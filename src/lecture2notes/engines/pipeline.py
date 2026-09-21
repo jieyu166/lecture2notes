@@ -68,7 +68,7 @@ def transcribe_audio(
     workdir: Path,
     chunk_sec: Optional[float] = None,
     duration_sec: Optional[float] = None,
-    extract: Callable[..., Path] = audio_mod.extract_audio,
+    extract: Optional[Callable[..., Path]] = None,
 ) -> List[Cue]:
     """Run the engine over ``source``, chunking the audio when asked to.
 
@@ -76,6 +76,7 @@ def transcribe_audio(
     Chunks are transcribed independently and their cue times shifted back onto
     the recording's clock, so the caller never sees the seam.
     """
+    extract = extract or audio_mod.extract_audio
     source = Path(source)
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
@@ -143,7 +144,7 @@ def transcribe_video(
     force: bool = False,
     chunk_sec: Optional[float] = None,
     workdir: Optional[Path] = None,
-    extract: Callable[..., Path] = audio_mod.extract_audio,
+    extract: Optional[Callable[..., Path]] = None,
 ) -> TranscribeResult:
     """Transcribe one recording and leave the stage's three artefacts behind.
 
