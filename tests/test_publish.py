@@ -272,12 +272,27 @@ def test_a_source_on_another_device_is_still_refused(
         resolved_dest = dest.resolve()
 
         class _Faked:
+            """The real stat result with one field changed.
+
+            Only st_dev is faked. Everything else is delegated, because the
+            same os.stat call answers `is_dir()` too, and a stat result with
+            no st_mode makes pathlib raise instead of making the publish
+            refuse.
+            """
+
             st_dev = -1
 
+            def __init__(self, real):
+                self._real = real
+
+            def __getattr__(self, name):
+                return getattr(self._real, name)
+
         def stat(path, *args, **kwargs):
+            real = real_stat(path, *args, **kwargs)
             if Path(path) == resolved_dest:
-                return _Faked()
-            return real_stat(path, *args, **kwargs)
+                return _Faked(real)
+            return real
 
         monkeypatch.setattr(publish_mod.os, "stat", stat)
 
