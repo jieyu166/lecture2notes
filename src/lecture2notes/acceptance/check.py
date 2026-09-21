@@ -214,6 +214,9 @@ def check_segments(segments: Sequence[Any], base: Path, report: Report) -> None:
         frames = segment.get("frames") or (
             [segment["frame"]] if segment.get("frame") else []
         )
+        # Only a segment with neither a captured frame nor an inherited one is
+        # a finding: `frames == []` with `frame` set is the "slide did not
+        # change here" shape, not a gap.
         if any_frame and not frames:
             report.err("%s has no frame although other segments do" % tag)
         for frame in frames:
@@ -595,6 +598,13 @@ def check_json_frames(
     for position, segment in enumerate(segments, 1):
         if not isinstance(segment, Mapping):
             continue
+        # `frame` is the one that must be there; `frames` may legitimately be
+        # empty. A segment during which the slide never changed inherits the
+        # last frame from before it began (see
+        # `frames.manifest.merge_frames_into_segments`), and that is a complete
+        # answer to "what was on screen here". Demanding a captured frame per
+        # segment would cap the segment count at the number of detected scene
+        # changes -- a 20 minute talk on nine slides is not a nine-segment talk.
         if not segment.get("frame"):
             report.add(
                 "error", "frame", "segments[%d].frame" % position,

@@ -16,6 +16,20 @@ l2n frames <video> --mode interval --every 45
 建議流程：先 `--stage` 產候選，再 `--curate --max-per-segment 4` 晉升。
 使用者已經自己截好圖時**沿用他的圖**，不要重抓。只有音檔時整個階段跳過。
 
+### 抓到幾張，不決定切幾段
+
+**scene 抓到的張數少於你預計的段數時，改用 interval，不要為了湊圖去改分段。**
+20 分鐘的講座在 scene 模式下只抓到 9 張是正常的（講者一張投影片講很久），
+那不表示這場只能切 9 段。
+
+```bash
+l2n frames <video> --mode interval --every 45
+```
+
+一個區間裡沒有換投影片時，該段**沿用前一張**：`frame` 填前一段那一張、
+`frames` 留空陣列。`l2n frames` 的合併邏輯本來就會這樣寫，`l2n check json`
+也不會報錯。段數由主題轉折決定 -> [segmentation.md](segmentation.md)。
+
 **抓圖沒跑完就不要做下一步。** 背景執行可以，但要回報進度、等 exit code、
 確認影格已經併入 JSON。這是 HARD RULE 4。
 

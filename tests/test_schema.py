@@ -429,3 +429,73 @@ def test_cli_check_prints_only_ascii_markers(tmp_path):
 
 def test_legacy_message_is_the_documented_wording():
     assert LEGACY_MESSAGE % "old.json" == "legacy schema detected; run: l2n migrate old.json"
+
+
+# --------------------------------------------------------------------------
+# 15.4 -- how many slides were captured does not decide how many segments
+# --------------------------------------------------------------------------
+# `frames.manifest.merge_frames_into_segments` gives a segment during which the
+# slide never changed the last frame from before it began, and leaves `frames`
+# empty so "nothing changed here" stays distinguishable from "capture never
+# ran". A 20 minute talk detected as nine scenes is not a nine-segment talk.
+
+def _inherit_frame(document: dict, position: int) -> dict:
+    """Make segment *position* reuse the previous segment's frame."""
+    previous = document["segments"][position - 1]
+    segment = document["segments"][position]
+    segment["frame"] = previous["frame"]
+    segment["frames"] = []
+    segment["frame_ocr"] = []
+    return document
+
+
+def test_an_inherited_frame_is_not_a_finding():
+    document = _inherit_frame(load_valid(), 1)
+
+    assert validate_document(document) == []
+
+
+def test_check_json_accepts_a_segment_that_inherits_its_frame(tmp_path):
+    path = materialize(_inherit_frame(load_valid(), 1), tmp_path)
+
+    report = check_json(path)
+
+    assert report.errors == [], [f.message for f in report.errors]
+    assert report.exit_code() == 0
+
+
+def test_cli_check_json_exits_0_when_a_segment_inherits_its_frame(tmp_path):
+    path = materialize(_inherit_frame(load_valid(), 1), tmp_path)
+
+    result = run_cli(["check", "json", str(path)])
+
+    assert result.returncode == 0, result.stdout
+    assert "json: 0 errors, 0 warnings" in result.stdout
+
+
+def test_a_segment_with_neither_a_captured_nor_an_inherited_frame_is_an_error(tmp_path):
+    document = load_valid()
+    document["segments"][1]["frame"] = None
+    document["segments"][1]["frames"] = []
+    document["segments"][1]["frame_ocr"] = []
+    path = materialize(document, tmp_path)
+
+    report = check_json(path)
+
+    assert "segment 2 has no frame" in "\n".join(f.message for f in report.errors)
+
+
+def test_the_legacy_validator_also_accepts_an_inherited_frame(tmp_path):
+    """The 1.x audit path shared the one-frame-per-segment rule."""
+    from lecture2notes.schema.model import normalize_lecture, validate_lecture_schema
+
+    document = _inherit_frame(load_valid(), 1)
+    materialize(document, tmp_path)
+    normalised = normalize_lecture(document)
+    normalised["segments"][1]["frame"] = document["segments"][1]["frame"]
+
+    codes_found = {
+        finding.code for finding in validate_lecture_schema(normalised, tmp_path)
+    }
+
+    assert "frame_count" not in codes_found

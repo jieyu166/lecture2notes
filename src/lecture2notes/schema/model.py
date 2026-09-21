@@ -345,7 +345,18 @@ def validate_lecture_schema(
             ))
 
         frames = segment.get("frames")
-        if not isinstance(frames, list) or not min_frames <= len(frames) <= max_frames:
+        # An empty `frames` beside a non-null `frame` is the inherited-frame
+        # shape `merge_frames_into_segments` writes: nothing changed on screen
+        # during this segment, so it shows the last slide from before it began.
+        # Requiring one frame per segment here made the number of detected
+        # scenes an upper bound on the number of segments, which is backwards:
+        # segments come from where the topic turns, not from where the slide
+        # deck happens to advance.
+        inherited = isinstance(frames, list) and not frames and bool(
+            isinstance(segment.get("frame"), str) and segment.get("frame")
+        )
+        floor = 0 if inherited else min_frames
+        if not isinstance(frames, list) or not floor <= len(frames) <= max_frames:
             findings.append(Finding(
                 "error", "frame_count",
                 "frames must contain %d to %d items" % (min_frames, max_frames),
