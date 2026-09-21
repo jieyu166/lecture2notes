@@ -1,0 +1,15 @@
+# A user overlay's frontmatter template, used only by tests/test_frontmatter.py.
+#
+# It exists to prove the point the requirement makes: a vault convention such as
+# noteVer, DateRev or subspecialty is added by editing a template file, and the
+# package code knows nothing about any of these names.
+---
+title: "{{title}}"
+date: {{date}}
+source: "{{source_video}}"
+tags: [{{tags}}]
+noteVer: v4
+DateRev: {{date}}
+subspecialty: "{{subspecialty}}"
+Parent Link: "[[=佔位分類]]"
+---
