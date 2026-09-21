@@ -333,3 +333,19 @@ def test_a_second_run_skips_every_stage_that_already_has_output(pipeline):
         )
     for name, stamp in before.items():
         assert (work / name).stat().st_mtime_ns == stamp, "%s was rewritten" % name
+
+
+def test_the_note_check_says_the_skeleton_is_still_a_skeleton(pipeline):
+    """The pipeline stops at `l2n render`, so the note is not written yet.
+
+    Task 15.10: every rule about shape passes on a skeleton, which is why R10
+    exists. A real run must therefore end with R10 on every segment and a
+    non-zero `unexpanded_segments` ratio -- and still be a clean check, because
+    a skeleton is a legitimate intermediate state, not an error.
+    """
+    result = pipeline["check_note"]
+    _assert_clean(result, "check note")
+
+    assert "warn R10 segment 1" in result.stdout, result.stdout
+    assert "note: unexpanded_segments=" in result.stdout
+    assert "note: ai_draft_remaining=" in result.stdout

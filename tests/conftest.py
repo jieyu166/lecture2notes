@@ -106,6 +106,39 @@ _CUE_WORDS = (
 )
 
 
+#: One sentence added to each segment section so the fixture is a *finished*
+#: note rather than a skeleton. R10 (task 15.10) reports a section still
+#: identical to the render output, and "a complete output set" has to mean a
+#: note somebody wrote. Shares no run of characters with `_CUE_WORDS`, so R5
+#: still has nothing to find.
+_EXPANSION_LINE = "〈本段已由測試展開：這一句不在逐字稿裡。〉"
+
+
+def expand_note(text: str) -> str:
+    """Append one sentence to every ``## n、title`` section of the Note body.
+
+    The cheapest possible edit that makes each section differ from what
+    `l2n render` produces, which is exactly what R10 measures.
+    """
+    out = []
+    inside = False
+    for line in text.split("\n"):
+        starts_section = (
+            (line.startswith("## ") and "、" in line)
+            or line.strip() == "# Evergreen Note"
+        )
+        closes_section = line.startswith("#")
+        if (starts_section or closes_section) and inside:
+            out.extend(["", _EXPANSION_LINE, ""])
+            inside = False
+        if starts_section:
+            inside = True
+        out.append(line)
+    if inside:
+        out.extend(["", _EXPANSION_LINE])
+    return "\n".join(out)
+
+
 @dataclass
 class SyntheticLecture:
     """One folder holding every artefact the four stage checks look at."""
@@ -218,7 +251,7 @@ def build_synthetic_lecture(
     )
     note = root / (stem + ".v4.md")
     note.write_text(
-        render_skeleton(document, style="faithful", stem=stem),
+        expand_note(render_skeleton(document, style="faithful", stem=stem)),
         encoding="utf-8", newline="\n",
     )
     return SyntheticLecture(

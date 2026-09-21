@@ -115,11 +115,17 @@ def _run(lecture, *extra):
 
 
 # -- the stages run, in order ------------------------------------------------
+# `run` ends on WARN rather than OK from task 15.10 onwards. Every mechanical
+# stage succeeded; what it hands over is a *skeleton*, and R10 says so once per
+# segment. A run that reported 0 would be claiming the note is written, which is
+# the exact confusion this branch exists to remove. An R10 warning never stops
+# the run -- only a check error does.
 def test_a_first_run_produces_every_mechanical_output(ready, capsys):
     code = _run(ready, "--mode", "interval", "--every", "5")
     printed = capsys.readouterr().out
 
-    assert code == exit_codes.OK, printed
+    assert code == exit_codes.WARN, printed
+    assert "warn R10 segment 1" in printed
     assert ready.subtitle.is_file()
     assert ready.manifest.is_file()
     assert ready.note.is_file()
@@ -140,14 +146,14 @@ def test_scaffold_says_it_is_the_model_s_stage_rather_than_doing_it(ready, capsy
 
 # -- the scenario: a second run is a no-op -----------------------------------
 def test_a_second_run_skips_every_stage_and_changes_no_file(ready, capsys):
-    assert _run(ready, "--mode", "interval", "--every", "5") == exit_codes.OK
+    assert _run(ready, "--mode", "interval", "--every", "5") == exit_codes.WARN
     capsys.readouterr()
     before = tree_state(ready.root)
 
     code = _run(ready, "--mode", "interval", "--every", "5")
     printed = capsys.readouterr().out
 
-    assert code == exit_codes.OK
+    assert code == exit_codes.WARN
     assert tree_state(ready.root) == before
     for stage in ("transcribe", "frames", "ocr", "render", "viewer"):
         assert "[%s] skip (exists)" % stage in printed, stage
@@ -161,7 +167,7 @@ def test_force_redoes_the_stages_a_second_run_would_skip(ready, capsys):
     code = _run(ready, "--mode", "interval", "--every", "5", "--force")
     printed = capsys.readouterr().out
 
-    assert code == exit_codes.OK, printed
+    assert code == exit_codes.WARN, printed
     assert "skip (exists)" not in printed
     assert tree_state(ready.root) != before
 
@@ -267,6 +273,6 @@ def test_the_chapter_file_is_written_only_when_the_profile_enables_it(
     monkeypatch.setattr(pbf_mod, "is_enabled", lambda config: True)
     code = _run(ready, "--mode", "interval", "--every", "5")
 
-    assert code == exit_codes.OK
+    assert code == exit_codes.WARN
     assert chapter.is_file()
     assert "[pbf] ok" in capsys.readouterr().out

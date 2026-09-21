@@ -775,7 +775,7 @@ def check_json(path: Path, require_frames: bool = True) -> StageReport:
 # ==========================================================================
 # stage acceptance: check note
 # ==========================================================================
-# R1 to R9 of the note-writing guideline. Everything here is decided from the
+# R1 to R10 of the note-writing guideline. Everything here is decided from the
 # note's text, the document it came from and the transcript beside it; nothing
 # judges whether the writing is any good, because that is what the other half of
 # the guideline -- the half a person has to follow -- is for.
@@ -995,7 +995,7 @@ def check_note_stage(
     style: Optional[str] = None,
     profile: Optional[str] = None,
 ) -> StageReport:
-    """`l2n check note`: rules R1 to R9 of the note-writing guideline."""
+    """`l2n check note`: rules R1 to R10 of the note-writing guideline."""
     json_path = Path(json_path)
     note_path = Path(note_path)
     report = StageReport("note", note_path.name)
@@ -1053,8 +1053,89 @@ def check_note_stage(
     _rule_privacy(lines, effective_profile, note_path, report)
     _rule_placeholder(lines, regions, note_path, report)
     _rule_questions(lines, note_path, report)
+    _rule_unexpanded(
+        data, lines, regions, json_path, note_path,
+        effective_style, effective_profile, report,
+    )
     report.measure("ai_draft_remaining", count_ai_drafts(lines))
     return report
+
+
+def comparable_body(lines: Sequence[str]) -> str:
+    """A section's text with every space removed, for an identity comparison.
+
+    Whitespace only, deliberately. R10 asks one question -- has anybody typed
+    anything into this section -- and a rule that also forgave a changed word
+    would start guessing at how much change counts.
+    """
+    return "".join("".join(line.split()) for line in lines)
+
+
+def _rule_unexpanded(
+    data: Mapping[str, Any],
+    lines: Sequence[str],
+    regions: Mapping[str, Tuple[int, int]],
+    json_path: Path,
+    note: Path,
+    style: str,
+    profile: str,
+    report: StageReport,
+) -> None:
+    """R10: a section still byte-identical to what `l2n render` produced.
+
+    Every other rule can be satisfied by a note nobody wrote. A test with a
+    fresh context was handed the skill, filled in the speaker outline and the
+    question answers, and `check note` returned 0 errors 0 warnings on a
+    document whose every segment was still the renderer's output. Passing the
+    check has to mean more than that.
+
+    The comparison is against a re-render of the same document at the same
+    style, so it cannot drift from what `render` actually writes.
+    """
+    if "note" not in regions:
+        return
+    try:
+        skeleton = render.render_skeleton(
+            data, style=style, stem=json_path.stem, profile=profile
+        )
+    except (ValueError, OSError):  # no template for this profile
+        return
+    severity = "error" if loader.unexpanded_severity(profile) == "error" else "warn"
+    skeleton_lines = note_lines(skeleton)
+    skeleton_regions = note_regions(skeleton_lines)
+
+    mine = segment_sections(lines, regions["note"])
+    theirs = (
+        segment_sections(skeleton_lines, skeleton_regions["note"])
+        if "note" in skeleton_regions else []
+    )
+    unexpanded = 0
+    for position, (_title, start, end) in enumerate(mine):
+        if position >= len(theirs):
+            break
+        _, other_start, other_end = theirs[position]
+        if comparable_body(lines[start:end]) == comparable_body(
+            skeleton_lines[other_start:other_end]
+        ):
+            unexpanded += 1
+            report.add(
+                severity, "R10", "segment %d" % (position + 1),
+                "unexpanded skeleton (body identical to l2n render output)",
+                position + 1,
+            )
+    report.measure("unexpanded_segments", "%d/%d" % (unexpanded, len(mine)))
+
+    # Evergreen is one line projected from the first takeaway. Left as it was
+    # rendered, the note's single most prominent claim is a placeholder.
+    name = "Evergreen Note"
+    if name in regions and name in skeleton_regions:
+        if comparable_body(lines[slice(*regions[name])]) == comparable_body(
+            skeleton_lines[slice(*skeleton_regions[name])]
+        ):
+            report.add(
+                severity, "R10", name,
+                "unexpanded skeleton (body identical to l2n render output)",
+            )
 
 
 def count_ai_drafts(lines: Sequence[str]) -> int:
@@ -1361,6 +1442,8 @@ __all__ = [
     "PLACEHOLDER_TEXT",
     "QUESTION_LINE",
     "QUOTED_SPAN",
+    "comparable_body",
+    "count_ai_drafts",
     "R5_EXTRA_REGIONS",
     "check_note_stage",
     "correction_rows",

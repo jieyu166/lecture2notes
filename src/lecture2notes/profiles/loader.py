@@ -57,6 +57,10 @@ from lecture2notes.profiles.layers import (
 DEFAULT_NOTE_STYLE = "concise"
 #: R5 is a warning unless a profile promotes it.
 DEFAULT_TRANSCRIPT_PASTE = "warning"
+#: R10 (a section still identical to the render output) is a warning by
+#: default: a skeleton is a legitimate intermediate state. A profile whose
+#: notes get published can set `guideline.unexpanded = "error"`.
+DEFAULT_UNEXPANDED = "warning"
 
 #: The ``outputs.toml`` key that names the profile, and so is reported as the
 #: ``profile`` setting rather than as an output setting of its own.
@@ -348,6 +352,16 @@ def transcript_paste_severity(profile: str = BUILTIN_PROFILE) -> str:
     return DEFAULT_TRANSCRIPT_PASTE
 
 
+def unexpanded_severity(profile: str = BUILTIN_PROFILE) -> str:
+    """Severity R10 reports at: ``warning`` by default, ``error`` if set."""
+    table = outputs(profile).get("guideline")
+    if isinstance(table, Mapping):
+        value = table.get("unexpanded")
+        if isinstance(value, str) and value:
+            return value
+    return DEFAULT_UNEXPANDED
+
+
 def privacy_patterns(profile: str = BUILTIN_PROFILE) -> List[str]:
     """Regular expressions a note line must not match (R7)."""
     raw = privacy(profile).get("patterns")
@@ -370,6 +384,8 @@ __all__ = [
     "CORRECTIONS_PREFIX",
     "DEFAULT_NOTE_STYLE",
     "DEFAULT_TRANSCRIPT_PASTE",
+    "DEFAULT_UNEXPANDED",
+    "unexpanded_severity",
     "FRONTMATTER_TEMPLATE",
     "LAYER_NAMES",
     "NOTE_TEMPLATE",

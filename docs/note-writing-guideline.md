@@ -383,6 +383,7 @@ exit code：`0` 全過、`1` 只有 warning、`2` 有任何 error。
 | **R7** | error | 沒有任何一行符合生效 profile 的 `privacy.toml` 所列的模式。 |
 | **R8** | warning | Note 章節內沒有 `N/A`、`不適用`、`無資料`、`（略）` 之類的補位字串。沒素材就刪掉那一節（見 0.3）。 |
 | **R9** | warning | `## 題目` 節至少有 3 題，而且至少一題標了 `[推論]`。少於 3 題或找不到 `[推論]`，各報一條（見第 5 節）。 |
+| **R10** | warning（profile 設 `guideline.unexpanded = "error"` 時為 error） | 沒有任何一個段落章節的本文，在去掉空白之後與 `l2n render` 用同一份 JSON、同一個 style 重新產出的骨架一字不差。Evergreen 仍是骨架那一句時同樣報。 |
 
 ### R5 的範圍與邊界
 
@@ -411,6 +412,29 @@ exit code：`0` 全過、`1` 只有 warning、`2` 有任何 error。
 一行裡被「」包住的片段會先被扣掉再比對，所以「半句標了、半句沒標」的行，只會針對沒標的那半句判定。
 
 逐字稿來源是與 JSON 同名的 `<stem>.srt`。找不到時 R5 跳過，並印一行 warning 說明它跳過了——沉默地不檢查，比不檢查更糟。
+
+### 通過 check 不等於寫好了
+
+`check note` 的結尾除了 `note: N errors, M warnings`，還會印兩個數字。
+它們不影響 exit code，但**它們才是「有沒有人真的動過這份筆記」的唯一證據**：
+
+```
+note: unexpanded_segments=K/N
+note: ai_draft_remaining=N
+```
+
+- `unexpanded_segments`：本文與 `l2n render` 骨架一字不差的段落數（R10 數的同一件事）。
+- `ai_draft_remaining`：還沒被換掉的 `<!-- ai-draft -->` 佔位數。
+
+**兩個都是 0，才代表每一段都有人（或模型）真的重寫過。**
+
+這一段是 1.2 加的，理由是實測：一個全新上下文的模型只讀 skill 就去擴寫，
+只填了講者骨架與題目答案，其餘每一段原封不動，而 1.1 的 `check note` 回報
+0 errors 0 warnings。R1 到 R9 全部都可以被一份沒有人寫過的筆記滿足——
+它們檢查的是形狀，而骨架的形狀本來就是對的。R10 檢查的是「有沒有動過」。
+
+**骨架直接拿去 check 會每一段都報 R10，那是預期行為**，不是誤報：
+`l2n render` 剛產出的檔案本來就還不是筆記。
 
 ---
 

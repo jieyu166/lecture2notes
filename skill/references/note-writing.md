@@ -49,6 +49,27 @@
    `note: unexpanded_segments=K/N` 是本文與 `l2n render` 骨架一字不差的段落數。
    **兩個都要是 0，才算擴寫完成。**
 
+## 做完了沒有：R10 與兩個數字
+
+`l2n render` 剛產出的骨架，R1 到 R9 全部都會過——**它們檢查的是形狀，而骨架的形狀本來就是對的。**
+所以還有 R10：把筆記每一段的本文，和「用同一份 JSON、同一個 style 重新 render 出來的骨架」
+去空白後比對，一字不差就報
+
+```
+warn R10 segment 3: unexpanded skeleton (body identical to l2n render output)
+```
+
+Evergreen 還是骨架那一句時同樣會報。**骨架直接拿去 check 會每一段都報 R10，那是預期行為。**
+
+判斷「擴寫完成了沒有」只看結尾那兩行：
+
+```
+note: unexpanded_segments=0/6
+note: ai_draft_remaining=0
+```
+
+**兩個都是 0 才算做完。** 只填講者骨架與題目答案、其餘原封不動，是實測出現過的失敗樣態。
+
 ## 最容易犯的三個錯
 
 | 錯 | 機器會不會抓到 |

@@ -1,4 +1,4 @@
-"""`l2n check note`: rules R1 to R9, one passing and one failing case each.
+"""`l2n check note`: rules R1 to R10, one passing and one failing case each.
 
 Every note here starts as a real skeleton render and is then damaged in exactly
 one way, so a failure names the rule that broke rather than a fixture that
@@ -54,6 +54,24 @@ def lecture(tmp_path):
     return json_path, note_path
 
 
+@pytest.fixture()
+def expanded(lecture):
+    """The same lecture, with each section rewritten enough to defeat R10.
+
+    One appended sentence per section is the cheapest edit that makes the body
+    differ from the render output, which is exactly what R10 measures. The
+    sentence shares no run with the transcript, so R5 still finds nothing.
+    """
+    from conftest import expand_note
+
+    json_path, note_path = lecture
+    note_path.write_text(
+        expand_note(note_path.read_text(encoding="utf-8")),
+        encoding="utf-8", newline="\n",
+    )
+    return json_path, note_path
+
+
 def _edit(note_path: Path, transform):
     lines = note_path.read_text(encoding="utf-8").split("\n")
     note_path.write_text("\n".join(transform(lines)), encoding="utf-8", newline="\n")
@@ -77,11 +95,27 @@ def _insert_into_first_section(note_path: Path, text: str):
 
 
 # -- the clean case ---------------------------------------------------------
-def test_a_freshly_rendered_skeleton_passes_every_rule(lecture):
+def test_a_freshly_rendered_skeleton_breaks_only_r10(lecture):
+    """A skeleton satisfies every rule about shape, because its shape is right.
+
+    That was the problem (task 15.10): R1 to R9 all pass on a file nobody has
+    written. The skeleton is now exactly one finding per section -- R10 -- and
+    nothing else, which is what "the shape is fine, the writing has not
+    happened" should look like.
+    """
     json_path, note_path = lecture
     report = check.check_note_stage(json_path, note_path, style="faithful")
 
-    assert report.findings == []
+    assert set(_codes(report)) == {"R10"}
+    assert all(f.severity == "warn" for f in report.findings)
+    assert report.exit_code() == exit_codes.WARN
+
+
+def test_an_expanded_note_passes_every_rule(expanded):
+    json_path, note_path = expanded
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert report.findings == [], report.lines()
     assert report.exit_code() == exit_codes.OK
     assert report.summary_line() == "note: 0 errors, 0 warnings"
 
@@ -368,8 +402,8 @@ def test_every_finding_line_carries_severity_rule_and_location(lecture):
         assert ": " in rest
 
 
-def test_the_cli_prints_the_guideline_version_and_the_summary(lecture, capsys):
-    json_path, note_path = lecture
+def test_the_cli_prints_the_guideline_version_and_the_summary(expanded, capsys):
+    json_path, note_path = expanded
     code = main(["check", "note", str(json_path), "--note", str(note_path),
                  "--style", "faithful"])
     out = capsys.readouterr().out
@@ -379,8 +413,8 @@ def test_the_cli_prints_the_guideline_version_and_the_summary(lecture, capsys):
     assert "note: 0 errors, 0 warnings" in out
 
 
-def test_the_cli_defaults_the_note_path_to_the_stem(lecture, capsys):
-    json_path, _ = lecture
+def test_the_cli_defaults_the_note_path_to_the_stem(expanded, capsys):
+    json_path, _ = expanded
 
     assert main(["check", "note", str(json_path)]) == exit_codes.OK
     assert "note: 0 errors, 0 warnings" in capsys.readouterr().out
@@ -521,16 +555,18 @@ def test_removing_every_marker_drives_the_count_to_zero(lecture):
 
 
 def test_the_count_is_printed_after_the_summary_and_changes_no_exit_code(
-    lecture, capsys
+    expanded, capsys
 ):
-    json_path, note_path = lecture
+    json_path, note_path = expanded
 
     code = main(["check", "note", str(json_path), "--note", str(note_path),
                  "--style", "faithful"])
 
     printed = [line for line in capsys.readouterr().out.split("\n") if line.strip()]
     at = printed.index("note: 0 errors, 0 warnings")
-    assert printed[at + 1].startswith("note: ai_draft_remaining=")
+    after = printed[at + 1:]
+    assert any(line.startswith("note: ai_draft_remaining=") for line in after)
+    assert all(line.startswith("note: ") for line in after)
     assert code == exit_codes.OK
 
 
@@ -593,3 +629,116 @@ def test_a_note_without_a_marker_falls_back_to_the_profile(lecture):
     # generic's default is concise, under which R6 does not run at all.
     assert "R6" not in _codes(report)
     assert "style" not in _codes(report)
+
+
+# --------------------------------------------------------------------------
+# 15.10 -- passing the check must not be achievable by doing nothing
+# --------------------------------------------------------------------------
+# A model with a fresh context, handed only the skill, filled in the speaker
+# outline and the question answers and left every segment untouched. Under the
+# 1.1 rules `check note` returned 0 errors, 0 warnings.
+
+def test_r10_reports_every_segment_of_an_untouched_skeleton(lecture):
+    json_path, note_path = lecture
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    hits = [f for f in report.findings if f.code == "R10"]
+    segments = [f for f in hits if f.location.startswith("segment ")]
+    assert [f.location for f in segments] == ["segment 1", "segment 2"]
+    assert all(
+        "identical to l2n render output" in f.message for f in hits
+    )
+
+
+def test_r10_reports_an_evergreen_still_holding_the_rendered_line(lecture):
+    json_path, note_path = lecture
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert "Evergreen Note" in [
+        f.location for f in report.findings if f.code == "R10"
+    ]
+
+
+def test_r10_is_silent_on_a_section_somebody_rewrote(lecture):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, "本段已經改寫過，這一句不在骨架裡。")
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    locations = [f.location for f in report.findings if f.code == "R10"]
+    assert "segment 1" not in locations
+    assert "segment 2" in locations
+
+
+def test_r10_ignores_whitespace_only_edits(lecture):
+    """Reflowing a paragraph is not writing it."""
+    json_path, note_path = lecture
+    _edit(note_path, lambda lines: [
+        line + "   " if line.startswith("## 1、") else line for line in lines
+    ])
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert "segment 1" in [f.location for f in report.findings if f.code == "R10"]
+
+
+def test_the_unexpanded_ratio_is_measured_and_printed(lecture, capsys):
+    json_path, note_path = lecture
+
+    code = main(["check", "note", str(json_path), "--note", str(note_path),
+                 "--style", "faithful"])
+
+    printed = capsys.readouterr().out
+    assert "note: unexpanded_segments=2/2" in printed
+    assert code == exit_codes.WARN
+
+
+def test_the_ratio_falls_as_sections_get_written(lecture):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, "本段已經改寫過，這一句不在骨架裡。")
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert report.metrics["unexpanded_segments"] == "1/2"
+
+
+def test_an_expanded_note_reports_zero_unexpanded_segments(expanded):
+    json_path, note_path = expanded
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert report.metrics["unexpanded_segments"] == "0/2"
+    assert "R10" not in _codes(report)
+
+
+def test_r10_is_a_warning_the_profile_can_promote(lecture, monkeypatch):
+    json_path, note_path = lecture
+    monkeypatch.setattr(
+        check.loader, "unexpanded_severity", lambda profile=None: "error"
+    )
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert all(f.severity == "error" for f in report.findings if f.code == "R10")
+    assert report.exit_code() == exit_codes.ERROR
+
+
+def test_r10_compares_against_the_style_actually_in_force(lecture):
+    """Concise drops the quote bullets, so the skeletons differ by style.
+
+    Comparing a faithful note against a concise render would report every
+    section as expanded, which is the failure mode this rule exists to close.
+    """
+    json_path, note_path = lecture
+
+    faithful = check.check_note_stage(json_path, note_path, style="faithful")
+    assert "R10" in _codes(faithful)
+
+
+def test_the_audit_report_carries_the_unexpanded_ratio(lecture, tmp_path):
+    from lecture2notes.acceptance import audit
+
+    json_path, note_path = lecture
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+    payload = audit.stage_report_payload([report], stem="x")
+
+    assert payload["stages"]["note"]["unexpanded_segments"] == "2/2"

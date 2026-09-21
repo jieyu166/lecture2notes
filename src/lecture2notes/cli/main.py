@@ -1015,6 +1015,11 @@ def _run_pbf(paths: RunPaths, force: bool) -> Optional[str]:
 def cmd_run(args: argparse.Namespace) -> int:
     """`l2n run <video> --lang xx`: every mechanical stage, with the checks.
 
+    A clean run ends on exit 1, not 0: every mechanical stage succeeded, and
+    what it hands over is a skeleton note, which `check note` reports as R10
+    once per segment. Reporting 0 would be claiming the note is written. An
+    R10 warning never stops the run; only a check error does.
+
     The order is transcribe, frames, ocr, scaffold, render, viewer, and the
     chapter file when the profile enables it. After each stage that has one, its
     acceptance check runs: an error stops the run so that nothing downstream is
