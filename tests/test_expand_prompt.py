@@ -175,3 +175,40 @@ def test_the_bundle_stays_ascii_in_its_markers(lecture, capsys):
     out = capsys.readouterr().out
 
     assert not any(marker in out for marker in "\u2192\u2265\u2713\u2717")
+
+
+# --------------------------------------------------------------------------
+# 16.4 -- Evergreen is the first instruction, not a row halfway down a table
+# --------------------------------------------------------------------------
+def test_the_bundle_puts_evergreen_first(lecture, capsys):
+    """Two independent expansions left Evergreen as `takeaways_zh[0]`.
+
+    Both had the checklist in front of them, with Evergreen as its first row.
+    A row in a table is not an instruction, so the bundle now says it in its
+    own voice before the table starts.
+    """
+    main(["render", "--expand-prompt", str(lecture)])
+    out = capsys.readouterr().out
+
+    assert guideline.EVERGREEN_FIRST in out
+    assert out.index(guideline.EVERGREEN_FIRST) < out.index("| 章節 |")
+    assert "單一數據點" in out
+    assert "規範 4.1" in out
+
+
+def test_the_bundle_says_when_the_ai_draft_marker_goes(lecture, capsys):
+    main(["render", "--expand-prompt", str(lecture)])
+    out = capsys.readouterr().out
+
+    assert "寫完該處就連標記一起刪掉" in out
+    assert "讀者的兩個空槽與「模型候選」不帶標記" in out
+
+
+def test_the_checklist_row_order_matches_the_note(lecture, capsys):
+    main(["render", "--expand-prompt", str(lecture)])
+    out = capsys.readouterr().out
+
+    positions = [out.index("| `%s` |" % section)
+                 for section, _, _ in guideline.EXPANSION_CHECKLIST]
+    assert positions == sorted(positions)
+    assert guideline.EXPANSION_CHECKLIST[0][0] == "# Evergreen Note"

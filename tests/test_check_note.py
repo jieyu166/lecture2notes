@@ -544,17 +544,19 @@ def test_the_guideline_records_the_wider_scope():
     from lecture2notes.notes.guideline import find_guideline_doc
 
     text = find_guideline_doc().read_text(encoding="utf-8")
-    assert "guideline_version: 1.2" in text
+    assert guideline.VERSION_LINE in text
     assert "R5 只看 Note 章節內的行" not in text
 
 
 # --------------------------------------------------------------------------
 # 15.8 -- count the markers nobody removed
 # --------------------------------------------------------------------------
-# The skeleton fences three things with `<!-- ai-draft -->`: the remember-three
-# candidates, the speaker outline rows and the drafted questions. Nothing
-# counted them, so a note that had been read and one that had not looked
-# identical in the report -- and the field run shipped the one that had not.
+# The skeleton marks the two placeholders a model still has to write: the
+# speaker outline rows and the drafted questions. Nothing counted them, so a
+# note that had been read and one that had not looked identical in the report
+# -- and the field run shipped the one that had not. (Until 16.4 the
+# remember-three candidates carried a marker too, which made the count
+# unreachable: those are the reader's, and no model finishes them.)
 
 def test_a_freshly_rendered_skeleton_reports_its_ai_draft_count(lecture):
     json_path, note_path = lecture
@@ -986,3 +988,45 @@ def test_r11_leaves_a_short_repeated_line_alone(lecture):
     report = check.check_note_stage(json_path, note_path, style="faithful")
 
     assert "R11" not in _codes(report)
+
+
+# --------------------------------------------------------------------------
+# 16.4 -- `ai_draft_remaining=0` has to be reachable by the model alone
+# --------------------------------------------------------------------------
+def test_only_the_two_model_placeholders_carry_a_marker(lecture):
+    """The reader's slots and the remember-three candidates carry none."""
+    json_path, note_path = lecture
+    lines = note_path.read_text(encoding="utf-8").split("\n")
+
+    marked = [
+        position for position, line in enumerate(lines)
+        if render_mod.AI_DRAFT_MARK in line
+    ]
+    assert len(marked) == 2
+
+    def owning_heading(position):
+        return next(lines[i] for i in range(position, -1, -1)
+                    if lines[i].startswith("#"))
+
+    assert {owning_heading(p) for p in marked} == {"## 講者骨架", "## 題目"}
+
+    verification_at = lines.index("## 學習驗證")
+    assert render_mod.AI_DRAFT_MARK not in "\n".join(lines[verification_at:])
+    assert render_mod.CANDIDATE_CALLOUT in "\n".join(lines[verification_at:])
+    for slot in render_mod.SUMMARY_SLOTS:
+        assert slot in "\n".join(lines)
+
+
+def test_writing_the_two_placeholders_drives_the_count_to_zero(lecture):
+    """Without the model touching the reader's slots or the candidates."""
+    json_path, note_path = lecture
+    _edit(note_path, lambda lines: [
+        line for line in lines if render_mod.AI_DRAFT_MARK not in line
+    ])
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert report.metrics["ai_draft_remaining"] == 0
+    text = note_path.read_text(encoding="utf-8")
+    assert render_mod.CANDIDATE_CALLOUT in text
+    assert render_mod.SUMMARY_SLOTS[0] in text

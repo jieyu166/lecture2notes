@@ -15,7 +15,7 @@ from typing import List, Optional, Tuple
 
 #: Bump this whenever a rule changes meaning. `l2n check note` prints it, so a
 #: report always says which edition of the rules produced it.
-GUIDELINE_VERSION = "1.2"
+GUIDELINE_VERSION = "1.3"
 
 #: The exact line the document carries and the check prints.
 VERSION_LINE = "guideline_version: %s" % GUIDELINE_VERSION
@@ -80,7 +80,8 @@ EXPANSION_CHECKLIST: Tuple[Tuple[str, str, str], ...] = (
     (
         "# Evergreen Note",
         "takeaways_zh 的第一條，包成一句粗體引文",
-        "待寫：換成一句離開這場講座也成立的觀念，不是講題摘要",
+        "**先寫這一個**：換成一句離開這場講座也成立的**可遷移原則**，"
+        "不是本集的單一數據點（正反例見規範 4.1）",
     ),
     (
         "# Summary",
@@ -91,7 +92,8 @@ EXPANSION_CHECKLIST: Tuple[Tuple[str, str, str], ...] = (
     (
         "## 講者骨架",
         "每段一行：時間區間、佔全片比例，第三欄是 ai-draft 佔位",
-        "待改寫：第三欄換成動詞開頭一句，只寫講者做了什麼，不寫他講了什麼",
+        "待改寫：第三欄換成動詞開頭一句，只寫講者做了什麼，不寫他講了什麼；"
+        "寫完把該節的 `<!-- ai-draft -->` 一起刪掉",
     ),
     (
         "# Note (layer 1-3)",
@@ -106,13 +108,28 @@ EXPANSION_CHECKLIST: Tuple[Tuple[str, str, str], ...] = (
     (
         "## 題目",
         "3 到 5 題草稿，每題下面一個收合的答案 callout",
-        "答案待寫（附時間碼）；題目不合用就改寫，至少一題以 %s 開頭",
+        "答案待寫（附時間碼）；題目不合用就改寫，至少一題以 %s 開頭；"
+        "寫完把該節的 `<!-- ai-draft -->` 一起刪掉",
     ),
     (
         "## 學習驗證",
-        "「我應該記住的 3 件事」候選已由 takeaways 投影，收在摺疊 callout 裡",
-        "候選可以改寫得更好；保留／刪除是讀者的工作，模型不代勞",
+        "「我應該記住的 3 件事」候選已由 takeaways 投影，收在摺疊 callout 裡"
+        "（**不帶** ai-draft 標記）",
+        "候選可以改寫得更好，但不要和 Summary 逐字相同（R11）；"
+        "保留／刪除是讀者的工作，模型不代勞",
     ),
+)
+
+#: The one thing to write before anything else, said in the bundle's own voice.
+#: The blind review found the same failure in two independent expansions and in
+#: an earlier Claude run: Evergreen left as `takeaways_zh[0]`, which is a single
+#: week's number rather than something that survives the lecture. It is first on
+#: the checklist because writing it first gives the rest of the note an axis;
+#: written last it is only ever the skeleton line with a word changed.
+EVERGREEN_FIRST = (
+    "**第一件事：先寫 Evergreen。** 把時間、人名、這次的數字拿掉之後還成立的，"
+    "才是 Evergreen；拿掉就不成立的，是本集的單一數據點，屬於 Summary。"
+    "正反例見規範 4.1。R10 通過不代表 Evergreen 合格。"
 )
 
 
@@ -120,6 +137,8 @@ def expansion_checklist(style: str = "concise") -> List[str]:
     """The bundle's "already landed / still yours" table, as lines."""
     lines = [
         "## 已由 render 落地／待你擴寫",
+        "",
+        EVERGREEN_FIRST,
         "",
         "| 章節 | render 已經落地 | 待你處理 |",
         "| ---- | ---- | ---- |",
@@ -132,6 +151,8 @@ def expansion_checklist(style: str = "concise") -> List[str]:
         "",
         "完成的定義不是「check 沒報錯」，而是這兩個數字都歸零：",
         "`note: unexpanded_segments=0/N` 與 `note: ai_draft_remaining=0`。",
+        "`ai-draft` 標記只在「還等著你寫」的地方（講者骨架第三欄、題目答案）；"
+        "寫完該處就連標記一起刪掉。讀者的兩個空槽與「模型候選」不帶標記，不要去加。",
     ])
     return lines
 
@@ -268,6 +289,7 @@ def expand_prompt(
 __all__ = [
     "ANSWER_CALLOUT",
     "DUPLICATE_SENTENCE_CHARS",
+    "EVERGREEN_FIRST",
     "EXPANSION_CHECKLIST",
     "INFERENCE_PREFIX_HINT",
     "expansion_checklist",

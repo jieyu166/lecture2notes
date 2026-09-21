@@ -286,11 +286,19 @@ def test_a_short_question_set_is_topped_up_rather_than_trusted(document):
     assert guideline.INFERENCE_MARK in body
 
 
-def test_learning_verification_drafts_three_things_behind_a_marker(document):
+def test_learning_verification_drafts_three_things_behind_a_fold(document):
+    """Collapsed, and deliberately without an ai-draft marker (task 16.4).
+
+    The marker means "a model still has to write this", and the count of
+    markers left is the definition of done. These three candidates are the
+    reader's to keep, delete or rewrite, so marking them would have put a
+    number nobody can drive to zero into the report.
+    """
     body = _section(render_skeleton(document), "## 學習驗證")
 
     assert "### 我應該記住的 3 件事" in body
-    assert "<!-- ai-draft -->" in body
+    assert render_mod.CANDIDATE_CALLOUT in body
+    assert "<!-- ai-draft -->" not in body
     assert "3. 佔位重點：講者對長期追蹤明說沒有經驗" in body
 
 
