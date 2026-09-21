@@ -396,7 +396,13 @@ def stage_report_payload(
         rows = [finding_row(f, report.target) for f in report.findings]
         errors += sum(1 for row in rows if row["severity"] == "error")
         warnings += sum(1 for row in rows if row["severity"] in WARNING_SEVERITIES)
-        stages[report.stage] = {"target": report.target, "findings": rows}
+        stages[report.stage] = {
+            "target": report.target,
+            "findings": rows,
+            # Counts the stage measured but did not judge, so a reader of the
+            # report sees "0 errors" and "12 ai-draft markers left" together.
+            **dict(getattr(report, "metrics", {}) or {}),
+        }
     return {
         "guideline_version": guideline_version,
         "stem": stem,

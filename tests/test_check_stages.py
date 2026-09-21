@@ -75,21 +75,27 @@ def test_every_stage_exits_zero_through_the_cli(stage, synthetic_lecture, capsys
     target = synthetic_lecture.path(STAGE_SUFFIX[stage])
 
     assert cli_entry(["check", stage, str(target)]) == exit_codes.OK
-    assert capsys.readouterr().out.strip().endswith(
-        "%s: 0 errors, 0 warnings" % stage
-    )
+    printed = [l for l in capsys.readouterr().out.split("\n") if l.strip()]
+    assert "%s: 0 errors, 0 warnings" % stage in printed
 
 
 # -- the shared output contract ---------------------------------------------
 @pytest.mark.parametrize("stage", sorted(STAGE_SUFFIX))
-def test_the_summary_line_is_the_last_line_every_stage_prints(
+def test_the_summary_line_closes_the_findings_every_stage_prints(
     stage, synthetic_lecture, capsys
 ):
+    """The tally is the last judgement; only measurements may follow it.
+
+    Task 15.8 added `note: ai_draft_remaining=N` after the tally. It is a count
+    the stage took, not a rule it applied, so it must not be mistaken for one:
+    it comes after the summary and never moves the exit code.
+    """
     report = _report_for(stage, synthetic_lecture)
     report.emit()
 
     printed = [line for line in capsys.readouterr().out.split("\n") if line.strip()]
-    assert printed[-1] == report.summary_line()
+    at = printed.index(report.summary_line())
+    assert printed[at + 1:] == report.metric_lines()
 
 
 def test_every_finding_carries_all_four_contract_fields(synthetic_lecture):

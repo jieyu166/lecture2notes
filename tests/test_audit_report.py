@@ -247,3 +247,45 @@ def test_the_spine_is_what_the_skeleton_writes(synthetic_lecture):
 
     for heading in audit.note_spine(document):
         assert "## %s" % heading in text
+
+
+# --------------------------------------------------------------------------
+# 15.8 -- the report carries what the note stage measured, not only its verdict
+# --------------------------------------------------------------------------
+def test_the_note_stage_carries_its_ai_draft_count_into_the_report(
+    synthetic_lecture, tmp_path
+):
+    """"0 errors" and "12 markers nobody removed" belong on the same page.
+
+    A reader of the audit file otherwise has no way to tell a note somebody
+    worked through from a skeleton that was never opened, which is exactly the
+    pair the field run confused.
+    """
+    destination = tmp_path / "audit.json"
+
+    cli_entry([
+        "check", "--all", str(synthetic_lecture.document),
+        "--report", str(destination), "--style", "faithful",
+    ])
+    payload = _report(destination)
+
+    note_stage = payload["stages"]["note"]
+    expected = synthetic_lecture.note.read_text(encoding="utf-8").count(
+        "<!-- ai-draft -->"
+    )
+    assert note_stage["ai_draft_remaining"] == expected
+    # It is a measurement, so it stays out of the verdict.
+    assert payload["summary"]["errors"] == 0
+
+
+def test_stages_without_a_measurement_carry_no_extra_keys(
+    synthetic_lecture, tmp_path
+):
+    destination = tmp_path / "audit.json"
+    cli_entry([
+        "check", "--all", str(synthetic_lecture.document),
+        "--report", str(destination), "--style", "faithful",
+    ])
+    payload = _report(destination)
+
+    assert set(payload["stages"]["json"]) == {"target", "findings"}

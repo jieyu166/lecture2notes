@@ -33,6 +33,7 @@ from lecture2notes.frames.manifest import read_manifest, sha256_file
 from lecture2notes.notes import guideline, rules
 from lecture2notes.profiles import loader
 from lecture2notes.schema.model import (
+    AI_DRAFT_MARK,
     MAX_SUMMARY_CHARS,
     MAX_TAKEAWAYS,
     MIN_SUMMARY_CHARS,
@@ -509,6 +510,19 @@ class StageReport:
     stage: str
     target: str
     findings: List[Finding] = field(default_factory=list)
+    #: Counts a stage measured but did not judge. They are printed after the
+    #: summary line and carried into the audit report, and they never move the
+    #: exit code: "three ai-draft markers left" is a fact about how far the
+    #: work got, not a rule anybody broke.
+    metrics: Dict[str, Any] = field(default_factory=dict)
+
+    def measure(self, name: str, value: Any) -> None:
+        """Record a count to print after the summary. Never a finding."""
+        self.metrics[name] = value
+
+    def metric_lines(self) -> List[str]:
+        return ["%s: %s=%s" % (self.stage, name, value)
+                for name, value in self.metrics.items()]
 
     def add(
         self,
@@ -546,6 +560,11 @@ class StageReport:
         for text in self.lines():
             _out.line(text)
         _out.line(self.summary_line())
+        # After the summary, so a script that reads the last line for the
+        # tally keeps working and a person reading down the page sees the
+        # counts last.
+        for text in self.metric_lines():
+            _out.line(text)
 
     def exit_code(self) -> int:
         if self.errors:
@@ -559,6 +578,7 @@ class StageReport:
             "findings": [finding.to_dict() for finding in self.findings],
             "errors": len(self.errors),
             "warnings": len(self.warnings),
+            **dict(self.metrics),
         }
 
 
@@ -1015,7 +1035,19 @@ def check_note_stage(
     _rule_privacy(lines, effective_profile, note_path, report)
     _rule_placeholder(lines, regions, note_path, report)
     _rule_questions(lines, note_path, report)
+    report.measure("ai_draft_remaining", count_ai_drafts(lines))
     return report
+
+
+def count_ai_drafts(lines: Sequence[str]) -> int:
+    """How many `<!-- ai-draft -->` markers the note still carries.
+
+    Not a rule: a note may legitimately keep a drafted candidate the reader
+    decided to keep. It is the one number that says whether anybody has been
+    through the file at all, and until now nothing counted it -- the field run
+    shipped a note with every marker still in place and a clean report.
+    """
+    return sum(line.count(AI_DRAFT_MARK) for line in lines)
 
 
 def _rule_sections(lines: Sequence[str], note: Path, report: StageReport) -> None:

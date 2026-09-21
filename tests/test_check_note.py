@@ -16,6 +16,7 @@ from lecture2notes import exit_codes
 from lecture2notes.acceptance import check
 from lecture2notes.cli.main import main
 from lecture2notes.notes import guideline
+from lecture2notes.notes import render as render_mod
 from lecture2notes.notes.render import render_skeleton
 
 FIXTURE = Path(__file__).parent / "fixtures" / "note_doc.json"
@@ -488,3 +489,54 @@ def test_the_guideline_records_the_wider_scope():
     text = find_guideline_doc().read_text(encoding="utf-8")
     assert "guideline_version: 1.2" in text
     assert "R5 只看 Note 章節內的行" not in text
+
+
+# --------------------------------------------------------------------------
+# 15.8 -- count the markers nobody removed
+# --------------------------------------------------------------------------
+# The skeleton fences three things with `<!-- ai-draft -->`: the remember-three
+# candidates, the speaker outline rows and the drafted questions. Nothing
+# counted them, so a note that had been read and one that had not looked
+# identical in the report -- and the field run shipped the one that had not.
+
+def test_a_freshly_rendered_skeleton_reports_its_ai_draft_count(lecture):
+    json_path, note_path = lecture
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    text = note_path.read_text(encoding="utf-8")
+    assert report.metrics["ai_draft_remaining"] == text.count(render_mod.AI_DRAFT_MARK)
+    assert report.metrics["ai_draft_remaining"] > 0
+
+
+def test_removing_every_marker_drives_the_count_to_zero(lecture):
+    json_path, note_path = lecture
+    note_path.write_text(
+        note_path.read_text(encoding="utf-8").replace(render_mod.AI_DRAFT_MARK, ""),
+        encoding="utf-8", newline="\n",
+    )
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert report.metrics["ai_draft_remaining"] == 0
+
+
+def test_the_count_is_printed_after_the_summary_and_changes_no_exit_code(
+    lecture, capsys
+):
+    json_path, note_path = lecture
+
+    code = main(["check", "note", str(json_path), "--note", str(note_path),
+                 "--style", "faithful"])
+
+    printed = [line for line in capsys.readouterr().out.split("\n") if line.strip()]
+    at = printed.index("note: 0 errors, 0 warnings")
+    assert printed[at + 1].startswith("note: ai_draft_remaining=")
+    assert code == exit_codes.OK
+
+
+def test_the_count_line_is_ascii(lecture, capsys):
+    json_path, note_path = lecture
+    main(["check", "note", str(json_path), "--note", str(note_path)])
+
+    printed = capsys.readouterr().out
+    assert not any(marker in printed for marker in "\u2192\u2265\u2713\u2717")
