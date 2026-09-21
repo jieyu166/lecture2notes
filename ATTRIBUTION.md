@@ -112,6 +112,7 @@ Relation values:
 | `frames/ocr.py` | inspired | `scripts/quick_ocr.py` | Same stage (OCR every extracted frame) and same third-party OCR engine choice (`rapidocr-onnxruntime`), but different purpose and output: this module feeds a source-priority note-writing rule (handout > slide > transcript > OCR) with Traditional-Chinese normalization (OpenCC) that upstream does not have; upstream feeds semantic dedup and a VLM skip-gate. No shared function names. |
 | `frames/scene.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/lecture-to-notes/scripts/slide_frames.py` (PySceneDetect / ffmpeg scene-filter detection). Upstream's `extract_slides.py` explicitly rejects scene detection for lecture recordings and uses interval-sampling instead — the opposite algorithm, not a shared design. |
 | `notes/__init__.py` | original | — | Package marker. |
+| `notes/guideline.py` | original | — | This package's own note-writing guideline constants (version string, mandatory section order, rule identifiers); no prior script. |
 | `notes/render.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/render_v4_note.py`. Upstream's `render_embeds.py` expands embed placeholders inside an existing note in a different format; different input/output convention, no shared functions. |
 | `notes/rewrite.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/lecture-to-notes/scripts/rewrite_evidence.py` (only the sensitive-data-pattern and text-normalization helpers were kept). No upstream file addresses claims/citations/evidence packets at all. |
 | `notes/rules.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/lecture_content_rules.py`. No upstream equivalent (Traditional/Simplified Chinese content rules are specific to this project's language target). |
@@ -124,6 +125,7 @@ Relation values:
 | `outputs/publish.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/publish_transaction.py`. Upstream's `finalize_to_vault.py` is a plain copy-with-refresh-check; this module is a full transactional publish system (manifest, atomic replace-with-rollback, recovery) with no shared design. |
 | `outputs/viewer.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/lecture-to-notes/scripts/build_lecture_viewer.py`. Benchmarked in its own upstream (rad-workflow) docstring against a different in-workspace tool, not against `drpwchen/lecture-to-notes`'s `export_web.py` / `build_single_talk_web.py`; no shared function names with either. |
 | `profiles/__init__.py` | original | — | Package marker; ships the `generic`/`radiology` corrections-table profiles (written from scratch for this project; not derived from any third-party correction table). |
+| `profiles/loader.py` | original | — | This package's own reader for the built-in profile's template and settings files; no prior script. |
 | `schema/__init__.py` | original | — | Package marker. |
 | `schema/builder.py` | original | — | Session-written lecture-document builder (`mkseg3.py` in `rad-workflow`, never itself a port of an upstream file). No upstream analog. |
 | `schema/condense.py` | original | — | Session-written per-minute transcript condensing (`condense_agent.py` in `rad-workflow`, never itself a port of an upstream file). No upstream analog. |
@@ -131,7 +133,7 @@ Relation values:
 | `schema/migrate.py` | original | — | `l2n migrate`: upgrades a 1.x lecture document to canonical schema v2. No upstream analog. |
 | `schema/model.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/lecture_model.py`. No upstream canonical-schema module or time-signature validator exists in `drpwchen/lecture-to-notes`. |
 
-Counts: 7 inspired, 15 ported-from-rad-workflow, 26 original — 48 modules total.
+Counts: 7 inspired, 15 ported-from-rad-workflow, 31 original — 53 modules total.
 
 ## ASR default parameters
 

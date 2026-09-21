@@ -34,9 +34,11 @@ from lecture2notes.frames import curation as curation_mod
 from lecture2notes.frames import ocr as ocr_mod
 from lecture2notes.frames import scene as scene_mod
 from lecture2notes.frames.manifest import read_manifest, write_manifest
+from lecture2notes.notes import guideline, render
 from lecture2notes.outputs import hub as hub_mod
 from lecture2notes.outputs import pbf as pbf_mod
 from lecture2notes.outputs import viewer as viewer_mod
+from lecture2notes.profiles import loader
 from lecture2notes.schema.io import read_json, write_json_atomic
 from lecture2notes.schema.migrate import migrate_file
 
@@ -351,7 +353,31 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
 
 
 def cmd_render(args: argparse.Namespace) -> int:
-    not_implemented("render")
+    """`l2n render <doc>`: the deterministic skeleton, or the expansion bundle.
+
+    The skeleton is the file the language model then rewrites in place, so an
+    existing note is never overwritten without ``--force``: losing an expanded
+    note to a re-run of a mechanical stage is not a recoverable mistake.
+    """
+    path, data = _load_document(getattr(args, "json_file", None), "render")
+    if path is None:
+        return exit_codes.ERROR
+
+    profile = str(data.get("profile") or loader.BUILTIN_PROFILE)
+    if not (loader.profile_dir(profile) / loader.NOTE_TEMPLATE).is_file():
+        profile = loader.BUILTIN_PROFILE
+    style = loader.note_style(profile, getattr(args, "style", None))
+    note_path = path.with_name(path.stem + ".v4.md")
+
+    if getattr(args, "expand_prompt", False):
+        _out.line(guideline.expand_prompt(path, note_path, style=style))
+        return exit_codes.OK
+
+    if note_path.exists() and not getattr(args, "force", False):
+        _out.stage("render", "skip (%s exists; use --force)" % note_path.name)
+        return exit_codes.OK
+    render.write_skeleton(note_path, data, style=style, stem=path.stem, profile=profile)
+    _out.ok("render -> %s (style %s, profile %s)" % (note_path, style, profile))
     return exit_codes.OK
 
 
@@ -510,6 +536,26 @@ def _check_frames(target: Optional[str]) -> int:
     return report.exit_code()
 
 
+def _check_note(args: argparse.Namespace) -> int:
+    """`l2n check note <doc> --note <note>`: rules R1 to R8 of the guideline.
+
+    The version line comes first so a saved report always says which edition of
+    the rules produced it; a report that does not is not evidence of anything.
+    """
+    path = _existing_path(getattr(args, "target", None), "check note")
+    if path is None:
+        return exit_codes.ERROR
+    note = Path(args.note) if getattr(args, "note", None) else path.with_name(
+        path.stem + ".v4.md"
+    )
+    report = check.check_note_stage(
+        path, note, style=getattr(args, "style", None)
+    )
+    _out.line(guideline.VERSION_LINE)
+    report.emit()
+    return report.exit_code()
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     stage = getattr(args, "what", None)
     if not stage:
@@ -526,7 +572,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         return _check_frames(target)
     if stage == "json":
         return _check_json(target)
-    # note belongs to the group that owns the note output.
+    if stage == "note":
+        return _check_note(args)
     not_implemented("check %s" % stage)
     return exit_codes.OK
 
@@ -745,6 +792,15 @@ def build_parser() -> argparse.ArgumentParser:
         "what", nargs="?", help="要檢查的階段：transcribe / frames / json / note"
     )
     p.add_argument("target", nargs="?", help="檔案或資料夾路徑")
+    p.add_argument(
+        "--note", default=None, help="check note 的筆記路徑（預設 <stem>.v4.md）"
+    )
+    p.add_argument(
+        "--style",
+        choices=["faithful", "concise"],
+        default=None,
+        help="check note 的風格；faithful 才檢查 R6（預設取 profile）",
+    )
     p.set_defaults(func=cmd_check)
 
     p = sub.add_parser("migrate", parents=[common], help="把舊版 JSON 原地升級為 schema v2")

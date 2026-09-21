@@ -24,12 +24,14 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import unquote
 
 from lecture2notes import _out
 from lecture2notes.engines.base import SRT_TIME
 from lecture2notes.frames.manifest import read_manifest, sha256_file
+from lecture2notes.notes import guideline, rules
+from lecture2notes.profiles import loader
 from lecture2notes.schema.model import (
     MAX_SUMMARY_CHARS,
     MAX_TAKEAWAYS,
@@ -647,9 +649,436 @@ def check_json(path: Path, require_frames: bool = True) -> StageReport:
     return report
 
 
+# ==========================================================================
+# stage acceptance: check note
+# ==========================================================================
+# R1 to R8 of the note-writing guideline. Everything here is decided from the
+# note's text, the document it came from and the transcript beside it; nothing
+# judges whether the writing is any good, because that is what the other half of
+# the guideline -- the half a person has to follow -- is for.
+#
+# The rules that matter most are the ones a reader cannot see. A note that
+# quietly pastes the transcript, or that names a term nobody can verify, looks
+# exactly like a good one. That is why these are machine-checked at all.
+
+#: The Obsidian embed spelling the skeleton emits.
+NOTE_EMBED = re.compile(r"!\[\[([^\]|]+?)(?:\|[^\]]*)?\]\]")
+
+#: A 「...」 span. R5 subtracts these from a line before comparing it, so a line
+#: that marks half of itself as a quotation is judged only on the other half.
+QUOTED_SPAN = re.compile(r"「[^」]*」")
+
+#: Filler a section gets when there was nothing to say. The guideline's answer is
+#: to delete the section instead, so this is a warning rather than an error.
+PLACEHOLDER_TEXT = (
+    "N/A", "n/a", "N.A.", "TBD", "tbd",
+    "不適用", "無資料", "無相關資料", "（略）", "(略)", "待補", "暫無",
+)
+
+#: Rendered by `notes.render`; `check note` looks for the same header.
+CORRECTION_HEADER = ("heard", "correct")
+
+#: What R5 compares against when the profile does not promote it.
+R5_DEFAULT_SEVERITY = "warn"
+
+
+def _heading_depth(line: str) -> int:
+    stripped = line.lstrip("#")
+    depth = len(line) - len(stripped)
+    return depth if depth and stripped[:1] in (" ", "\t") else 0
+
+
+def note_lines(text: str) -> List[str]:
+    return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+def heading_index(lines: Sequence[str], heading: str) -> int:
+    """Line number of an exact heading, or -1. First occurrence wins."""
+    for position, line in enumerate(lines):
+        if line.strip() == heading:
+            return position
+    return -1
+
+
+def section_bounds(
+    lines: Sequence[str], start: int, stop_at_depth: Optional[int] = None
+) -> int:
+    """Where the section opened at *start* ends: the next heading that closes it."""
+    depth = stop_at_depth if stop_at_depth is not None else _heading_depth(lines[start])
+    for position in range(start + 1, len(lines)):
+        found = _heading_depth(lines[position])
+        if found and found <= depth:
+            return position
+    return len(lines)
+
+
+def note_regions(lines: Sequence[str]) -> Dict[str, Tuple[int, int]]:
+    """The two regions the rules talk about: the Note body and References.
+
+    The Note body deliberately stops at ``### References`` even though that
+    heading is nested deeper: References is where unverified terms and the
+    correction table are allowed to live, and R3 is exactly the rule that they
+    must not be anywhere else.
+    """
+    regions: Dict[str, Tuple[int, int]] = {}
+    note_at = heading_index(lines, "# Note (layer 1-3)")
+    references_at = heading_index(lines, "### References")
+    if note_at >= 0:
+        end = section_bounds(lines, note_at)
+        if 0 <= references_at < end:
+            end = references_at
+        regions["note"] = (note_at + 1, end)
+    if references_at >= 0:
+        regions["references"] = (references_at + 1,
+                                 section_bounds(lines, references_at))
+    return regions
+
+
+def segment_sections(
+    lines: Sequence[str], bounds: Tuple[int, int]
+) -> List[Tuple[str, int, int]]:
+    """Each ``## n、title`` section inside the Note body, as (title, start, end)."""
+    start, end = bounds
+    heads = [
+        position for position in range(start, end)
+        if _heading_depth(lines[position]) == 2
+    ]
+    out: List[Tuple[str, int, int]] = []
+    for number, position in enumerate(heads):
+        stop = heads[number + 1] if number + 1 < len(heads) else end
+        out.append((lines[position].lstrip("#").strip(), position + 1, stop))
+    return out
+
+
+def is_marked_quote(line: str) -> bool:
+    """A blockquote, or a line whose content is wrapped in 「」."""
+    body = line.strip()
+    for marker in ("- ", "* ", "+ "):
+        if body.startswith(marker):
+            body = body[len(marker):].lstrip()
+    if body.startswith(">"):
+        return True
+    return bool(QUOTED_SPAN.search(body))
+
+
+def unquoted_residue(line: str) -> str:
+    """The part of a line that is not inside 「」, normalised for comparison."""
+    return rules.comparison_text(QUOTED_SPAN.sub("", line))
+
+
+def transcript_text(path: Path) -> str:
+    """Every cue's text, concatenated. Cue boundaries are not word boundaries."""
+    from lecture2notes.engines.base import parse_srt_text, read_subtitle_text
+
+    cues = parse_srt_text(read_subtitle_text(Path(path)))
+    return "".join(cue.text for cue in cues)
+
+
+def transcript_runs(text: str, size: int) -> set:
+    """Every window of *size* characters in the normalised transcript."""
+    normalized = rules.comparison_text(text)
+    if len(normalized) < size:
+        return set()
+    return {normalized[i:i + size] for i in range(len(normalized) - size + 1)}
+
+
+def pasted_run(residue: str, runs: set, size: int) -> Optional[str]:
+    """The first window of *residue* that also occurs in the transcript."""
+    for i in range(0, max(len(residue) - size + 1, 0)):
+        window = residue[i:i + size]
+        if window in runs:
+            return window
+    return None
+
+
+def correction_rows(lines: Sequence[str], bounds: Tuple[int, int]):
+    """The correction table under References as (line number, cells) pairs.
+
+    Returns None when there is no table at all, which is itself an R4 finding
+    and a different one from a table with an empty cell.
+    """
+    start, end = bounds
+    header_at = -1
+    for position in range(start, end):
+        cells = _table_cells(lines[position])
+        if cells and all(
+            any(column == cell.strip().lower() for cell in cells)
+            for column in CORRECTION_HEADER
+        ):
+            header_at = position
+            break
+    if header_at < 0:
+        return None
+    rows: List[Tuple[int, List[str]]] = []
+    for position in range(header_at + 1, end):
+        cells = _table_cells(lines[position])
+        if not cells:
+            break
+        if all(set(cell.strip()) <= set("-: ") for cell in cells):
+            continue
+        rows.append((position, cells))
+    return rows
+
+
+def _table_cells(line: str) -> List[str]:
+    body = line.strip()
+    if not body.startswith("|"):
+        return []
+    return [cell.strip() for cell in body.strip("|").split("|")]
+
+
+def _resolve_embed(note: Path, ref: str) -> bool:
+    target = unquote(ref.strip()).replace("\\", "/")
+    if (note.parent / target).exists():
+        return True
+    if "/" in target:
+        return False
+    return any(
+        (note.parent / sub / target).exists() if sub else (note.parent / target).exists()
+        for sub in NOTE_IMAGE_DIRS
+    )
+
+
+def check_note_stage(
+    json_path: Path,
+    note_path: Path,
+    transcript: Optional[Path] = None,
+    style: Optional[str] = None,
+    profile: Optional[str] = None,
+) -> StageReport:
+    """`l2n check note`: rules R1 to R8 of the note-writing guideline."""
+    json_path = Path(json_path)
+    note_path = Path(note_path)
+    report = StageReport("note", note_path.name)
+
+    data: Dict[str, Any] = {}
+    if json_path.is_file():
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8-sig"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            report.add("error", "parse", json_path.name,
+                       "JSON is unparseable: %s" % exc)
+            return report
+    else:
+        report.add("error", "parse", json_path.name, "no such file")
+        return report
+    if not note_path.is_file():
+        report.add("error", "R1", note_path.name, "the note does not exist")
+        return report
+
+    effective_profile = profile or str(data.get("profile") or loader.BUILTIN_PROFILE)
+    if not loader.profile_dir(effective_profile).is_dir():
+        effective_profile = loader.BUILTIN_PROFILE
+    effective_style = loader.note_style(effective_profile, style)
+
+    text = note_path.read_text(encoding="utf-8", errors="replace")
+    lines = note_lines(text)
+    regions = note_regions(lines)
+
+    _rule_sections(lines, note_path, report)
+    _rule_embeds(text, note_path, report)
+    _rule_unverified(data, lines, regions, note_path, report)
+    _rule_corrections(lines, regions, note_path, report)
+    _rule_transcript_paste(
+        lines, regions, json_path, note_path, transcript, effective_profile, report
+    )
+    _rule_faithful_quotes(lines, regions, effective_style, note_path, report)
+    _rule_privacy(lines, effective_profile, note_path, report)
+    _rule_placeholder(lines, regions, note_path, report)
+    return report
+
+
+def _rule_sections(lines: Sequence[str], note: Path, report: StageReport) -> None:
+    """R1: every mandatory section exists, in the mandated order."""
+    seen: List[int] = []
+    for heading, name in guideline.MANDATORY_SECTIONS:
+        position = heading_index(lines, heading)
+        if position < 0:
+            report.add("error", "R1", note.name,
+                       "mandatory section is missing: %s" % heading)
+            continue
+        if seen and position < seen[-1]:
+            report.add("error", "R1", "%s:%d" % (note.name, position + 1),
+                       "section %s is out of order" % name)
+        seen.append(position)
+
+
+def _rule_embeds(text: str, note: Path, report: StageReport) -> None:
+    """R2: every embed resolves to a file that exists beside the note."""
+    for ref in sorted(set(match.group(1) for match in NOTE_EMBED.finditer(text))):
+        if not _resolve_embed(note, ref):
+            report.add("error", "R2", ref,
+                       "the note embeds a file that does not exist")
+
+
+def _rule_unverified(
+    data: Mapping[str, Any],
+    lines: Sequence[str],
+    regions: Mapping[str, Tuple[int, int]],
+    note: Path,
+    report: StageReport,
+) -> None:
+    """R3: an unverified term belongs under References and nowhere else."""
+    terms = [t for t in (data.get("unverified_terms") or []) if isinstance(t, str) and t]
+    if not terms:
+        return
+    body = "\n".join(lines[slice(*regions["note"])]) if "note" in regions else ""
+    references = (
+        "\n".join(lines[slice(*regions["references"])])
+        if "references" in regions else ""
+    )
+    for term in terms:
+        if term not in references:
+            report.add("error", "R3", "unverified_terms[%r]" % term,
+                       "the term is not listed under References")
+        if term in body:
+            report.add("error", "R3", "unverified_terms[%r]" % term,
+                       "the term appears in the Note body; it must stay in References")
+
+
+def _rule_corrections(
+    lines: Sequence[str],
+    regions: Mapping[str, Tuple[int, int]],
+    note: Path,
+    report: StageReport,
+) -> None:
+    """R4: the correction table exists and no row is half-filled."""
+    if "references" not in regions:
+        report.add("error", "R4", note.name,
+                   "there is no References section to hold the correction table")
+        return
+    rows = correction_rows(lines, regions["references"])
+    if rows is None:
+        report.add("error", "R4", note.name,
+                   "the References correction table is missing (columns %s)"
+                   % ", ".join(CORRECTION_HEADER))
+        return
+    for position, cells in rows:
+        for column, index in zip(CORRECTION_HEADER, range(len(CORRECTION_HEADER))):
+            value = cells[index].strip() if index < len(cells) else ""
+            if not value or value == "-":
+                report.add("error", "R4", "%s:%d" % (note.name, position + 1),
+                           "correction row has an empty %s cell" % column)
+
+
+def _rule_transcript_paste(
+    lines: Sequence[str],
+    regions: Mapping[str, Tuple[int, int]],
+    json_path: Path,
+    note: Path,
+    transcript: Optional[Path],
+    profile: str,
+    report: StageReport,
+) -> None:
+    """R5: no unmarked run of transcript long enough to be a paste."""
+    if "note" not in regions:
+        return
+    path = Path(transcript) if transcript else json_path.with_name(
+        json_path.stem + ".srt"
+    )
+    if not path.is_file():
+        report.add("warn", "R5", path.name,
+                   "no transcript beside the document; R5 was not checked")
+        return
+    size = guideline.TRANSCRIPT_RUN_CHARS
+    runs = transcript_runs(transcript_text(path), size)
+    if not runs:
+        report.add("warn", "R5", path.name,
+                   "the transcript is shorter than %d characters; R5 was not checked"
+                   % size)
+        return
+    severity = "error" if loader.transcript_paste_severity(profile) == "error" else "warn"
+    for title, start, end in segment_sections(lines, regions["note"]) or [
+        ("Note (layer 1-3)", *regions["note"])
+    ]:
+        for position in range(start, end):
+            line = lines[position]
+            if not line.strip() or line.lstrip().startswith(">"):
+                continue
+            hit = pasted_run(unquoted_residue(line), runs, size)
+            if hit:
+                report.add(
+                    severity, "R5", title,
+                    "%d or more characters copied from the transcript without "
+                    "quotation marks: %s..."
+                    % (size, hit[:guideline.FINDING_EXCERPT_CHARS]),
+                )
+                break
+
+
+def _rule_faithful_quotes(
+    lines: Sequence[str],
+    regions: Mapping[str, Tuple[int, int]],
+    style: str,
+    note: Path,
+    report: StageReport,
+) -> None:
+    """R6: in faithful style every section quotes the speaker at least once."""
+    if style != "faithful" or "note" not in regions:
+        return
+    for title, start, end in segment_sections(lines, regions["note"]):
+        if not any(is_marked_quote(lines[p]) for p in range(start, end)):
+            report.add("error", "R6", title,
+                       "faithful style needs at least one quotation in this section")
+
+
+def _rule_privacy(
+    lines: Sequence[str], profile: str, note: Path, report: StageReport
+) -> None:
+    """R7: nothing matching the profile's personal-data patterns."""
+    for pattern in loader.privacy_patterns(profile):
+        try:
+            compiled = re.compile(pattern)
+        except re.error as exc:
+            report.add("error", "R7", "privacy.toml",
+                       "pattern %r does not compile: %s" % (pattern, exc))
+            continue
+        for position, line in enumerate(lines):
+            if compiled.search(line):
+                report.add("error", "R7", "%s:%d" % (note.name, position + 1),
+                           "line matches the privacy pattern %r" % pattern)
+                break
+
+
+def _rule_placeholder(
+    lines: Sequence[str],
+    regions: Mapping[str, Tuple[int, int]],
+    note: Path,
+    report: StageReport,
+) -> None:
+    """R8: filler text where a section should simply have been deleted."""
+    if "note" not in regions:
+        return
+    for title, start, end in segment_sections(lines, regions["note"]) or [
+        ("Note (layer 1-3)", *regions["note"])
+    ]:
+        for position in range(start, end):
+            hit = next((t for t in PLACEHOLDER_TEXT if t in lines[position]), None)
+            if hit:
+                report.add("warn", "R8", title,
+                           "placeholder text %r; delete the section instead" % hit)
+                break
+
+
 __all__ = [
     "CLOCK_TOLERANCE_SEC",
     "CORRECTIONS_SUFFIX",
+    "CORRECTION_HEADER",
+    "NOTE_EMBED",
+    "PLACEHOLDER_TEXT",
+    "QUOTED_SPAN",
+    "check_note_stage",
+    "correction_rows",
+    "heading_index",
+    "is_marked_quote",
+    "note_lines",
+    "note_regions",
+    "pasted_run",
+    "section_bounds",
+    "segment_sections",
+    "transcript_runs",
+    "transcript_text",
+    "unquoted_residue",
     "CUE_OVERLAP_TOLERANCE_SEC",
     "DIGEST_PREVIEW",
     "MIN_CUE_SEC",

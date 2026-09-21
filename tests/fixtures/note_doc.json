@@ -1,0 +1,74 @@
+{
+  "schema_version": "2.0",
+  "stem": "20240115 demo talk",
+  "title": "佔位講座：兩個觀念與一組判準",
+  "duration_sec": 180,
+  "source": {
+    "video": "20240115 demo talk.mp4",
+    "subtitle": {
+      "path": "20240115 demo talk.srt",
+      "origin": "asr",
+      "engine": "breeze_ct2",
+      "lang": "zh",
+      "offset_model": null
+    }
+  },
+  "profile": "generic",
+  "overall_summary_zh": "佔位總結，全部內容為合成測試資料，與任何真實講座無關。",
+  "takeaways_zh": [
+    "佔位核心觀念：兩個名詞常被混用，判準其實不同",
+    "佔位重點：閾值落在第二型時要改用另一組數字",
+    "佔位重點：講者對長期追蹤明說沒有經驗",
+    "佔位重點：影像所見要先描述再命名"
+  ],
+  "segments": [
+    {
+      "index": 1,
+      "start_time": "00:00:00",
+      "end_time": "00:01:00",
+      "start_sec": 0,
+      "end_sec": 60,
+      "title": "佔位段落一：名詞與判準",
+      "summary_zh": "佔位段落摘要一。",
+      "bullets_zh": [
+        {"text": "佔位綜整條列一之甲", "t": 5, "kind": "synthesis"},
+        {"text": "佔位原話條列一之乙", "t": 12, "kind": "quote"}
+      ],
+      "quotes_zh": [
+        {"text": "佔位原話一之一", "t": 10},
+        {"text": "佔位原話一之二", "t": 20},
+        {"text": "佔位原話一之三", "t": 30}
+      ],
+      "frame": "frames/demo-0001.png",
+      "frames": ["frames/demo-0001.png"],
+      "frame_ocr": [],
+      "editorial_notes_zh": []
+    },
+    {
+      "index": 2,
+      "start_time": "00:01:00",
+      "end_time": "00:03:00",
+      "start_sec": 60,
+      "end_sec": 180,
+      "title": "佔位段落二：追蹤與邊界",
+      "summary_zh": "佔位段落摘要二。",
+      "bullets_zh": [
+        {"text": "佔位綜整條列二之甲", "t": 70, "kind": "synthesis"}
+      ],
+      "quotes_zh": [
+        {"text": "佔位原話二之一", "t": 90}
+      ],
+      "frame": null,
+      "frames": [],
+      "frame_ocr": [],
+      "editorial_notes_zh": []
+    }
+  ],
+  "corrections": [
+    {"heard": "佔位聽錯甲", "correct": "佔位正確甲", "source": "deterministic"},
+    {"heard": "佔位聽錯乙", "correct": "佔位正確乙", "source": "context"}
+  ],
+  "unverified_terms": [
+    "Placeholderinger's imaginary sign"
+  ]
+}

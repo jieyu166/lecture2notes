@@ -1,0 +1,19 @@
+# Frontmatter template for the public generic profile.
+#
+# Everything between the two `---` lines is rendered by substituting
+# `{{placeholder}}` with a value from the document. An unknown placeholder
+# renders as the empty string, so a template is never a crash.
+#
+# Available placeholders: title, date, stem, profile, source_video,
+# source_subtitle, source_origin, source_engine, source_lang, duration_min,
+# segment_count, tags.
+#
+# Add fields by editing this file in a profile or overlay, never in package
+# code: the generic profile deliberately emits only title, date, source and
+# tags, because everything else is one person's vault convention.
+---
+title: "{{title}}"
+date: {{date}}
+source: "{{source_video}}"
+tags: [{{tags}}]
+---
