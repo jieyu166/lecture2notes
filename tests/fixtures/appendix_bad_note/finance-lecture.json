@@ -1,0 +1,42 @@
+{
+  "schema_version": "2.0",
+  "stem": "finance-lecture",
+  "title": "佔位財經講座：利率與債券（去識別化失敗樣本）",
+  "duration_sec": 64,
+  "source": {
+    "video": "finance-lecture.mp4",
+    "subtitle": {
+      "path": "finance-lecture.srt",
+      "origin": "asr",
+      "engine": "breeze_ct2",
+      "lang": "zh",
+      "offset_model": null
+    }
+  },
+  "profile": "generic",
+  "overall_summary_zh": "虛構的財經講座，公司名為佔位名稱，僅用於示範失敗樣態。",
+  "takeaways_zh": [
+    "佔位重點：利率與債券價格反向",
+    "佔位重點：存續期間決定受創幅度",
+    "佔位重點：評等變動是結果不是原因"
+  ],
+  "segments": [
+    {
+      "index": 1,
+      "start_time": "00:00:00",
+      "end_time": "00:00:30",
+      "start_sec": 0,
+      "end_sec": 30,
+      "title": "利率與債券價格",
+      "summary_zh": "佔位段落摘要。",
+      "bullets_zh": [],
+      "quotes_zh": [],
+      "frame": null,
+      "frames": [],
+      "frame_ocr": [],
+      "editorial_notes_zh": []
+    }
+  ],
+  "corrections": [],
+  "unverified_terms": []
+}
