@@ -11,6 +11,7 @@ failure of this code. The module skips itself and says why.
 
 from __future__ import annotations
 
+import io
 import shutil
 import sys
 from pathlib import Path
@@ -30,6 +31,7 @@ pytest.importorskip("PIL", reason="Pillow builds the synthetic slides")
 
 from fixtures import synthetic  # noqa: E402
 
+from lecture2notes import _out  # noqa: E402
 from lecture2notes.frames import capture, scene  # noqa: E402
 from lecture2notes.frames.manifest import read_manifest  # noqa: E402
 
@@ -177,3 +179,102 @@ def test_same_second_detections_do_not_collide():
     planned = capture.plan_frames("talk", [12.1, 12.6, 40.0])
 
     assert [name for _second, name in planned] == ["talk-0012.png", "talk-0040.png"]
+
+
+# --------------------------------------------------------------------------
+# 15.5 -- a scan that says nothing for two minutes looks like a hang
+# --------------------------------------------------------------------------
+class FakeFfmpeg:
+    """Stands in for a scanning ffmpeg: a `-progress` stream and a showinfo dump."""
+
+    #: What ffmpeg writes to the progress pipe, one block per reporting point.
+    BLOCKS = [
+        "frame=%d\nfps=25\nout_time=00:00:%02d.000000\nprogress=continue\n"
+        % (second * 25, second)
+        for second in (5, 10, 15, 20)
+    ]
+    SHOWINFO = (
+        "[Parsed_showinfo_1 @ 0000] n:0 pts_time:4.400 pos:1\n"
+        "[Parsed_showinfo_1 @ 0000] n:1 pts_time:12.800 pos:2\n"
+    )
+
+    def __init__(self, command, stdout=None, stderr=None, **kwargs):
+        self.command = list(command)
+        self.stdout = io.StringIO("".join(self.BLOCKS) + "progress=end\n")
+        if stderr is not None:
+            stderr.write(self.SHOWINFO)
+        self.returncode = 0
+
+    def wait(self):
+        return self.returncode
+
+
+def test_run_scan_reports_how_far_through_the_media_it_is(capsys):
+    """The 110 second field scan printed nothing for 108 of them."""
+    _out.reset()
+
+    stderr_text = scene.run_scan(
+        ["ffmpeg", "-progress", "pipe:1"], total_sec=20, interval=0,
+        popen=FakeFfmpeg,
+    )
+
+    printed = [
+        line for line in capsys.readouterr().out.splitlines()
+        if line.startswith("[frames] ")
+    ]
+    assert len(printed) > 1, printed
+    assert "[frames] 5/20" in printed[0]
+    assert printed[-1].startswith("[frames] 20/20")
+    assert "pts_time:4.400" in stderr_text
+
+
+def test_run_scan_lines_stay_ascii(capsys):
+    _out.reset()
+    scene.run_scan(
+        ["ffmpeg"], total_sec=20, interval=0, popen=FakeFfmpeg
+    )
+
+    printed = capsys.readouterr().out
+    assert not any(marker in printed for marker in "\u2192\u2265\u2713\u2717")
+
+
+def test_run_scan_reports_elapsed_and_eta(capsys):
+    _out.reset()
+    scene.run_scan(["ffmpeg"], total_sec=20, interval=0, popen=FakeFfmpeg)
+
+    first = capsys.readouterr().out.splitlines()[0]
+    assert "elapsed" in first and "eta" in first
+
+
+def test_detect_ffmpeg_asks_for_the_progress_stream_and_still_finds_the_cuts(
+    monkeypatch, capsys
+):
+    _out.reset()
+    captured = {}
+
+    class Recording(FakeFfmpeg):
+        def __init__(self, command, **kwargs):
+            captured["command"] = list(command)
+            super().__init__(command, **kwargs)
+
+    monkeypatch.setattr(scene._deps, "require_ffmpeg", lambda: "ffmpeg")
+
+    marks = scene.detect_ffmpeg(
+        Path("talk.mp4"), total_sec=20, progress_interval=0, popen=Recording
+    )
+
+    assert "-progress" in captured["command"]
+    assert "pipe:1" in captured["command"]
+    seconds = [entry["timestamp_sec"] for entry in marks]
+    assert seconds == [0.0, 4.4, 12.8]
+    assert "[frames] 20/20" in capsys.readouterr().out
+
+
+def test_quiet_silences_the_scan_progress(capsys):
+    _out.configure(quiet=True, json_progress=False)
+    try:
+        scene.run_scan(["ffmpeg"], total_sec=20, interval=0, popen=FakeFfmpeg)
+    finally:
+        _out.reset()
+
+    assert capsys.readouterr().out == ""

@@ -17,8 +17,9 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from lecture2notes import _deps, _out
 from lecture2notes.frames.manifest import timestamp_display, timestamp_file
@@ -42,6 +43,13 @@ DURATION_PREVIEW = 200
 FALLBACK_MESSAGE = "[frames] scenedetect not installed, using ffmpeg scene filter"
 
 PTS_TIME = re.compile(r"pts_time:([\d.]+)")
+
+#: How often a long scan reports, in seconds of wall clock.
+SCAN_PROGRESS_INTERVAL = 5.0
+
+#: One line of ffmpeg's ``-progress`` stream. ``out_time_ms`` is microseconds in
+#: some builds and milliseconds in others, so the clock form is what is parsed.
+PROGRESS_OUT_TIME = re.compile(r"^out_time=(\d+):(\d{2}):(\d{2}(?:\.\d+)?)\s*$")
 SUBTITLE_SUFFIX = re.compile(r"\.(zh(-TW)?|en|orig)$")
 VIDEO_EXT = (".mp4", ".mkv", ".mov", ".webm", ".avi", ".m4v")
 
@@ -103,16 +111,83 @@ def get_duration(video_path: Path) -> float:
         return 0.0
 
 
-def detect_ffmpeg(video_path: Path, threshold: float = DEFAULT_FFMPEG_THRESHOLD) -> List[Dict[str, Any]]:
+def scan_progress_seconds(line: str) -> Optional[float]:
+    """Seconds of media scanned so far, from one ffmpeg ``-progress`` line."""
+    match = PROGRESS_OUT_TIME.match(line.strip())
+    if not match:
+        return None
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def run_scan(
+    command: List[str],
+    total_sec: float,
+    stage: str = "frames",
+    interval: float = SCAN_PROGRESS_INTERVAL,
+    popen: Optional[Callable[..., Any]] = None,
+) -> str:
+    """Run a scanning ffmpeg command, reporting progress, and return its stderr.
+
+    Scene detection over a 20 minute talk takes around two minutes during which
+    ffmpeg says nothing at all, and a silent two minutes is indistinguishable
+    from a hang -- the field run's first reaction was to reach for Ctrl-C. The
+    ``-progress`` stream goes to stdout so it can be read a line at a time,
+    while stderr (which carries the ``showinfo`` dump this function returns)
+    goes to a temporary file: reading both pipes from one thread deadlocks as
+    soon as either one fills.
+    """
+    launch = popen or subprocess.Popen
+    progress = _out.Progress(stage, int(max(total_sec, 0.0)), interval=interval)
+    emitted = 0
+    with tempfile.TemporaryFile(
+        "w+", encoding="utf-8", errors="replace", newline=""
+    ) as errors:
+        process = launch(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=errors,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if process.stdout is not None:
+            for line in process.stdout:
+                scanned = scan_progress_seconds(line)
+                if scanned is None:
+                    continue
+                whole = int(scanned)
+                if whole > emitted:
+                    progress.advance(whole - emitted)
+                    emitted = whole
+            process.stdout.close()
+        process.wait()
+        if emitted:
+            progress.finish()
+        errors.seek(0)
+        return errors.read()
+
+
+def detect_ffmpeg(
+    video_path: Path,
+    threshold: float = DEFAULT_FFMPEG_THRESHOLD,
+    total_sec: Optional[float] = None,
+    progress_interval: float = SCAN_PROGRESS_INTERVAL,
+    popen: Optional[Callable[..., Any]] = None,
+) -> List[Dict[str, Any]]:
     """Fallback detector built on the ffmpeg ``scene`` filter."""
     ffmpeg = _deps.require_ffmpeg()
-    result = subprocess.run(
-        [ffmpeg, "-hide_banner", "-i", str(video_path),
+    total = get_duration(video_path) if total_sec is None else float(total_sec)
+    stderr_text = run_scan(
+        [ffmpeg, "-hide_banner", "-nostats", "-progress", "pipe:1",
+         "-i", str(video_path),
          "-filter:v", "select='gt(scene,%s)',showinfo" % threshold, "-f", "null", "-"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        total,
+        interval=progress_interval,
+        popen=popen,
     )
     marks = [mark(0.0)]
-    marks.extend(mark(sec) for sec in parse_ffmpeg_scene_output(result.stderr or ""))
+    marks.extend(mark(sec) for sec in parse_ffmpeg_scene_output(stderr_text))
     return marks
 
 
@@ -121,6 +196,7 @@ def detect_scenes(
     detector: str = "adaptive",
     threshold: Optional[float] = None,
     min_scene_len: float = DEFAULT_MIN_SCENE_LEN,
+    progress_interval: float = SCAN_PROGRESS_INTERVAL,
 ) -> List[Dict[str, Any]]:
     """Detected cut points, newest-first-frame included.
 
@@ -129,7 +205,11 @@ def detect_scenes(
     if detector not in DETECTORS:
         raise ValueError("unknown detector: %s" % detector)
     if detector == "ffmpeg":
-        return detect_ffmpeg(video_path, threshold or DEFAULT_FFMPEG_THRESHOLD)
+        return detect_ffmpeg(
+            video_path,
+            threshold or DEFAULT_FFMPEG_THRESHOLD,
+            progress_interval=progress_interval,
+        )
     try:
         from scenedetect import SceneManager, open_video  # type: ignore
         from scenedetect.detectors import AdaptiveDetector, ContentDetector  # type: ignore
@@ -139,7 +219,9 @@ def detect_scenes(
         # matches the contract exactly.
         _out.line(FALLBACK_MESSAGE)
         _out.say("info", "install: %s" % _deps.INSTALL_HINTS["scenedetect"])
-        return detect_ffmpeg(video_path, DEFAULT_FFMPEG_THRESHOLD)
+        return detect_ffmpeg(
+            video_path, DEFAULT_FFMPEG_THRESHOLD, progress_interval=progress_interval
+        )
 
     video = open_video(str(video_path))
     minimum = max(int(round(min_scene_len * video.frame_rate)), 1)
@@ -154,7 +236,30 @@ def detect_scenes(
             adaptive_threshold=DEFAULT_ADAPTIVE_THRESHOLD if threshold is None else threshold,
             min_scene_len=minimum,
         ))
-    manager.detect_scenes(video=video)
+    # PySceneDetect has no per-frame hook, but it does call back on every cut it
+    # finds, and a cut carries the frame number it happened at. That is enough
+    # to turn a silent scan into one that says how far through the media it has
+    # read. The total is in seconds, so the line reads scanned/total.
+    progress = _out.Progress(
+        "frames", max(int(get_duration(video_path)), 0), interval=progress_interval
+    )
+    state = {"emitted": 0}
+
+    def on_cut(_image: Any, frame_num: int) -> None:
+        try:
+            scanned = int(frame_num / float(video.frame_rate))
+        except (TypeError, ValueError, ZeroDivisionError):
+            return
+        if scanned > state["emitted"]:
+            progress.advance(scanned - state["emitted"])
+            state["emitted"] = scanned
+
+    try:
+        manager.detect_scenes(video=video, callback=on_cut)
+    except TypeError:  # pragma: no cover - PySceneDetect without a callback arg
+        manager.detect_scenes(video=video)
+    if state["emitted"]:
+        progress.finish()
     marks = [mark(start.get_seconds()) for start, _end in manager.get_scene_list()]
     if not marks or marks[0]["timestamp_sec"] > 0.5:
         marks.insert(0, mark(0.0))
@@ -182,6 +287,10 @@ def extract_frame(
 __all__ = [
     "DETECTORS",
     "FALLBACK_MESSAGE",
+    "PROGRESS_OUT_TIME",
+    "SCAN_PROGRESS_INTERVAL",
+    "run_scan",
+    "scan_progress_seconds",
     "DEFAULT_WIDTH",
     "SEEK_PADDING",
     "detect_ffmpeg",

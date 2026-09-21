@@ -6,7 +6,7 @@ name: ci
 
 on:
   push:
-    branches: [main, "g12-tests"]
+    branches: [main, "g12-tests", "g15-fieldfixes"]
   pull_request:
     branches: [main]
   workflow_dispatch:
