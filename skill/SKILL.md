@@ -19,7 +19,7 @@ SRT／JSON 就從缺少的階段接續，不重跑已完成的階段。
 | 已有字幕，要切分段、建立或升級正規 JSON v2（`l2n scaffold`、`l2n migrate`） | [references/segmentation.md](references/segmentation.md) |
 | 抓投影片影格（`l2n frames`）、對影格做 OCR（`l2n ocr`）、產骨架筆記（`l2n render`） | [references/frames-and-notes.md](references/frames-and-notes.md) |
 | 把骨架筆記擴寫成完整筆記 | [references/note-writing.md](references/note-writing.md) |
-| 產 viewer（`l2n viewer`）、PotPlayer 章節檔（`l2n pbf`）、課程首頁（`l2n hub`）、批次整課，以及用 `l2n check` 驗收任一階段 | [references/outputs-and-batch.md](references/outputs-and-batch.md) |
+| 產 viewer（`l2n viewer`）、PotPlayer 章節檔（`l2n pbf`）、課程首頁（`l2n hub`）、整份搬到輸出目錄（`l2n publish`）、批次整課，以及用 `l2n check` 驗收任一階段 | [references/outputs-and-batch.md](references/outputs-and-batch.md) |
 | 選 profile、疊 overlay、改詞庫或輸出設定（`l2n profile`） | [references/profiles-and-overlay.md](references/profiles-and-overlay.md) |
 
 只要字幕、不要筆記時，用 whisper-srt-zh；純文字筆記整理或新知查核，用 obsidian-v4-cleanup。

@@ -92,7 +92,7 @@ l2n run lecture.mp4 --lang zh
 ## 子命令
 
 `transcribe`、`calibrate-subs`、`frames`、`ocr`、`scaffold`、`render`、`viewer`、`pbf`、
-`hub`、`check`、`migrate`、`run`、`convert-model`、`profile`、`install-skill`。
+`hub`、`publish`、`check`、`migrate`、`run`、`convert-model`、`profile`、`install-skill`。
 
 每個子命令可獨立重跑且冪等（已有產物即跳過，`--force` 重做）。共用旗標：`--quiet`、
 `--json-progress`（每行一個 JSON 物件，給 agent 追蹤進度）、`--force`。

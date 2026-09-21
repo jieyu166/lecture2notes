@@ -41,6 +41,7 @@ CLI_STAGES = (
     "viewer",
     "pbf",
     "hub",
+    "publish",
     "check",
 )
 

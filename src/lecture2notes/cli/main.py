@@ -23,7 +23,7 @@ from urllib.parse import unquote
 
 from lecture2notes import __version__, _deps, _out, exit_codes
 from lecture2notes import install as install_mod
-from lecture2notes.acceptance import check
+from lecture2notes.acceptance import audit, check
 from lecture2notes.acceptance.check import check_json
 from lecture2notes.engines import calibrate
 from lecture2notes.engines import convert
@@ -38,7 +38,9 @@ from lecture2notes.frames.manifest import read_manifest, write_manifest
 from lecture2notes.notes import guideline, render
 from lecture2notes.outputs import hub as hub_mod
 from lecture2notes.outputs import pbf as pbf_mod
+from lecture2notes.outputs import publish as publish_mod
 from lecture2notes.outputs import viewer as viewer_mod
+from lecture2notes.outputs.plan import plan_for
 from lecture2notes.profiles import loader
 from lecture2notes.schema.io import read_json, write_json_atomic
 from lecture2notes.schema.migrate import migrate_file
@@ -58,6 +60,7 @@ SUBCOMMANDS: List[str] = [
     "viewer",
     "pbf",
     "hub",
+    "publish",
     "check",
     "migrate",
     "run",
@@ -499,6 +502,54 @@ def cmd_hub(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+def cmd_publish(args: argparse.Namespace) -> int:
+    """`l2n publish <stem> --dest <dir>`: the derivative set, as one transaction.
+
+    Publishing means replacing several files at once. One at a time means a
+    failure halfway leaves the destination holding a new viewer, an old chapter
+    file and a note from neither: the pieces disagree and nothing records that
+    they do. So either all of them land or none of them do.
+    """
+    stem_arg = getattr(args, "stem", None)
+    destination = getattr(args, "dest", None)
+    if not stem_arg:
+        _out.error("publish needs a lecture stem")
+        return exit_codes.ERROR
+    if not destination:
+        _out.error("publish needs --dest <dir>")
+        return exit_codes.ERROR
+
+    base = check.stem_path(Path(stem_arg))
+    source_dir = base.parent if str(base.parent) else Path(".")
+    document = base.with_name(base.name + ".json")
+    if not document.is_file():
+        _out.error("publish：找不到正式 JSON %s" % document)
+        return exit_codes.ERROR
+
+    profile = _run_profile(document)
+    outcome = publish_mod.publish_lecture(
+        base.name,
+        Path(destination),
+        source_dir,
+        pbf_enabled=pbf_mod.is_enabled(loader.outputs(profile)),
+    )
+    if not outcome.ok:
+        if outcome.failed_path:
+            _out.error("publish failed on %s" % outcome.failed_path)
+        _out.error(outcome.message)
+        if outcome.backup_dir:
+            _out.warn(
+                "rollback did not finish; the backups are in %s" % outcome.backup_dir
+            )
+        return exit_codes.ERROR
+
+    for name in outcome.files:
+        _out.line("publish -> %s" % name)
+    _out.ok(outcome.message)
+    _out.line("publish backup_dir: %s" % (outcome.backup_dir or "none"))
+    return exit_codes.OK
+
+
 #: Stages `l2n check` knows about. Only the ones with a handler are wired up;
 #: the rest still report "not implemented yet" rather than silently passing.
 CHECK_STAGES = ("transcribe", "frames", "json", "note")
@@ -526,11 +577,9 @@ def _check_transcribe(target: Optional[str]) -> int:
         _out.error("no such file: %s" % path)
         return exit_codes.ERROR
 
-    report = check.Report(path.name)
-    check.check_transcribe(path, report)
+    report = check.check_transcribe_stage(path)
     report.emit()
-    _out.line(report.summary("transcribe"))
-    return check.exit_code([report])
+    return report.exit_code()
 
 
 def _check_json(target: Optional[str]) -> int:
@@ -573,7 +622,43 @@ def _check_note(args: argparse.Namespace) -> int:
     return report.exit_code()
 
 
+def _check_all(args: argparse.Namespace) -> int:
+    """`l2n check --all <stem> [--report <path>]`: every applicable stage.
+
+    "Applicable" is what is on disk. A lecture whose note has not been written
+    is not failing the note stage, it has not reached it, and an error for a
+    file the pipeline was never asked to produce would make this useless as a
+    progress check. A stem with nothing at all beside it is a different matter:
+    that is a mistyped path, and it exits 2 rather than reporting a clean run
+    over zero stages.
+    """
+    stem = getattr(args, "what", None) or getattr(args, "target", None)
+    if not stem:
+        _out.error("check --all needs a stem")
+        return exit_codes.ERROR
+    base = check.stem_path(Path(stem))
+    reports = check.check_all(base, style=getattr(args, "style", None))
+    if not reports:
+        _out.error("check --all：找不到任何階段產物 %s" % base.name)
+        return exit_codes.ERROR
+
+    _out.line(guideline.VERSION_LINE)
+    for report in reports:
+        report.emit()
+
+    report_path = getattr(args, "report", None)
+    if report_path:
+        payload = audit.stage_report_payload(
+            reports, stem=base.name, guideline_version=guideline.GUIDELINE_VERSION
+        )
+        written = audit.write_stage_report(Path(report_path), payload)
+        _out.ok("check --all -> %s" % written)
+    return check.worst_exit_code(reports)
+
+
 def cmd_check(args: argparse.Namespace) -> int:
+    if getattr(args, "all_stages", False):
+        return _check_all(args)
     stage = getattr(args, "what", None)
     if not stage:
         _out.error("check needs a stage: %s" % " / ".join(CHECK_STAGES))
@@ -611,11 +696,304 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+class RunPaths:
+    """Every file `l2n run` can write for one recording, resolved once.
+
+    Resolved before any stage starts so ``--preflight`` and the run itself
+    answer from the same list: a preflight that computed its targets separately
+    would be a second implementation of the thing it is supposed to predict.
+    """
+
+    def __init__(self, video: Path, profile: str = loader.BUILTIN_PROFILE) -> None:
+        self.video = Path(video)
+        self.base = self.video.parent
+        self.stem = scene_mod.video_stem(self.video)
+        self.subtitle = self.base / (self.stem + ".srt")
+        self.manifest = self.base / (self.stem + ".frames.json")
+        self.frames_dir = self.base / "frames"
+        self.document = self.base / (self.stem + ".json")
+        self.ocr_cache = ocr_mod.cache_path_for(self.document)
+        self.note = self.base / (self.stem + ".v4.md")
+        self.viewer = viewer_mod.viewer_path(self.document)
+        self.pbf = self.base / (self.stem + ".pbf")
+        self.profile = profile
+
+    def pbf_enabled(self) -> bool:
+        return pbf_mod.is_enabled(loader.outputs(self.profile))
+
+    def planned(self) -> List[Path]:
+        """The write targets, in the order the stages reach them."""
+        targets = [
+            self.subtitle, self.manifest, self.ocr_cache,
+            self.document, self.note, self.viewer,
+        ]
+        if self.pbf_enabled():
+            targets.append(self.pbf)
+        return targets
+
+
+def _run_profile(paths_document: Path) -> str:
+    """The profile the document declares, or the built-in one."""
+    if not paths_document.is_file():
+        return loader.BUILTIN_PROFILE
+    try:
+        data = read_json(paths_document)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return loader.BUILTIN_PROFILE
+    name = data.get("profile") if isinstance(data, dict) else None
+    if isinstance(name, str) and name and loader.profile_dir(name).is_dir():
+        return name
+    return loader.BUILTIN_PROFILE
+
+
+#: What a stage prints when its output is already there.
+SKIP_EXISTS = "skip (exists)"
+
+#: scaffold is not a mechanical stage. It is the one place a language model has
+#: to write, so `run` states that plainly instead of pretending to do it.
+SCAFFOLD_SKIP = "skip (LLM stage; see skill)"
+
+#: What to do when the model has not written the document yet. Naming the skill
+#: matters: the next step is not something the CLI can perform.
+SCAFFOLD_MISSING = (
+    "%s does not exist; scaffold is the LLM stage -- run the lecture2notes "
+    "skill to write it, then run again"
+)
+
+
+class _StageRunner:
+    """Runs the stages in order and remembers the worst outcome so far.
+
+    `run` has two failure modes that must not be confused. A check error means
+    the artefact is wrong, so nothing downstream may be built from it and the
+    run stops. A check warning means the artefact is usable and somebody should
+    look at it, so the run continues and says so at the end with exit 1. That
+    distinction is the whole point of the acceptance contract, so it lives in
+    one place rather than being re-decided at each call site.
+    """
+
+    def __init__(self) -> None:
+        self.worst = exit_codes.OK
+
+    def failed(self, stage: str, reason: str) -> int:
+        _out.stage(stage, "error: %s" % reason)
+        self.worst = exit_codes.ERROR
+        return exit_codes.ERROR
+
+    def accept(self, stage: str, report) -> bool:
+        """Emit a stage check and say whether the run may continue.
+
+        The findings and the summary are printed in the acceptance contract's
+        own format, but the ``[stage] ok`` line uses the *run* stage's name
+        rather than the check's. They differ twice: scaffold is accepted by
+        `check json` and render by `check note`, and a run that reported
+        ``[json] ok`` in the middle of the scaffold stage would be describing a
+        stage the user never asked for.
+        """
+        for text in report.lines():
+            _out.line(text)
+        _out.line(report.summary_line())
+        code = report.exit_code()
+        if code == exit_codes.ERROR:
+            first = report.errors[0]
+            self.failed(stage, "%s %s: %s" % (first.code, first.location or "-",
+                                              first.message))
+            return False
+        if code == exit_codes.WARN:
+            self.worst = max(self.worst, exit_codes.WARN)
+        _out.stage(stage, "ok")
+        return True
+
+    def done(self, stage: str) -> bool:
+        """A stage that has no acceptance check of its own."""
+        _out.stage(stage, "ok")
+        return True
+
+
+def _run_transcribe(args, paths: RunPaths, lang: str, force: bool) -> Optional[str]:
+    """Do the transcribe stage, or report why it could not. None means fine."""
+    if paths.subtitle.is_file() and not force:
+        _out.stage("transcribe", SKIP_EXISTS)
+        return None
+    engine = resolve_engine(args)
+    pairs, table_path = load_corrections(args)
+    try:
+        pipeline.transcribe_video(
+            paths.video, lang, engine,
+            pairs=pairs, table_path=table_path, force=force,
+            chunk_sec=getattr(args, "chunk_sec", None)
+            or getattr(engine, "chunk_sec", None),
+        )
+    except RuntimeError as exc:
+        return str(exc)
+    return None
+
+
+def _run_frames(args, paths: RunPaths, force: bool) -> Optional[str]:
+    if paths.manifest.is_file() and not force:
+        _out.stage("frames", SKIP_EXISTS)
+        return None
+    try:
+        result = capture_mod.capture(
+            paths.video,
+            mode=getattr(args, "mode", None) or "scene",
+            every=getattr(args, "every", None) or 45.0,
+        )
+    except (capture_mod.DurationUnknown, ValueError, FileNotFoundError) as exc:
+        return str(exc)
+    if not result.kept:
+        return "capture produced no frames"
+    return None
+
+
+def _run_ocr(paths: RunPaths, force: bool) -> Optional[str]:
+    """OCR the captured frames, unless the cache already covers them.
+
+    The dependency is required only when there is work to do. Asking for
+    rapidocr in order to discover there is nothing to recognise would make a
+    resumed run fail on a machine where the first run succeeded.
+    """
+    if paths.ocr_cache.is_file() and not force:
+        _out.stage("ocr", SKIP_EXISTS)
+        return None
+    _deps.require("rapidocr")
+    target = paths.document if paths.document.is_file() else paths.frames_dir
+    if not target.exists():
+        return "no frames to read: %s" % paths.frames_dir
+    try:
+        ocr_mod.run_ocr(target, force=force)
+    except (OSError, RuntimeError) as exc:
+        return str(exc)
+    return None
+
+
+def _run_render(paths: RunPaths, style: Optional[str], force: bool) -> Optional[str]:
+    if paths.note.is_file() and not force:
+        _out.stage("render", SKIP_EXISTS)
+        return None
+    try:
+        data = read_json(paths.document)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return "cannot read %s: %s" % (paths.document.name, exc)
+    profile = paths.profile
+    if not (loader.profile_dir(profile) / loader.NOTE_TEMPLATE).is_file():
+        profile = loader.BUILTIN_PROFILE
+    render.write_skeleton(
+        paths.note, data,
+        style=loader.note_style(profile, style),
+        stem=paths.stem, profile=profile,
+    )
+    return None
+
+
+def _run_viewer(paths: RunPaths, force: bool) -> Optional[str]:
+    if paths.viewer.is_file() and not force:
+        _out.stage("viewer", SKIP_EXISTS)
+        return None
+    try:
+        data = read_json(paths.document)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return "cannot read %s: %s" % (paths.document.name, exc)
+    if not (data.get("segments") or []):
+        return "%s has no segments" % paths.document.name
+    viewer_mod.build(paths.document, data)
+    return None
+
+
+def _run_pbf(paths: RunPaths, force: bool) -> Optional[str]:
+    if paths.pbf.is_file() and not force:
+        _out.stage("pbf", SKIP_EXISTS)
+        return None
+    try:
+        data = read_json(paths.document)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return "cannot read %s: %s" % (paths.document.name, exc)
+    pbf_mod.write_pbf(paths.document, data, out=paths.pbf)
+    return None
+
+
 def cmd_run(args: argparse.Namespace) -> int:
-    require_lang(args)
+    """`l2n run <video> --lang xx`: every mechanical stage, with the checks.
+
+    The order is transcribe, frames, ocr, scaffold, render, viewer, and the
+    chapter file when the profile enables it. After each stage that has one, its
+    acceptance check runs: an error stops the run so that nothing downstream is
+    built from a broken artefact, a warning does not.
+
+    Re-running is the normal case, not the exception -- a thirty-minute lecture
+    is transcribed once and then rendered and viewed many times -- so every
+    stage skips when its output is there. ``--force`` is how you say you meant
+    it, and it is per-run rather than per-stage on purpose: a flag that redid
+    only the stage you named would still leave the later ones stale.
+    """
+    # The language gate comes before everything, including --preflight: it is
+    # the one contract that must fire before any path is even resolved.
+    lang = require_lang(args)
+    video = getattr(args, "video", None)
+    if not video:
+        _out.error("run needs a video file")
+        return exit_codes.ERROR
+    source = Path(video)
+    if not source.is_file():
+        _out.error("no such file: %s" % source)
+        return exit_codes.ERROR
+    paths = RunPaths(source, _run_profile(Path(source).with_suffix(".json")))
+    if getattr(args, "preflight", False):
+        # No dependency check: listing what a run would write must work on a
+        # machine that cannot run it, which is exactly when it is most useful.
+        return _emit_plan("run", plan_for(paths.planned()))
+
     _deps.require("ffmpeg")
-    not_implemented("run")
-    return exit_codes.OK
+    force = bool(getattr(args, "force", False))
+    style = getattr(args, "style", None)
+    runner = _StageRunner()
+
+    reason = _run_transcribe(args, paths, lang, force)
+    if reason is not None:
+        return runner.failed("transcribe", reason)
+    if not runner.accept("transcribe", check.check_transcribe_stage(paths.subtitle)):
+        return runner.worst
+
+    reason = _run_frames(args, paths, force)
+    if reason is not None:
+        return runner.failed("frames", reason)
+    if not runner.accept("frames", check.check_frames(paths.manifest)):
+        return runner.worst
+
+    reason = _run_ocr(paths, force)
+    if reason is not None:
+        return runner.failed("ocr", reason)
+    runner.done("ocr")
+
+    _out.stage("scaffold", SCAFFOLD_SKIP)
+    if not paths.document.is_file():
+        return runner.failed("scaffold", SCAFFOLD_MISSING % paths.document.name)
+    if not runner.accept("scaffold", check.check_json(paths.document)):
+        return runner.worst
+
+    reason = _run_render(paths, style, force)
+    if reason is not None:
+        return runner.failed("render", reason)
+    if not runner.accept("render", check.check_note_stage(
+        paths.document, paths.note,
+        transcript=paths.subtitle if paths.subtitle.is_file() else None,
+        style=style, profile=paths.profile,
+    )):
+        return runner.worst
+
+    reason = _run_viewer(paths, force)
+    if reason is not None:
+        return runner.failed("viewer", reason)
+    runner.done("viewer")
+
+    if paths.pbf_enabled():
+        reason = _run_pbf(paths, force)
+        if reason is not None:
+            return runner.failed("pbf", reason)
+        runner.done("pbf")
+
+    _out.ok("run: %s" % ("完成，但有警告" if runner.worst else "完成"))
+    return runner.worst
 
 
 def cmd_convert_model(args: argparse.Namespace) -> int:
@@ -866,11 +1244,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.set_defaults(func=cmd_hub)
 
+    p = sub.add_parser(
+        "publish", parents=[common], help="把一場講座的衍生產物交易式發佈到目標資料夾"
+    )
+    p.add_argument("stem", nargs="?", help="講座 stem 或它的任一個檔案路徑")
+    p.add_argument("--dest", default=None, help="目標資料夾（必須與來源同一個檔案系統）")
+    p.set_defaults(func=cmd_publish)
+
     p = sub.add_parser("check", parents=[common], help="執行各階段的驗收合約")
     p.add_argument(
-        "what", nargs="?", help="要檢查的階段：transcribe / frames / json / note"
+        "what",
+        nargs="?",
+        help="要檢查的階段：transcribe / frames / json / note；加 --all 時填 <stem>",
     )
     p.add_argument("target", nargs="?", help="檔案或資料夾路徑")
+    p.add_argument(
+        "--all",
+        dest="all_stages",
+        action="store_true",
+        help="對一個 <stem> 執行所有有產物的階段，exit code 取最大值",
+    )
+    p.add_argument(
+        "--report", default=None, help="把 --all 的結果寫成 JSON 稽核報告"
+    )
     p.add_argument(
         "--note", default=None, help="check note 的筆記路徑（預設 <stem>.v4.md）"
     )
@@ -893,6 +1289,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", default=None, help="模型名稱或大小")
     p.add_argument(
         "--allow-cloud", action="store_true", help="允許使用非本機引擎（預設拒絕）"
+    )
+    p.add_argument(
+        "--style",
+        choices=["faithful", "concise"],
+        default=None,
+        help="骨架筆記與 check note 的風格（預設取 profile）",
+    )
+    p.add_argument(
+        "--mode", choices=["scene", "interval"], default=None,
+        help="抓圖模式（預設 scene）",
+    )
+    p.add_argument(
+        "--every", type=float, default=None, help="interval 模式的取樣秒數"
+    )
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="只列出將建立或覆蓋的檔案，不寫入任何東西",
     )
     p.set_defaults(func=cmd_run)
 

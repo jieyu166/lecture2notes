@@ -297,6 +297,99 @@ def check_transcribe(path: Path, report: Report) -> List[Any]:
     return loops
 
 
+#: Location prefix for a per-cue finding, so every line carries a location that
+#: points at one cue rather than at the whole file.
+def _cue_location(name: str, number: int) -> str:
+    return "%s:cue %d" % (name, number)
+
+
+def check_transcribe_stage(path: Path) -> StageReport:
+    """The ``transcribe`` stage check over one ``<stem>.srt``.
+
+    The same rules :func:`check_transcribe` applies, reported through
+    :class:`StageReport` so that the four stages share one output contract and
+    one finding shape. The older ``Report`` form stays for callers that want the
+    grouped per-document printout.
+
+    Severity split, unchanged from the ported version: structure is an error
+    because every later stage reads these times; a hallucination loop is a
+    warning because the transcript is still usable up to the loop and only a
+    person can decide whether to re-run or trim; a missing correction sidecar is
+    only an error when its twin is present, since a run with no correction table
+    legitimately has neither.
+    """
+    from lecture2notes.engines import hallucination
+    from lecture2notes.engines.base import parse_srt_text
+
+    target = Path(path)
+    report = StageReport("transcribe", target.name)
+    name = target.name
+
+    try:
+        raw_bytes = target.read_bytes()
+    except OSError as exc:
+        report.add("error", "parse", name, "subtitle is unreadable: %s" % exc)
+        return report
+    if raw_bytes[:3] == b"\xef\xbb\xbf":
+        report.add(
+            "error", "bom", name,
+            "SRT has a UTF-8 BOM; players and parsers mis-read the first cue",
+        )
+    text = raw_bytes.decode("utf-8", "replace").replace("\r", "")
+
+    cues = parse_srt_text(text)
+    if not cues:
+        report.add("error", "parse", name, "no cues could be parsed")
+        return report
+
+    previous_end: Optional[float] = None
+    for number, cue in enumerate(cues, 1):
+        location = _cue_location(name, number)
+        if cue.end <= cue.start:
+            report.add(
+                "error", "cue_time", location,
+                "cue ends at or before it starts (%.3f to %.3f)"
+                % (cue.start, cue.end),
+            )
+        elif cue.duration() < MIN_CUE_SEC:
+            report.add(
+                "warn", "cue_time", location,
+                "cue lasts only %.3f seconds" % cue.duration(),
+            )
+        if (
+            previous_end is not None
+            and cue.start < previous_end - CUE_OVERLAP_TOLERANCE_SEC
+        ):
+            report.add(
+                "error", "cue_order", location,
+                "cue starts at %.3f, before the previous cue ended (%.3f)"
+                % (cue.start, previous_end),
+            )
+        previous_end = max(previous_end or 0.0, cue.end)
+        if not cue.text.strip():
+            report.add("error", "cue_text", location, "cue has no text")
+
+    numbers = cue_index_numbers(text)
+    if numbers and numbers != list(range(1, len(numbers) + 1)):
+        report.add(
+            "error", "numbering", name,
+            "cue numbering is not 1..%d in order" % len(numbers),
+        )
+
+    for loop in hallucination.find_loops(cues):
+        report.add("warn", "loop", name, loop.message())
+
+    raw = target.with_name(target.stem + RAW_SUFFIX)
+    sidecar = target.with_name(target.stem + CORRECTIONS_SUFFIX)
+    if raw.exists() != sidecar.exists():
+        report.add(
+            "error", "corrections", name,
+            "the transcribe stage writes %s and %s together; only one is present"
+            % (raw.name, sidecar.name),
+        )
+    return report
+
+
 def cue_index_numbers(text: str) -> List[int]:
     """The cue index lines: a bare number immediately before a timecode line.
 
@@ -1060,7 +1153,86 @@ def _rule_placeholder(
                 break
 
 
+# ==========================================================================
+# stage acceptance: check --all
+# ==========================================================================
+# One stem, every stage that has something to check. "Applicable" is decided by
+# what is on disk rather than by a flag: a lecture whose note has not been
+# written yet is not failing the note stage, it simply has not reached it, and
+# reporting an error for a file the pipeline has not produced yet would make
+# `check --all` useless as a progress check.
+
+#: Suffix each stage's target carries, in pipeline order. ``note`` is checked
+#: against the canonical JSON, so it shares ``json``'s target and names the note
+#: separately.
+STAGE_SUFFIXES: Tuple[Tuple[str, str], ...] = (
+    ("transcribe", ".srt"),
+    ("frames", ".frames.json"),
+    ("json", ".json"),
+    ("note", ".v4.md"),
+)
+
+
+def stem_path(target: Path) -> Path:
+    """The stem behind any of a lecture's files, given any one of them.
+
+    Accepts the bare stem (``lectures/2024 talk``) as well as a real file, so a
+    caller can pass whatever it has. The suffix list is ordered longest first:
+    ``.frames.json`` must be stripped whole, not left as ``.frames``.
+    """
+    path = Path(target)
+    for suffix in (".frames.json", ".frames_ocr.json", ".v4.md", ".json", ".srt"):
+        if path.name.endswith(suffix):
+            return path.with_name(path.name[: -len(suffix)])
+    return path
+
+
+def stage_targets(target: Path) -> Dict[str, Path]:
+    """Each stage's target file for one stem, whether or not it exists."""
+    base = stem_path(target)
+    return {
+        stage: base.with_name(base.name + suffix)
+        for stage, suffix in STAGE_SUFFIXES
+    }
+
+
+def check_all(
+    target: Path, style: Optional[str] = None, profile: Optional[str] = None
+) -> List[StageReport]:
+    """Run every stage check whose target exists, in pipeline order."""
+    targets = stage_targets(target)
+    reports: List[StageReport] = []
+    if targets["transcribe"].is_file():
+        reports.append(check_transcribe_stage(targets["transcribe"]))
+    if targets["frames"].is_file():
+        reports.append(check_frames(targets["frames"]))
+    if targets["json"].is_file():
+        reports.append(check_json(targets["json"]))
+        if targets["note"].is_file():
+            reports.append(check_note_stage(
+                targets["json"],
+                targets["note"],
+                transcript=(
+                    targets["transcribe"]
+                    if targets["transcribe"].is_file() else None
+                ),
+                style=style,
+                profile=profile,
+            ))
+    return reports
+
+
+def worst_exit_code(reports: Sequence[StageReport]) -> int:
+    """The maximum of the stage exit codes, which is the contract for --all."""
+    return max([report.exit_code() for report in reports] or [0])
+
+
 __all__ = [
+    "STAGE_SUFFIXES",
+    "check_all",
+    "stage_targets",
+    "stem_path",
+    "worst_exit_code",
     "CLOCK_TOLERANCE_SEC",
     "CORRECTIONS_SUFFIX",
     "CORRECTION_HEADER",
@@ -1100,6 +1272,7 @@ __all__ = [
     "check_path",
     "check_segments",
     "check_transcribe",
+    "check_transcribe_stage",
     "cue_index_numbers",
     "collect_targets",
     "exit_code",

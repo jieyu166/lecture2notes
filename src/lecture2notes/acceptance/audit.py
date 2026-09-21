@@ -8,10 +8,16 @@ The mechanical check prints for a human. This produces a record: a JSON report
 with counts, findings and the hash of every input it looked at, so a run can be
 compared against a later one.
 
-The derivative comparison is the part that matters. A viewer, a chapter file and
-a note are all projections of the canonical JSON, and the only way to know they
+The derivative comparison is the part that matters. A viewer and a chapter file
+are mechanical projections of the canonical JSON, and the only way to know they
 still agree with it is to regenerate them and compare. Anything else is trusting
 that whoever edited the JSON last also re-ran everything.
+
+The note is not such a projection. It starts as a skeleton and a language model
+expands it in place, so comparing it against any renderer's output would report
+a mismatch on every correct lecture. Only its spine -- which segments it covers,
+in what order -- is decidable from outside the prose, and that is what is
+compared; the writing is `check note`'s business.
 """
 
 from __future__ import annotations
@@ -23,7 +29,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from lecture2notes.notes.render import render_note
 from lecture2notes.notes.rules import validate_segment_content
 from lecture2notes.outputs.pbf import pbf_text
 from lecture2notes.schema.io import write_json_atomic
@@ -163,23 +168,71 @@ def compare_derived(
                     path=str(pbf_path),
                 ))
     if note_path is not None:
-        note_path = Path(note_path)
-        if not note_path.is_file():
-            findings.append(Finding(
-                "error", "note_missing", "note is missing", path=str(note_path)
-            ))
-        else:
-            try:
-                actual_text = note_path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                actual_text = ""
-            if actual_text != render_note(data):
-                findings.append(Finding(
-                    "error", "note_content_mismatch",
-                    "note content differs from the canonical JSON",
-                    path=str(note_path),
-                ))
+        findings.extend(compare_note_structure(data, note_path))
     return findings
+
+
+def note_spine(data: Mapping[str, Any]) -> List[str]:
+    """The segment headings the canonical JSON implies, as the skeleton writes them."""
+    segments = data.get("segments") if isinstance(data.get("segments"), list) else []
+    spine: List[str] = []
+    for position, segment in enumerate(segments, 1):
+        if not isinstance(segment, Mapping):
+            continue
+        title = segment.get("title")
+        spine.append("%d、%s" % (position, title if isinstance(title, str) else ""))
+    return spine
+
+
+def compare_note_structure(data: Mapping[str, Any], note_path: Path) -> List[Finding]:
+    """Does the note still cover the canonical JSON's segments, in its order?
+
+    This used to compare the note byte for byte against ``render_note``, which
+    could only ever hold for a note nobody had touched. The product's note is a
+    skeleton that a language model expands in place, so every published note
+    differs from any renderer's output: the comparison reported a mismatch on
+    every correct lecture and would have reported one on an incorrect lecture
+    too. A check that fires either way decides nothing.
+
+    What is decidable from outside the prose is the spine -- which segments the
+    note covers and in what order. The writing itself is judged by `check note`
+    against the guideline; a note that silently lost or reordered a segment is a
+    structural error that nothing else would catch.
+    """
+    from lecture2notes.acceptance import check
+
+    note_path = Path(note_path)
+    if not note_path.is_file():
+        return [Finding(
+            "error", "note_missing", "note is missing", path=str(note_path)
+        )]
+    try:
+        text = note_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return [Finding(
+            "error", "note_unreadable", "note is unreadable: %s" % exc,
+            path=str(note_path),
+        )]
+
+    lines = check.note_lines(text)
+    regions = check.note_regions(lines)
+    if "note" not in regions:
+        return [Finding(
+            "error", "note_body_missing",
+            "the note has no '# Note (layer 1-3)' section to compare",
+            path=str(note_path),
+        )]
+
+    actual = [title for title, _, _ in check.segment_sections(lines, regions["note"])]
+    expected = note_spine(data)
+    if actual == expected:
+        return []
+    return [Finding(
+        "error", "note_segment_mismatch",
+        "note sections do not match the canonical JSON's segments: "
+        "expected %r, found %r" % (expected, actual),
+        path=str(note_path),
+    )]
 
 
 def audit_lecture(
@@ -296,15 +349,83 @@ def write_report(path: Path, report: AuditReport, guideline_version: str = "") -
     return destination
 
 
+# ==========================================================================
+# the structured report behind `l2n check --all --report`
+# ==========================================================================
+# The console output of the stage checks is for a person reading one run. This
+# is the other consumer: a file an agent or a CI step reads back. The two must
+# not drift, so the report is assembled from the very same StageReport objects
+# the console printed -- there is no second pass over the lecture and no second
+# set of rules that could disagree with the first.
+
+#: The four keys the specification names for a finding in the report. ``rule``
+#: rather than ``code`` because that is the word the contract line uses.
+FINDING_KEYS = ("severity", "rule", "location", "message")
+
+#: Both spellings of the warning severity count as warnings. The stage checks
+#: emit ``warn`` and the ported schema validator emits ``warning``; a summary
+#: that counted only one of them would under-report, which is the one failure
+#: mode a summary must not have.
+WARNING_SEVERITIES = ("warn", "warning")
+
+
+def finding_row(finding: Finding, default_location: str) -> Dict[str, Any]:
+    """One finding in report shape: severity, rule, location, message."""
+    return {
+        "severity": finding.severity,
+        "rule": finding.code,
+        "location": finding.location or default_location,
+        "message": finding.message,
+    }
+
+
+def stage_report_payload(
+    reports: Sequence[Any],
+    stem: str = "",
+    guideline_version: str = "",
+) -> Dict[str, Any]:
+    """The `check --all` report: version, per-stage findings, and a summary.
+
+    ``summary.errors`` is counted from the rows that were written, not from the
+    reports' own tallies, so the number in the file always describes the file.
+    """
+    stages: Dict[str, Any] = {}
+    errors = 0
+    warnings = 0
+    for report in reports:
+        rows = [finding_row(f, report.target) for f in report.findings]
+        errors += sum(1 for row in rows if row["severity"] == "error")
+        warnings += sum(1 for row in rows if row["severity"] in WARNING_SEVERITIES)
+        stages[report.stage] = {"target": report.target, "findings": rows}
+    return {
+        "guideline_version": guideline_version,
+        "stem": stem,
+        "stages": stages,
+        "summary": {"errors": errors, "warnings": warnings},
+    }
+
+
+def write_stage_report(path: Path, payload: Mapping[str, Any]) -> Path:
+    """Write the `check --all` report atomically, UTF-8 without a BOM."""
+    return write_json_atomic(path, dict(payload))
+
+
 __all__ = [
     "AuditReport",
+    "FINDING_KEYS",
     "FRAME_TARGET",
     "SNAPSHOT_RE",
+    "WARNING_SEVERITIES",
     "audit_course",
     "audit_lecture",
     "canonical_snapshot",
     "compare_derived",
+    "compare_note_structure",
+    "note_spine",
     "file_sha256",
+    "finding_row",
     "snapshot_from_payload",
+    "stage_report_payload",
     "write_report",
+    "write_stage_report",
 ]
