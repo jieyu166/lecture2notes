@@ -104,7 +104,9 @@ def signature_from_image(path: Path, size: Tuple[int, int] = SIGNATURE_SIZE) -> 
     module = _deps.require_module("pillow", import_name="PIL.Image")
     with module.open(str(path)) as image:
         thumbnail = image.convert("L").resize(size)
-        return tuple(thumbnail.getdata())
+        # ``tobytes`` on a mode-L image is one byte per pixel in row order, which
+        # is exactly the signature and, unlike ``getdata``, is not deprecated.
+        return tuple(thumbnail.tobytes())
 
 
 __all__ = [

@@ -107,7 +107,10 @@ def build_document(
             "summary_zh": summary,
             "bullets_zh": list(bullets),
             "frame": frame,
-            "frames": inside if inside else ([frame] if frame else []),
+            # ``frames`` lists only what actually falls inside the segment, so an
+            # inherited lead frame never makes it look as if capture found
+            # something here.
+            "frames": inside,
         })
 
     return {
