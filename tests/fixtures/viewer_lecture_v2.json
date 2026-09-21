@@ -1,0 +1,72 @@
+{
+  "schema_version": "2.0",
+  "stem": "placeholder-lecture",
+  "title": "佔位講座（測試用）",
+  "duration_sec": 900,
+  "source": {
+    "video": "placeholder-lecture.mp4",
+    "subtitle": {
+      "path": "placeholder-lecture.srt",
+      "origin": "asr",
+      "engine": "breeze_ct2",
+      "lang": "zh",
+      "offset_model": null
+    }
+  },
+  "profile": "generic",
+  "overall_summary_zh": "佔位全片摘要，內容全為虛構，僅供結構測試使用。",
+  "takeaways_zh": [
+    "佔位全片重點第一條",
+    "佔位全片重點第二條",
+    "佔位全片重點第三條",
+    "佔位全片重點第四條"
+  ],
+  "segments": [
+    {
+      "index": 1,
+      "start_time": "00:00:00",
+      "end_time": "00:13:00",
+      "start_sec": 0,
+      "end_sec": 780,
+      "title": "段落一 佔位標題",
+      "summary_zh": "佔位段落摘要一，僅用於驗證結構。",
+      "bullets_zh": [
+        {"text": "佔位條列 1-A，沒有時間碼", "t": null, "kind": "synthesis"},
+        {"text": "佔位條列 1-B，沒有時間碼", "t": null, "kind": "synthesis"}
+      ],
+      "quotes_zh": [
+        {"text": "佔位原話一", "t": 120}
+      ],
+      "frame": "frames/placeholder-lecture-0200.png",
+      "frames": ["frames/placeholder-lecture-0200.png"],
+      "frame_ocr": [
+        {"frame": "frames/placeholder-lecture-0200.png", "text": "佔位投影片文字一"}
+      ],
+      "editorial_notes_zh": []
+    },
+    {
+      "index": 2,
+      "start_time": "00:13:00",
+      "end_time": "00:15:00",
+      "start_sec": 780,
+      "end_sec": 900,
+      "title": "段落二 佔位標題",
+      "summary_zh": "佔位段落摘要二，僅用於驗證結構。",
+      "bullets_zh": [
+        {"text": "佔位條列 2-A，帶有真實時間碼", "t": 812.5, "kind": "synthesis"},
+        {"text": "佔位條列 2-B，沒有時間碼", "t": null, "kind": "synthesis"}
+      ],
+      "quotes_zh": [
+        {"text": "佔位原話二", "t": 840}
+      ],
+      "frame": "frames/placeholder-lecture-1330.png",
+      "frames": ["frames/placeholder-lecture-1330.png"],
+      "frame_ocr": [
+        {"frame": "frames/placeholder-lecture-1330.png", "text": "佔位投影片文字二"}
+      ],
+      "editorial_notes_zh": []
+    }
+  ],
+  "corrections": [],
+  "unverified_terms": []
+}

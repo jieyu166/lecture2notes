@@ -19,6 +19,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
+from urllib.parse import unquote
 
 from lecture2notes import __version__, _deps, _out, exit_codes
 from lecture2notes.acceptance import check
@@ -33,6 +34,9 @@ from lecture2notes.frames import curation as curation_mod
 from lecture2notes.frames import ocr as ocr_mod
 from lecture2notes.frames import scene as scene_mod
 from lecture2notes.frames.manifest import read_manifest, write_manifest
+from lecture2notes.outputs import hub as hub_mod
+from lecture2notes.outputs import pbf as pbf_mod
+from lecture2notes.outputs import viewer as viewer_mod
 from lecture2notes.schema.io import read_json, write_json_atomic
 from lecture2notes.schema.migrate import migrate_file
 
@@ -351,18 +355,104 @@ def cmd_render(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+def _emit_plan(stage: str, planned) -> int:
+    """Print what a real run would write, then stop. Writes nothing itself."""
+    for item in planned:
+        _out.line("%s %s" % (stage, item.line()))
+    if not planned:
+        _out.line("%s nothing to write" % stage)
+    return exit_codes.OK
+
+
+def _load_document(target: Optional[str], what: str):
+    """Read a canonical JSON, reporting the usage or parse error itself."""
+    path = _existing_path(target, what)
+    if path is None:
+        return None, None
+    try:
+        data = read_json(path)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        _out.error("%s：JSON 無法解析 %s（%s）" % (what, path.name, exc))
+        return None, None
+    if not isinstance(data, dict):
+        _out.error("%s：JSON 最外層必須是物件 %s" % (what, path.name))
+        return None, None
+    return path, data
+
+
 def cmd_viewer(args: argparse.Namespace) -> int:
-    not_implemented("viewer")
+    path, data = _load_document(getattr(args, "json_file", None), "viewer")
+    if path is None:
+        return exit_codes.ERROR
+    if getattr(args, "preflight", False):
+        return _emit_plan("viewer", viewer_mod.preflight(path))
+    if not (data.get("segments") or []):
+        _out.error("viewer：JSON 沒有 segments，無法產生頁面")
+        return exit_codes.ERROR
+    destination = viewer_mod.viewer_path(path)
+    if destination.exists() and not getattr(args, "force", False):
+        _out.skip("viewer: %s 已存在（--force 重做）" % destination.name)
+        return exit_codes.OK
+    result = viewer_mod.build(path, data)
+    if not result["video"]:
+        _out.warn("viewer：找不到影片檔，頁面的播放器沒有來源")
+    _out.ok(
+        "viewer: %s (%d segments, %d blocks, %d estimated times, %d cues)"
+        % (
+            result["path"].name, result["segments"], result["blocks"],
+            result["estimated"], result["cues"],
+        )
+    )
     return exit_codes.OK
 
 
 def cmd_pbf(args: argparse.Namespace) -> int:
-    not_implemented("pbf")
+    path, data = _load_document(getattr(args, "json_file", None), "pbf")
+    if path is None:
+        return exit_codes.ERROR
+    segments = data.get("segments") or []
+    if not segments:
+        _out.error("pbf：JSON 沒有 segments，無法產生章節")
+        return exit_codes.ERROR
+    stem, note = pbf_mod.match_video_stem(path)
+    destination = path.parent / (stem + ".pbf")
+    if destination.exists() and not getattr(args, "force", False):
+        _out.skip("pbf: %s 已存在（--force 重做）" % destination.name)
+        return exit_codes.OK
+    written = pbf_mod.write_pbf(path, data, out=destination)
+    _out.ok(
+        "pbf: %s (%d chapters, %s)"
+        % (written.name, pbf_mod.chapter_count(data), note)
+    )
     return exit_codes.OK
 
 
 def cmd_hub(args: argparse.Namespace) -> int:
-    not_implemented("hub")
+    folder = getattr(args, "folder", None)
+    if not folder:
+        _out.error("hub 需要一個課程資料夾路徑")
+        return exit_codes.ERROR
+    root = Path(folder)
+    if not root.is_dir():
+        _out.error("hub：不是資料夾 %s" % root)
+        return exit_codes.ERROR
+    if getattr(args, "preflight", False):
+        return _emit_plan("hub", hub_mod.preflight(root))
+    result = hub_mod.build(root, title=getattr(args, "title", None))
+    if not result["cards"]:
+        _out.error("hub：資料夾裡沒有可用的正式 JSON")
+        return exit_codes.ERROR
+    _out.ok(
+        "hub: %s (%d lectures, %d index rows)"
+        % (result["path"].name, len(result["cards"]), result["index_rows"])
+    )
+    # Checked after the write, against the links the page actually carries. A
+    # hub full of dead links is worse than no hub: it looks like the lecture is
+    # there and it is not, and nothing else in the pipeline would notice.
+    for href in result["missing"]:
+        _out.error("hub：連結指向不存在的檔案 %s" % unquote(href))
+    if result["missing"]:
+        return exit_codes.ERROR
     return exit_codes.OK
 
 
@@ -629,6 +719,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("viewer", parents=[common], help="產出三層同步 viewer HTML")
     p.add_argument("json_file", nargs="?", help="正式 JSON 路徑")
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="只列出將建立或覆蓋的檔案，不寫入任何東西",
+    )
     p.set_defaults(func=cmd_viewer)
 
     p = sub.add_parser("pbf", parents=[common], help="產出 PotPlayer 章節檔（需在設定開啟）")
@@ -637,6 +732,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("hub", parents=[common], help="產出課程首頁與跨講座搜尋索引")
     p.add_argument("folder", nargs="?", help="課程資料夾")
+    p.add_argument("--title", default=None, help="課程名稱（預設用資料夾名）")
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="只列出將建立或覆蓋的檔案，不寫入任何東西",
+    )
     p.set_defaults(func=cmd_hub)
 
     p = sub.add_parser("check", parents=[common], help="執行各階段的驗收合約")

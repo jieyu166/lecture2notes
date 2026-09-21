@@ -99,10 +99,61 @@ def chapter_count(data: Mapping[str, Any]) -> int:
     return len(data.get("segments") or [])
 
 
+#: What ``outputs.toml`` calls the switch, and what a profile means by "off".
+CONFIG_KEY = "pbf"
+DEFAULT_ENABLED = False
+#: Strings a TOML-ish or command-line value may use for the two states.
+_TRUE_WORDS = ("true", "yes", "on", "1")
+_FALSE_WORDS = ("false", "no", "off", "0", "")
+
+
+def is_enabled(config: Optional[Mapping[str, Any]] = None) -> bool:
+    """Is the chapter file switched on by the effective configuration?
+
+    Pure, and the only place the answer is decided, so ``run`` cannot drift from
+    what ``l2n profile show`` prints. The default is off: a ``.pbf`` beside a
+    video changes what PotPlayer does with that video, and a pipeline that
+    quietly starts rewriting a player's chapter list for everyone is a
+    surprise, not a feature. The built-in generic profile therefore never sets
+    it, and an absent key is a firm ``False`` rather than a maybe.
+
+    Both an already-scoped mapping (``{"pbf": true}``, which is what a parsed
+    ``outputs.toml`` section gives) and a whole config carrying an ``outputs``
+    table are accepted, because the caller should not have to know which layer
+    it is holding.
+    """
+    if not isinstance(config, Mapping):
+        return DEFAULT_ENABLED
+    scope: Mapping[str, Any] = config
+    if CONFIG_KEY not in scope:
+        outputs = config.get("outputs")
+        if isinstance(outputs, Mapping):
+            scope = outputs
+    if CONFIG_KEY not in scope:
+        return DEFAULT_ENABLED
+    value = scope.get(CONFIG_KEY)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _TRUE_WORDS:
+            return True
+        if text in _FALSE_WORDS:
+            return False
+    # Anything else is a malformed switch, and a malformed switch must not be
+    # read as "on" -- that is the direction that writes files nobody asked for.
+    return DEFAULT_ENABLED
+
+
 __all__ = [
+    "CONFIG_KEY",
+    "DEFAULT_ENABLED",
     "DERIVED_SUFFIXES",
     "VIDEO_EXT",
     "chapter_count",
+    "is_enabled",
     "is_lecture_json",
     "iter_lecture_jsons",
     "match_video_stem",
