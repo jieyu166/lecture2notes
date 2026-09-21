@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from lecture2notes import _out
+from lecture2notes.schema.io import write_json_atomic
 
 #: Table sections that are applied automatically. A ``context_sensitive``
 #: section is deliberately never applied: those need a human or an LLM to judge.
@@ -122,12 +123,7 @@ def build_sidecar(
 def write_sidecar(target: Path, payload: Mapping[str, Any]) -> Path:
     """Write ``<stem>.corrections.json`` as UTF-8 without BOM, LF only."""
     path = Path(target).with_suffix(".corrections.json")
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    return path
+    return write_json_atomic(path, payload)
 
 
 def correct_file(

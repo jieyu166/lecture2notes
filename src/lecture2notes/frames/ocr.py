@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from urllib.parse import unquote
 
 from lecture2notes import _deps, _out
+from lecture2notes.schema.io import write_json_atomic
 
 IMG_EXT = (".png", ".jpg", ".jpeg", ".webp")
 ENGINE_NAME = "rapidocr-onnxruntime"
@@ -185,13 +186,7 @@ def read_cache(path: Path) -> Dict[str, Any]:
 
 
 def write_cache(path: Path, cache: Mapping[str, Any]) -> Path:
-    destination = Path(path)
-    destination.write_text(
-        json.dumps(dict(cache), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    return destination
+    return write_json_atomic(path, dict(cache))
 
 
 def merge_ocr_into_segments(

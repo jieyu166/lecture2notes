@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from lecture2notes.notes.render import render_note
 from lecture2notes.notes.rules import validate_segment_content
 from lecture2notes.outputs.pbf import pbf_text
+from lecture2notes.schema.io import write_json_atomic
 from lecture2notes.schema.model import (
     Finding,
     segment_end,
@@ -291,13 +292,7 @@ def write_report(path: Path, report: AuditReport, guideline_version: str = "") -
     """Write the audit as JSON, stamped with the guideline version it applied."""
     payload = report.to_dict()
     payload["guideline_version"] = guideline_version
-    destination = Path(path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    destination = write_json_atomic(path, payload)
     return destination
 
 

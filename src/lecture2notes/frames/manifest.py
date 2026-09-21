@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from urllib.parse import unquote
 
+from lecture2notes.schema.io import write_json_atomic
+
 #: Frames live beside the video in this directory.
 FRAMES_DIRNAME = "frames"
 
@@ -92,13 +94,7 @@ def record_for_file(sec: float, path: Path, base_dir: Path) -> Dict[str, Any]:
 
 def write_manifest(path: Path, records: Sequence[Mapping[str, Any]]) -> Path:
     """UTF-8 without BOM, LF only: a BOM here breaks the browser-side player."""
-    destination = Path(path)
-    destination.write_text(
-        json.dumps(list(records), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    return destination
+    return write_json_atomic(path, list(records))
 
 
 def read_manifest(path: Path) -> List[Dict[str, Any]]:
