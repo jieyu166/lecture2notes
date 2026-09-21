@@ -28,6 +28,8 @@ from lecture2notes.engines import convert
 from lecture2notes.engines import corrections as corrections_mod
 from lecture2notes.engines import pipeline, registry
 from lecture2notes.engines.base import Engine
+from lecture2notes.outputs import viewer as viewer_mod
+from lecture2notes.schema.io import read_json
 from lecture2notes.schema.migrate import migrate_file
 
 LANG_CHOICES = ("zh", "en", "ja", "auto")
@@ -266,8 +268,54 @@ def cmd_render(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+def _emit_plan(stage: str, planned) -> int:
+    """Print what a real run would write, then stop. Writes nothing itself."""
+    for item in planned:
+        _out.line("%s %s" % (stage, item.line()))
+    if not planned:
+        _out.line("%s nothing to write" % stage)
+    return exit_codes.OK
+
+
+def _load_document(target: Optional[str], what: str):
+    """Read a canonical JSON, reporting the usage or parse error itself."""
+    path = _existing_path(target, what)
+    if path is None:
+        return None, None
+    try:
+        data = read_json(path)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        _out.error("%s：JSON 無法解析 %s（%s）" % (what, path.name, exc))
+        return None, None
+    if not isinstance(data, dict):
+        _out.error("%s：JSON 最外層必須是物件 %s" % (what, path.name))
+        return None, None
+    return path, data
+
+
 def cmd_viewer(args: argparse.Namespace) -> int:
-    not_implemented("viewer")
+    path, data = _load_document(getattr(args, "json_file", None), "viewer")
+    if path is None:
+        return exit_codes.ERROR
+    if getattr(args, "preflight", False):
+        return _emit_plan("viewer", viewer_mod.preflight(path))
+    if not (data.get("segments") or []):
+        _out.error("viewer：JSON 沒有 segments，無法產生頁面")
+        return exit_codes.ERROR
+    destination = viewer_mod.viewer_path(path)
+    if destination.exists() and not getattr(args, "force", False):
+        _out.skip("viewer: %s 已存在（--force 重做）" % destination.name)
+        return exit_codes.OK
+    result = viewer_mod.build(path, data)
+    if not result["video"]:
+        _out.warn("viewer：找不到影片檔，頁面的播放器沒有來源")
+    _out.ok(
+        "viewer: %s (%d segments, %d blocks, %d estimated times, %d cues)"
+        % (
+            result["path"].name, result["segments"], result["blocks"],
+            result["estimated"], result["cues"],
+        )
+    )
     return exit_codes.OK
 
 
@@ -514,6 +562,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("viewer", parents=[common], help="產出三層同步 viewer HTML")
     p.add_argument("json_file", nargs="?", help="正式 JSON 路徑")
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="只列出將建立或覆蓋的檔案，不寫入任何東西",
+    )
     p.set_defaults(func=cmd_viewer)
 
     p = sub.add_parser("pbf", parents=[common], help="產出 PotPlayer 章節檔（需在設定開啟）")
@@ -522,6 +575,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("hub", parents=[common], help="產出課程首頁與跨講座搜尋索引")
     p.add_argument("folder", nargs="?", help="課程資料夾")
+    p.add_argument("--title", default=None, help="課程名稱（預設用資料夾名）")
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="只列出將建立或覆蓋的檔案，不寫入任何東西",
+    )
     p.set_defaults(func=cmd_hub)
 
     p = sub.add_parser("check", parents=[common], help="執行各階段的驗收合約")
