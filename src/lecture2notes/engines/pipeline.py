@@ -97,8 +97,8 @@ def transcribe_audio(
         cues.extend(shift_cues(engine.transcribe(window, lang), start))
         try:
             window.unlink()
-        except OSError:  # pragma: no cover - a locked temp file is not fatal
-            pass
+        except OSError as exc:  # pragma: no cover - a locked temp file is not fatal
+            _out.say("warn", "could not remove temp file %s: %s" % (window, exc))
         progress.advance()
     progress.finish()
     return cues

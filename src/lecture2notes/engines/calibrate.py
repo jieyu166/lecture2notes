@@ -30,7 +30,6 @@ tests can calibrate against a fake engine with no model, GPU or network.
 from __future__ import annotations
 
 import difflib
-import json
 import re
 import shutil
 import statistics
@@ -41,6 +40,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from lecture2notes import _out
 from lecture2notes.engines.base import MIN_CUE_DURATION, Cue
+from lecture2notes.schema.io import write_json_atomic
 
 #: Punctuation and whitespace are dropped before matching: the official track and
 #: an ASR run never agree on them, and they would dominate a substring match.
@@ -472,11 +472,7 @@ def write_outputs(
 
     write_srt(official, official_cues)
     write_srt(calibrated, corrected_cues)
-    report_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    write_json_atomic(report_path, report)
     return {"srt": calibrated, "official": official, "report": report_path}
 
 
