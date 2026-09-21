@@ -11,6 +11,7 @@ reads only one of the two files.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -119,6 +120,56 @@ def test_at_least_one_inspired_module_is_checked():
     # Guards against the parametrized test above silently collecting zero
     # cases if the table's markdown format ever changes shape.
     assert len(_INSPIRED_ROWS) >= 5
+
+
+# "Counts: 7 inspired, 15 ported-from-rad-workflow, 31 original — 53 modules total."
+COUNTS_RE = re.compile(
+    r"^Counts:\s*(?P<inspired>\d+)\s+inspired,\s*"
+    r"(?P<ported>\d+)\s+ported-from-rad-workflow,\s*"
+    r"(?P<original>\d+)\s+original\s*\W+\s*(?P<total>\d+)\s+modules total\.",
+    re.M,
+)
+
+
+def test_counts_line_matches_the_table_it_summarises(attribution_text, attribution_rows):
+    """The summary line is hand-written, so it goes stale unless a test reads it.
+
+    Two separate merges have now landed new modules with the Counts line left
+    at its old numbers, which makes the one line most readers actually read the
+    only wrong thing in the file. Recompute it from the table every run.
+    """
+    m = COUNTS_RE.search(attribution_text)
+    assert m, "ATTRIBUTION.md has no parseable 'Counts:' line"
+
+    stated = {
+        "inspired": int(m.group("inspired")),
+        "ported-from-rad-workflow": int(m.group("ported")),
+        "original": int(m.group("original")),
+    }
+    actual = Counter(row["relation"] for row in attribution_rows)
+
+    assert dict(actual) == stated, (
+        "Counts line disagrees with the table: line says %s, table has %s"
+        % (stated, dict(actual))
+    )
+
+    stated_total = int(m.group("total"))
+    assert stated_total == len(attribution_rows), (
+        "Counts line says %d modules total but the table has %d rows"
+        % (stated_total, len(attribution_rows))
+    )
+    assert stated_total == sum(stated.values()), (
+        "Counts line's own three numbers sum to %d, not the %d it claims"
+        % (sum(stated.values()), stated_total)
+    )
+
+
+def test_counts_line_relations_cover_every_relation_used(attribution_rows):
+    # A new relation word would otherwise slip past the equality above only by
+    # making the regex fail to match, which is a confusing way to learn it.
+    known = {"inspired", "ported-from-rad-workflow", "original"}
+    used = {row["relation"] for row in attribution_rows}
+    assert used <= known, "unknown relation(s) in the table: %s" % sorted(used - known)
 
 
 def test_notice_contains_upstream_copyright_line(notice_text):

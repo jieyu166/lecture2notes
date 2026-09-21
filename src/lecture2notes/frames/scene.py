@@ -32,6 +32,9 @@ DEFAULT_CONTENT_THRESHOLD = 27.0
 DEFAULT_FFMPEG_THRESHOLD = 0.3
 DETECTORS = ("adaptive", "content", "ffmpeg")
 
+#: Characters of raw ffprobe output echoed when the duration will not parse.
+DURATION_PREVIEW = 200
+
 #: Printed verbatim when PySceneDetect is missing. The wording is part of the
 #: frame-capture contract, so it is a constant rather than an inline literal: a
 #: silent downgrade produces a lecture with four frames and no explanation, and
@@ -88,6 +91,15 @@ def get_duration(video_path: Path) -> float:
     try:
         return float(result.stdout.strip())
     except (TypeError, ValueError):
+        # A silent 0.0 here becomes "0 frames captured" three layers down, with
+        # nothing left to say why. Print what ffprobe actually said instead.
+        raw = (result.stdout or "").strip() or "(empty stdout)"
+        detail = (result.stderr or "").strip()
+        _out.say("warn", "ffprobe duration unparseable for %s: %s%s" % (
+            Path(video_path).name,
+            raw[:DURATION_PREVIEW],
+            ("; stderr: " + detail[:DURATION_PREVIEW]) if detail else "",
+        ))
         return 0.0
 
 
@@ -178,6 +190,7 @@ __all__ = [
     "find_video",
     "get_duration",
     "mark",
+    "DURATION_PREVIEW",
     "parse_ffmpeg_scene_output",
     "video_stem",
 ]

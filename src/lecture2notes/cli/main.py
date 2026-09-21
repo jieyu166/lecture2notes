@@ -308,14 +308,20 @@ def cmd_frames(args: argparse.Namespace) -> int:
     if getattr(args, "curate", False):
         return _curate_frames(source, args)
 
-    result = capture_mod.capture(
-        source,
-        mode=getattr(args, "mode", "scene"),
-        every=getattr(args, "every", 45.0),
-        diff_min=getattr(args, "diff_min", 4.0),
-        width=getattr(args, "width", scene_mod.DEFAULT_WIDTH),
-        stage=getattr(args, "stage", False),
-    )
+    try:
+        result = capture_mod.capture(
+            source,
+            mode=getattr(args, "mode", "scene"),
+            every=getattr(args, "every", 45.0),
+            diff_min=getattr(args, "diff_min", 4.0),
+            width=getattr(args, "width", scene_mod.DEFAULT_WIDTH),
+            stage=getattr(args, "stage", False),
+        )
+    except capture_mod.DurationUnknown as exc:
+        # Nothing was written: an unknown duration is a usage-level error, not
+        # a run that happened to find no frames.
+        _out.error("frames: %s" % exc)
+        return exit_codes.ERROR
     if not result.kept:
         _out.error("frames: capture produced no frames")
         return exit_codes.ERROR

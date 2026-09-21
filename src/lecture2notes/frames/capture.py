@@ -93,6 +93,16 @@ def frames_dir_for(base_dir: Path, stage: bool = False) -> Path:
     return base / STAGING_DIRNAME / FRAMES_DIRNAME if stage else base / FRAMES_DIRNAME
 
 
+class DurationUnknown(RuntimeError):
+    """Interval mode was asked to sample a video of unknown length.
+
+    ``get_duration`` returns 0.0 when ffprobe says nothing it can parse, and
+    ``plan_marks(0.0, every)`` is legitimately empty. Letting that through
+    produces a successful-looking run with zero frames, so interval mode stops
+    here instead and the caller reports it as the contract error it is.
+    """
+
+
 def plan_seconds(
     video: Path,
     mode: str = "scene",
@@ -105,6 +115,11 @@ def plan_seconds(
         raise ValueError("unknown capture mode: %s" % mode)
     if mode == "interval":
         duration = scene_mode.get_duration(video)
+        if duration <= 0:
+            raise DurationUnknown(
+                "interval mode needs the video duration; ffprobe gave none for %s"
+                % Path(video).name
+            )
         return [float(second) for second in interval_mode.plan_marks(duration, every)]
     marks = scene_mode.detect_scenes(video, detector=detector, threshold=threshold)
     seconds: List[float] = []
@@ -165,10 +180,14 @@ def capture(
     root = Path(base_dir) if base_dir is not None else source.parent
     stem = scene_mode.video_stem(source)
     frames_dir = frames_dir_for(root, stage)
+
+    # Planned before anything is created: a mode that refuses to plan (see
+    # DurationUnknown) must not leave an empty frames/ behind as evidence of a
+    # run that never happened.
+    planned = plan_frames(stem, plan_seconds(source, mode, every, detector, threshold))
+
     frames_dir.mkdir(parents=True, exist_ok=True)
     grab = extract or scene_mode.extract_frame
-
-    planned = plan_frames(stem, plan_seconds(source, mode, every, detector, threshold))
     result = CaptureResult(
         video=source,
         stem=stem,
@@ -238,6 +257,7 @@ __all__ = [
     "MODES",
     "STAGING_DIRNAME",
     "CaptureResult",
+    "DurationUnknown",
     "capture",
     "curation_path_for",
     "document_path_for",

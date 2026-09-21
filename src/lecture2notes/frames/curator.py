@@ -140,7 +140,10 @@ def measure_frame_quality(path: Path, size: int = QUALITY_SIZE) -> Dict[str, Any
     ]
     try:
         process = subprocess.run(command, capture_output=True, check=False, timeout=30)
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        # The frame still becomes an unreadable candidate, as before; the run
+        # just stops swallowing the reason it could not be measured.
+        _out.say("warn", "curate: ffmpeg could not measure %s (%s)" % (path.name, exc))
         process = None
     pixels = process.stdout if process is not None and process.returncode == 0 else b""
     return quality_from_pixels(list(pixels), size)
