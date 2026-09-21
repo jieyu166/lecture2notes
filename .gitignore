@@ -1,0 +1,86 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+cover/
+.env
+.venv/
+env/
+venv/
+ENV/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.ruff_cache/
+.idea/
+.vscode/
+
+# --- Pipeline working directories ---
+frames/
+staging/
+.agent-reports/
+
+# ...but the package subpackage of the same name must stay tracked.
+!src/lecture2notes/frames/
+
+# --- Pipeline artifacts ---
+*.srt
+*.vtt
+*.pbf
+*.viewer.html
+*.frames.json
+*.frames_ocr.json
+*.corrections.json
+*.bak
+.installed.json
+
+# --- Media (never commit lecture material) ---
+*.mp4
+*.webm
+*.mkv
+*.mov
+*.m4v
+*.avi
+*.wav
+*.mp3
+*.m4a
+*.flac
+
+# Test fixtures are the only media allowed in the repository.
+!tests/fixtures/*.mp4
+
+# --- OS ---
+Thumbs.db
+.DS_Store
