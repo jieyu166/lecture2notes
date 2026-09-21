@@ -13,11 +13,15 @@ Exit codes (see ``lecture2notes.exit_codes``):
 from __future__ import annotations
 
 import argparse
+import inspect
 import sys
-from typing import Callable, List, Optional, Sequence
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from lecture2notes import __version__, _deps, _out, exit_codes
-from lecture2notes.engines import registry
+from lecture2notes.engines import corrections as corrections_mod
+from lecture2notes.engines import pipeline, registry
+from lecture2notes.engines.base import Engine
 
 LANG_CHOICES = ("zh", "en", "ja", "auto")
 LANG_REQUIRED_MESSAGE = "--lang is required (zh|en|ja|auto)"
@@ -93,6 +97,74 @@ def require_lang(args: argparse.Namespace) -> str:
 
 
 # --------------------------------------------------------------------------
+# engine resolution
+# --------------------------------------------------------------------------
+#: Maps a CLI flag onto the constructor keyword an engine would call it.
+ENGINE_OPTION_FLAGS = {
+    "model": "model",
+    "model_dir": "model_dir",
+    "aligner_dir": "aligner_dir",
+    "backend": "backend",
+    "whisper_cpp_bin": "binary",
+    "whisper_cpp_model": "model",
+}
+
+
+def engine_options(args: argparse.Namespace, factory) -> Dict[str, Any]:
+    """Which of the engine flags this particular backend actually accepts.
+
+    Flags are filtered against the constructor rather than hard-coded per engine
+    name, so a third-party engine gets the same treatment as a shipped one.
+    """
+    try:
+        accepted = set(inspect.signature(factory).parameters)
+    except (TypeError, ValueError):  # pragma: no cover - exotic callables
+        accepted = set(ENGINE_OPTION_FLAGS.values())
+    options: Dict[str, Any] = {}
+    for flag, keyword in ENGINE_OPTION_FLAGS.items():
+        value = getattr(args, flag, None)
+        if value in (None, ""):
+            continue
+        if keyword in accepted:
+            options[keyword] = value
+    return options
+
+
+def resolve_engine(args: argparse.Namespace) -> Engine:
+    """Build the requested engine, refusing a cloud one without --allow-cloud."""
+    name = getattr(args, "engine", None) or registry.DEFAULT_ENGINE
+    try:
+        factory = registry._get(name)
+    except KeyError as exc:
+        _out.error(str(exc).strip("'"))
+        raise SystemExit(exit_codes.ERROR)
+    options = engine_options(args, factory)
+    # whisper.cpp names its ggml file with --whisper-cpp-model, so a bare
+    # --model must not silently become the path to a model file.
+    if name == "whisper_cpp" and getattr(args, "whisper_cpp_model", None):
+        options["model"] = args.whisper_cpp_model
+    try:
+        return registry.create(
+            name, allow_cloud=getattr(args, "allow_cloud", False), **options
+        )
+    except registry.CloudEngineBlocked as exc:
+        _out.error(str(exc))
+        raise SystemExit(exit_codes.ERROR)
+
+
+def load_corrections(args: argparse.Namespace):
+    """Read the correction table, or return None when none was asked for."""
+    table = getattr(args, "corrections", None)
+    if not table:
+        return None, None
+    path = Path(table)
+    if not path.is_file():
+        _out.error("corrections table not found: %s" % path)
+        raise SystemExit(exit_codes.ERROR)
+    return corrections_mod.load_table_file(path), str(path)
+
+
+# --------------------------------------------------------------------------
 # stage handlers
 # --------------------------------------------------------------------------
 def cmd_transcribe(args: argparse.Namespace) -> int:
@@ -100,9 +172,31 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
         for text in registry.engine_lines():
             _out.line(text)
         return exit_codes.OK
-    require_lang(args)
+    lang = require_lang(args)
+    video = getattr(args, "video", None)
+    if not video:
+        _out.error("transcribe needs a video or audio file")
+        return exit_codes.ERROR
+    source = Path(video)
+    if not source.is_file():
+        _out.error("no such file: %s" % source)
+        return exit_codes.ERROR
     _deps.require("ffmpeg")
-    not_implemented("transcribe")
+    engine = resolve_engine(args)
+    pairs, table_path = load_corrections(args)
+    result = pipeline.transcribe_video(
+        source,
+        lang,
+        engine,
+        pairs=pairs,
+        table_path=table_path,
+        s2t=not getattr(args, "no_s2t", False),
+        force=getattr(args, "force", False),
+        chunk_sec=getattr(args, "chunk_sec", None),
+    )
+    if result.skipped:
+        return exit_codes.OK
+    _out.ok("transcribe: %s" % ", ".join(p.name for p in result.outputs()))
     return exit_codes.OK
 
 
@@ -214,6 +308,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--whisper-cpp-model", default=None, help="whisper.cpp 的 ggml 模型檔路徑"
+    )
+    p.add_argument(
+        "--corrections", default=None, help="對照表 JSON 路徑（套用後寫 raw 與 sidecar）"
+    )
+    p.add_argument(
+        "--no-s2t", action="store_true", help="不做簡轉繁（預設會轉）"
+    )
+    p.add_argument(
+        "--chunk-sec",
+        type=float,
+        default=None,
+        dest="chunk_sec",
+        help="把音訊切成這麼長的區塊逐段轉錄（給無法吃長音訊的後端）",
     )
     p.add_argument(
         "--list-engines",
@@ -349,6 +456,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except _deps.MissingDependency as exc:
         exc.report()
         return exit_codes.MISSING_DEPENDENCY
+    except RuntimeError as exc:
+        # An external tool or an engine failed. The message already says what
+        # and where, so print it as an error instead of a traceback.
+        _out.error(str(exc))
+        return exit_codes.ERROR
     except SystemExit as exc:
         code = exc.code
         return exit_codes.OK if code is None else int(code)

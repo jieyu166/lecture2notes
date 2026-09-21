@@ -115,7 +115,9 @@ def build_sidecar(
         "s2t": {"applied": bool(s2t_applied), "converter": S2T_CONFIG if s2t_applied else None},
         "total_kinds": len(hits),
         "total_hits": sum(int(hit.get("count", 0)) for hit in hits),
-        "applied": [dict(hit) for hit in hits],
+        # The key matches the document's ``corrections[]`` so a later stage can
+        # copy the list across without renaming anything.
+        "corrections": [dict(hit) for hit in hits],
     }
 
 
@@ -138,11 +140,16 @@ def correct_file(
     backup: bool = True,
     sidecar: bool = True,
     table_path: Optional[str] = None,
+    always: bool = False,
 ) -> Dict[str, Any]:
     """Correct a subtitle or transcript file in place, preserving its structure.
 
     Only the text is touched: cue numbers, timecodes and blank lines survive
     because the replacement is a plain string substitution over the whole file.
+
+    ``always`` writes the backup and the sidecar even when no rule fired, which
+    is what the transcribe stage wants: "a table was applied and changed
+    nothing" and "no table was ever applied" must not look the same on disk.
     """
     from lecture2notes.engines.base import read_subtitle_text
 
@@ -160,7 +167,7 @@ def correct_file(
         "backup": None,
         "sidecar": None,
     }
-    if not result["changed"]:
+    if not result["changed"] and not always:
         _out.say("skip", "no change: %s" % source.name)
         return result
 
