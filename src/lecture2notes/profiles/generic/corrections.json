@@ -1,0 +1,9 @@
+{
+  "_about": "ASR correction table for the generic profile. Written for this project; nothing here is carried over from any private vault. Longer keys win, so a specific phrase is replaced before a shorter key can eat part of it.",
+  "_sections": {
+    "deterministic": "Applied automatically. Only put a pair here when the wrong form is never a legitimate word in this domain.",
+    "context_sensitive": "Never applied automatically. Listed so a human or an LLM can judge each occurrence."
+  },
+  "deterministic": {},
+  "context_sensitive": {}
+}

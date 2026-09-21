@@ -46,6 +46,8 @@ INSTALL_HINTS: Dict[str, str] = {
     "faster_whisper": "pip install lecture2notes[breeze]",
     "ctranslate2": "pip install lecture2notes[breeze]",
     "scenedetect": "pip install lecture2notes[scene]",
+    "pillow": "pip install Pillow",
+    "opencc": "pip install opencc-python-reimplemented",
     "whisper_cpp": "build whisper.cpp and pass --whisper-cpp-bin <path to main.exe>",
     "ct2_model": "l2n convert-model --out <dir>",
 }
