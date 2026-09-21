@@ -391,3 +391,100 @@ def test_the_cli_exits_two_on_an_error(lecture, capsys):
 
     assert main(["check", "note", str(json_path)]) == exit_codes.ERROR
     assert "error R1" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# 15.7 -- R5 covers the prose a reader trusts, not only the Note body
+# --------------------------------------------------------------------------
+# The guideline's own appendix used to end with "R5 only looks at lines inside
+# the Note section, so the equally bad bullet in Summary cannot be caught by a
+# machine". A field run then shipped a note whose five Summary bullets were all
+# verbatim transcript, with a clean check report.
+
+def _insert_after_heading(note_path: Path, heading: str, text: str):
+    def transform(lines):
+        at = lines.index(heading)
+        return lines[:at + 1] + ["", text] + lines[at + 1:]
+    _edit(note_path, transform)
+
+
+@pytest.mark.parametrize(
+    "heading, location",
+    [
+        ("# Evergreen Note", "Evergreen Note"),
+        ("# Summary", "Summary"),
+        ("## 題目", "題目"),
+    ],
+)
+def test_r5_reports_a_pasted_run_outside_the_note_body(lecture, heading, location):
+    json_path, note_path = lecture
+    _insert_after_heading(note_path, heading, LONG_RUN[:40])
+
+    report = check.check_note_stage(json_path, note_path)
+
+    hits = [f for f in report.findings if f.code == "R5"]
+    assert [f.location for f in hits] == [location]
+    assert hits[0].severity == "warn"
+
+
+def test_r5_still_exempts_a_marked_quotation_outside_the_note_body(lecture):
+    json_path, note_path = lecture
+    _insert_after_heading(note_path, "# Summary", "「%s」" % LONG_RUN[:120])
+
+    assert "R5" not in _codes(check.check_note_stage(json_path, note_path))
+
+
+def test_r5_still_exempts_a_blockquote_outside_the_note_body(lecture):
+    json_path, note_path = lecture
+    _insert_after_heading(note_path, "# Summary", "> %s" % LONG_RUN[:120])
+
+    assert "R5" not in _codes(check.check_note_stage(json_path, note_path))
+
+
+def test_the_summary_region_stops_before_the_speaker_outline(lecture):
+    json_path, note_path = lecture
+    lines = check.note_lines(note_path.read_text(encoding="utf-8"))
+    regions = check.note_regions(lines)
+
+    start, end = regions["Summary"]
+    assert lines[end].strip() == "## 講者骨架"
+    assert all("講者骨架" not in lines[p] for p in range(start, end))
+
+
+def test_the_skeleton_summary_quotes_takeaways_and_is_not_a_paste(tmp_path):
+    """The skeleton's Summary is `takeaways_zh`, which nobody transcribed.
+
+    R5 growing past the Note body must not turn every unexpanded skeleton into
+    a finding: the takeaways are the model's own synthesis, so the transcript
+    cannot contain them. This fixture makes the transcript long enough for R5
+    to run at all, and asserts the skeleton still comes back clean.
+    """
+    document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    json_path = tmp_path / ("%s.json" % STEM)
+    json_path.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    (tmp_path / "frames").mkdir()
+    (tmp_path / "frames" / "demo-0001.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (tmp_path / ("%s.srt" % STEM)).write_text(
+        "1\n00:00:00,000 --> 00:00:20,000\n%s\n\n" % LONG_RUN, encoding="utf-8"
+    )
+    note_path = tmp_path / ("%s.v4.md" % STEM)
+    note_path.write_text(
+        render_skeleton(document, style="faithful", stem=STEM),
+        encoding="utf-8", newline="\n",
+    )
+
+    summary_at = note_path.read_text(encoding="utf-8").index("# Summary")
+    assert document["takeaways_zh"][0] in note_path.read_text(
+        encoding="utf-8"
+    )[summary_at:]
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+    assert [f for f in report.findings if f.code == "R5"] == []
+
+
+def test_the_guideline_records_the_wider_scope():
+    from lecture2notes.notes.guideline import find_guideline_doc
+
+    text = find_guideline_doc().read_text(encoding="utf-8")
+    assert "guideline_version: 1.2" in text
+    assert "R5 只看 Note 章節內的行" not in text

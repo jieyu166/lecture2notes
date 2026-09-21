@@ -1,6 +1,6 @@
 # 筆記撰寫規範
 
-guideline_version: 1.1
+guideline_version: 1.2
 
 這份規範是 lecture2notes 的產品的一部分，不是內部備忘。`l2n render` 產出的骨架筆記由語言模型就地擴寫，擴寫者可能是 Claude Code、也可能是任何一個讀得懂這份文件的模型；這份文件就是它們之間唯一的合約。
 
@@ -363,7 +363,7 @@ Summary 的條列**直接用 JSON 的 `takeaways_zh`**，不要換句話說。JS
 
 ## 機器可檢查
 
-這一部分由 `l2n check note <stem>.json --note <stem>.v4.md` 執行。報告的第一行會印出這份規範的版本字串（`guideline_version: 1.1`），接著每一個 finding 一行：
+這一部分由 `l2n check note <stem>.json --note <stem>.v4.md` 執行。報告的第一行會印出這份規範的版本字串（`guideline_version: 1.2`），接著每一個 finding 一行：
 
 ```
 <severity> R<n> <location>: <message>
@@ -378,13 +378,26 @@ exit code：`0` 全過、`1` 只有 warning、`2` 有任何 error。
 | **R2** | error | 筆記裡每一個 `![[...]]` 嵌入都解析得到實際存在的檔案（相對於筆記本身）。 |
 | **R3** | error | `unverified_terms` 的每一項都出現在 References，而且都不出現在 Note 本文。 |
 | **R4** | error | References 的 corrections 表存在，而且每一列的 `heard` 與 `correct` 都不是空的。 |
-| **R5** | warning（profile 設 `guideline.transcript_paste = "error"` 時為 error） | Note 本文裡沒有任何一行，含有 40 字以上（去空白與標點後）與逐字稿完全相同、又沒有以「」或引用區塊標示的連續片段。 |
+| **R5** | warning（profile 設 `guideline.transcript_paste = "error"` 時為 error） | **Evergreen Note、Summary、Note 本文、`## 題目`（含答案區）**裡沒有任何一行，含有 40 字以上（去空白與標點後）與逐字稿完全相同、又沒有以「」或引用區塊標示的連續片段。 |
 | **R6** | faithful 風格下為 error；concise 風格下跳過 | 每一個段落章節至少有一行是「」包住的原話或引用區塊。 |
 | **R7** | error | 沒有任何一行符合生效 profile 的 `privacy.toml` 所列的模式。 |
 | **R8** | warning | Note 章節內沒有 `N/A`、`不適用`、`無資料`、`（略）` 之類的補位字串。沒素材就刪掉那一節（見 0.3）。 |
 | **R9** | warning | `## 題目` 節至少有 3 題，而且至少一題標了 `[推論]`。少於 3 題或找不到 `[推論]`，各報一條（見第 5 節）。 |
 
-### R5 的邊界
+### R5 的範圍與邊界
+
+**1.2 起，R5 掃描的範圍從「只有 Note 本文」擴大到讀者會當成結論讀的每一段散文：**
+`# Evergreen Note`、`# Summary`（到 `## 講者骨架` 為止）、`# Note (layer 1-3)`、
+以及 `## 題目`（含答案區）。
+
+改這一條的理由寫在附錄 A：那份失敗樣態的 Summary 有一條和 Note 本文一樣糟的直貼，
+而 1.1 的 R5 看不到它。實地試跑又出現一次同樣的事——五條 Summary 全是逐字稿原句，
+`check note` 卻是乾淨的。**「第一部分（人／LLM 遵守）不能只靠第二部分兜底」這句話仍然成立，
+但機器能看到的範圍不應該小於讀者會相信的範圍。**
+
+豁免方式不變：「」包住的片段會先被扣掉，整行是引用區塊（`>`）就跳過——
+在哪一個章節都一樣。骨架本身不會因此被誤報：Summary 引用的是 `takeaways_zh`，
+那是模型整理過的話，不是逐字稿裡的句子。
 
 逐字稿以同一套正規化方式處理：去掉空白與標點、大小寫與全半形折疊之後再比對。
 
@@ -442,7 +455,7 @@ exit code：`0` 全過、`1` 只有 warning、`2` 有任何 error。
 三個錯分別對應到：
 
 - Evergreen 那一句是逐字稿裡被切斷的半句話，它不是一個觀念（違反第 4 節）。
-- Note 本文第一行是 50 幾字的逐字稿原句，沒有標成引用（違反 2.2）。R5 只看 Note 章節內的行，所以 Summary 裡那條一樣糟糕的條列機器抓不到——這正是為什麼第一部分不能只靠第二部分兜底。
+- Note 本文第一行是 50 幾字的逐字稿原句，沒有標成引用（違反 2.2）。Summary 裡那條一樣糟糕的條列，在 1.1 以前機器抓不到；**1.2 的 R5 已經涵蓋 Summary，兩條都會被報出來**。第一部分仍然不能只靠第二部分兜底——機器數得到形狀，數不到這一句值不值得寫。
 - 「木迪」是「穆迪」、「到窮」是「道瓊」的同音錯字，本文沒改；corrections 表只列了一列，而且 `correct` 是空的（違反 2.4，R4 會抓到那張殘缺的表）。
 
 正確的寫法，同一段內容應該是：
@@ -462,6 +475,6 @@ exit code：`0` 全過、`1` 只有 warning、`2` 有任何 error。
 
 ## 附錄 B：這份規範的版本
 
-`guideline_version: 1.1`
+`guideline_version: 1.2`
 
 版本字串同時定義在 `src/lecture2notes/notes/guideline.py` 的 `GUIDELINE_VERSION`，`l2n check note` 從那裡讀出來印在報告第一行；`tests/test_guideline_doc.py` 會斷言兩邊一致。改規則就要改版本，兩個地方一起改。

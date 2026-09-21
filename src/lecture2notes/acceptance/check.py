@@ -818,13 +818,26 @@ def section_bounds(
     return len(lines)
 
 
-def note_regions(lines: Sequence[str]) -> Dict[str, Tuple[int, int]]:
-    """The two regions the rules talk about: the Note body and References.
+#: Prose sections outside the Note body that R5 also judges, as
+#: ``(region name, heading, heading that ends it or None)``. A transcript
+#: sentence pasted into Summary is the same failure as one pasted into a
+#: segment; the note's own appendix records a Summary bullet that was "just as
+#: bad" and that the machine could not see.
+R5_EXTRA_REGIONS: Tuple[Tuple[str, str, Optional[str]], ...] = (
+    ("Evergreen Note", "# Evergreen Note", None),
+    ("Summary", "# Summary", "## 講者骨架"),
+    ("題目", "## 題目", None),
+)
 
-    The Note body deliberately stops at ``### References`` even though that
-    heading is nested deeper: References is where unverified terms and the
-    correction table are allowed to live, and R3 is exactly the rule that they
-    must not be anywhere else.
+
+def note_regions(lines: Sequence[str]) -> Dict[str, Tuple[int, int]]:
+    """The regions the rules talk about, by name.
+
+    ``note`` and ``references`` are the two R3 and R4 are about; the rest are
+    the prose sections R5 grew to cover. The Note body deliberately stops at
+    ``### References`` even though that heading is nested deeper: References is
+    where unverified terms and the correction table are allowed to live, and R3
+    is exactly the rule that they must not be anywhere else.
     """
     regions: Dict[str, Tuple[int, int]] = {}
     note_at = heading_index(lines, "# Note (layer 1-3)")
@@ -837,6 +850,16 @@ def note_regions(lines: Sequence[str]) -> Dict[str, Tuple[int, int]]:
     if references_at >= 0:
         regions["references"] = (references_at + 1,
                                  section_bounds(lines, references_at))
+    for name, heading, stop_heading in R5_EXTRA_REGIONS:
+        start = heading_index(lines, heading)
+        if start < 0:
+            continue
+        end = section_bounds(lines, start)
+        if stop_heading:
+            stop = heading_index(lines, stop_heading)
+            if 0 <= stop < end:
+                end = stop
+        regions[name] = (start + 1, end)
     return regions
 
 
@@ -1095,9 +1118,18 @@ def _rule_transcript_paste(
                    % size)
         return
     severity = "error" if loader.transcript_paste_severity(profile) == "error" else "warn"
-    for title, start, end in segment_sections(lines, regions["note"]) or [
+    sections = list(segment_sections(lines, regions["note"]) or [
         ("Note (layer 1-3)", *regions["note"])
-    ]:
+    ])
+    # Evergreen, Summary and the answers under 題目 are prose a reader trusts
+    # exactly as much as the Note body, and the guideline's own appendix
+    # records a pasted Summary bullet that "the machine cannot catch". It can
+    # now. The exemptions do not change: a 「」 span or a blockquote is still a
+    # marked quotation wherever it appears.
+    for name, _heading, _stop in R5_EXTRA_REGIONS:
+        if name in regions:
+            sections.append((name, *regions[name]))
+    for title, start, end in sections:
         for position in range(start, end):
             line = lines[position]
             if not line.strip() or line.lstrip().startswith(">"):
@@ -1279,6 +1311,7 @@ __all__ = [
     "PLACEHOLDER_TEXT",
     "QUESTION_LINE",
     "QUOTED_SPAN",
+    "R5_EXTRA_REGIONS",
     "check_note_stage",
     "correction_rows",
     "heading_index",
