@@ -77,3 +77,32 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------------------
+Third-party media -- tests/fixtures/media/copyrightx-12-1-clip.mp4
+--------------------------------------------------------------------------------
+
+The repository contains exactly one video file, used only as an end-to-end test
+fixture:
+
+  tests/fixtures/media/copyrightx-12-1-clip.mp4
+
+It is a 25-second excerpt, re-encoded and scaled down, of:
+
+  William Fisher, CopyrightX, Lecture 12.1, "Remedies: Equitable Relief"
+  Author / speaker: William Fisher (Harvard Law School, CopyrightX)
+  Uploader credited on the source page: BerkmanCenter
+  Source file: https://commons.wikimedia.org/wiki/File:William_Fisher_CopyrightX_Lecture_12_1.webm
+  Direct URL: https://upload.wikimedia.org/wikipedia/commons/8/8b/William_Fisher_CopyrightX_Lecture_12_1.webm
+
+Licensed under the Creative Commons Attribution 3.0 Unported licence
+(CC BY 3.0): https://creativecommons.org/licenses/by/3.0/
+
+Changes made: trimmed to the first 25 seconds, scaled to 640px wide and
+re-encoded to H.264/AAC. The clip is redistributed here under the same CC BY
+3.0 licence. Full provenance, the licence text as it appears on the source
+page, the transcode parameters and the file's sha256 are recorded in
+tests/fixtures/media/README.md.
+
+This licence covers the media file only; it does not apply to the source code
+of this project, which is MIT-licensed (see LICENSE).

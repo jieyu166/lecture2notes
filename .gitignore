@@ -83,9 +83,15 @@ staging/
 # real transcript.
 # The `**` form matters: a plain `tests/fixtures/*.srt` leaves fixtures that
 # live in a per-case subfolder ignored, which silently drops them from a clone.
-!tests/fixtures/**/*.mp4
 !tests/fixtures/**/*.srt
 !tests/fixtures/**/*.vtt
+
+# Exactly one video file is allowed in the repository: the 205 KB CC BY 3.0
+# clip the end-to-end test runs on. It is named in full rather than with a
+# `tests/fixtures/**/*.mp4` wildcard, so that dropping another recording into
+# a fixture folder stays ignored instead of silently becoming committable.
+# Provenance, licence and sha256: tests/fixtures/media/README.md.
+!tests/fixtures/media/copyrightx-12-1-clip.mp4
 
 # --- OS ---
 Thumbs.db
