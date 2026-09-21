@@ -19,6 +19,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
+from urllib.parse import unquote
 
 from lecture2notes import __version__, _deps, _out, exit_codes
 from lecture2notes.acceptance import check
@@ -361,6 +362,13 @@ def cmd_hub(args: argparse.Namespace) -> int:
         "hub: %s (%d lectures, %d index rows)"
         % (result["path"].name, len(result["cards"]), result["index_rows"])
     )
+    # Checked after the write, against the links the page actually carries. A
+    # hub full of dead links is worse than no hub: it looks like the lecture is
+    # there and it is not, and nothing else in the pipeline would notice.
+    for href in result["missing"]:
+        _out.error("hub：連結指向不存在的檔案 %s" % unquote(href))
+    if result["missing"]:
+        return exit_codes.ERROR
     return exit_codes.OK
 
 

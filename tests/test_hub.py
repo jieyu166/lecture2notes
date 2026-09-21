@@ -172,7 +172,12 @@ def test_cli_preflight_writes_nothing(course: Path) -> None:
         }
 
     before = snapshot()
-    result = run_cli(["hub", str(course), "--preflight"])
+    # The listing names a file whose name is Chinese, so the child is pinned to
+    # UTF-8 to match this process's decoder. The cp950 console path is covered
+    # in test_hub_links.
+    result = run_cli(
+        ["hub", str(course), "--preflight"], env={"PYTHONIOENCODING": "utf-8"}
+    )
     assert result.returncode == 0
     assert snapshot() == before
     assert hub.HUB_FILENAME in result.stdout
