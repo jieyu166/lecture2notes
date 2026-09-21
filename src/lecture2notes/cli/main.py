@@ -28,6 +28,12 @@ from lecture2notes.engines import convert
 from lecture2notes.engines import corrections as corrections_mod
 from lecture2notes.engines import pipeline, registry
 from lecture2notes.engines.base import Engine
+from lecture2notes.frames import capture as capture_mod
+from lecture2notes.frames import curation as curation_mod
+from lecture2notes.frames import ocr as ocr_mod
+from lecture2notes.frames import scene as scene_mod
+from lecture2notes.frames.manifest import read_manifest, write_manifest
+from lecture2notes.schema.io import read_json, write_json_atomic
 from lecture2notes.schema.migrate import migrate_file
 
 LANG_CHOICES = ("zh", "en", "ja", "auto")
@@ -243,16 +249,95 @@ def cmd_calibrate_subs(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+def _curate_frames(video: Path, args: argparse.Namespace) -> int:
+    """`l2n frames <video> --curate`: promote staged candidates into frames/.
+
+    The staging manifest is the input and the same path is the output: after
+    promotion ``<stem>.frames.json`` lists the formal frames only, which is what
+    makes "the canonical JSON references only promoted frames" true by
+    construction rather than by convention.
+    """
+    base_dir = video.parent
+    stem = scene_mod.video_stem(video)
+    manifest_path = capture_mod.manifest_path_for(base_dir, stem)
+    if not manifest_path.is_file():
+        _out.error("no staged manifest to curate: %s" % manifest_path.name)
+        return exit_codes.ERROR
+
+    document_path = capture_mod.document_path_for(base_dir, stem)
+    document = read_json(document_path) if document_path.is_file() else None
+    result = curation_mod.curate(
+        read_manifest(manifest_path),
+        base_dir,
+        document=document,
+        max_per_segment=getattr(args, "max_per_segment", curation_mod.DEFAULT_MAX_PER_SEGMENT),
+    )
+
+    write_json_atomic(capture_mod.curation_path_for(base_dir, stem), result.report())
+    write_manifest(manifest_path, result.promoted)
+    if document is not None and result.promoted:
+        capture_mod.merge_into_document(document_path, result.promoted)
+
+    for text in result.lines():
+        _out.line(text)
+    _out.stage(
+        "frames",
+        "curate: %d promoted, %d rejected" % (len(result.promoted), len(result.rejected)),
+    )
+    return result.exit_code()
+
+
 def cmd_frames(args: argparse.Namespace) -> int:
     _deps.require("ffmpeg")
     _deps.require("ffprobe")
-    not_implemented("frames")
+    video = getattr(args, "video", None)
+    if not video:
+        _out.error("frames needs a video file")
+        return exit_codes.ERROR
+    source = Path(video)
+    if not source.is_file():
+        _out.error("no such file: %s" % source)
+        return exit_codes.ERROR
+
+    if getattr(args, "curate", False):
+        return _curate_frames(source, args)
+
+    result = capture_mod.capture(
+        source,
+        mode=getattr(args, "mode", "scene"),
+        every=getattr(args, "every", 45.0),
+        diff_min=getattr(args, "diff_min", 4.0),
+        width=getattr(args, "width", scene_mod.DEFAULT_WIDTH),
+        stage=getattr(args, "stage", False),
+    )
+    if not result.kept:
+        _out.error("frames: capture produced no frames")
+        return exit_codes.ERROR
+    _out.ok("frames: %s" % result.manifest_path.name)
     return exit_codes.OK
 
 
 def cmd_ocr(args: argparse.Namespace) -> int:
+    # Checked before the target is even resolved: a run that cannot OCR must say
+    # so with exit 3 rather than reporting a missing file it never needed.
     _deps.require("rapidocr")
-    not_implemented("ocr")
+    target = getattr(args, "target", None)
+    if not target:
+        _out.error("ocr needs a frames folder or a canonical JSON")
+        return exit_codes.ERROR
+    path = Path(target)
+    if not path.exists():
+        _out.error("no such file or folder: %s" % path)
+        return exit_codes.ERROR
+    result = ocr_mod.run_ocr(
+        path,
+        min_conf=getattr(args, "min_conf", ocr_mod.DEFAULT_MIN_CONF),
+        s2t=not getattr(args, "no_s2t", False),
+        force=getattr(args, "force", False),
+    )
+    _out.ok(
+        "ocr: %d frames, %d with text" % (result.total, len(result.recognised))
+    )
     return exit_codes.OK
 
 
@@ -325,6 +410,16 @@ def _check_json(target: Optional[str]) -> int:
     return report.exit_code()
 
 
+def _check_frames(target: Optional[str]) -> int:
+    """`l2n check frames <stem>.frames.json`: files exist, hashes match."""
+    path = _existing_path(target, "check frames")
+    if path is None:
+        return exit_codes.ERROR
+    report = check.check_frames(path)
+    report.emit()
+    return report.exit_code()
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     stage = getattr(args, "what", None)
     if not stage:
@@ -337,9 +432,11 @@ def cmd_check(args: argparse.Namespace) -> int:
     target = getattr(args, "target", None)
     if stage == "transcribe":
         return _check_transcribe(target)
+    if stage == "frames":
+        return _check_frames(target)
     if stage == "json":
         return _check_json(target)
-    # frames and note belong to the groups that own those outputs.
+    # note belongs to the group that owns the note output.
     not_implemented("check %s" % stage)
     return exit_codes.OK
 
@@ -490,12 +587,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--every", type=float, default=45.0, help="interval 模式的取樣間隔（秒）")
     p.add_argument("--diff-min", type=float, default=4.0, help="相鄰去重門檻")
+    p.add_argument(
+        "--width", type=int, default=scene_mod.DEFAULT_WIDTH, help="影格寬度（像素）"
+    )
     p.add_argument("--stage", action="store_true", help="候選影格先寫入 staging/")
     p.add_argument("--curate", action="store_true", help="策展 staging/ 內的候選影格")
+    p.add_argument(
+        "--max-per-segment",
+        type=int,
+        default=curation_mod.DEFAULT_MAX_PER_SEGMENT,
+        dest="max_per_segment",
+        help="策展時每段最多晉升幾張影格",
+    )
     p.set_defaults(func=cmd_frames)
 
     p = sub.add_parser("ocr", parents=[common], help="對影格做 OCR 並快取結果")
     p.add_argument("target", nargs="?", help="影格資料夾或正式 JSON")
+    p.add_argument(
+        "--min-conf",
+        type=float,
+        default=ocr_mod.DEFAULT_MIN_CONF,
+        dest="min_conf",
+        help="低於此信心值的辨識結果直接丟棄",
+    )
+    p.add_argument("--no-s2t", action="store_true", help="不做簡轉繁（預設會轉）")
     p.set_defaults(func=cmd_ocr)
 
     p = sub.add_parser("scaffold", parents=[common], help="從字幕建立分段 JSON 骨架")
