@@ -297,3 +297,59 @@ def test_render_never_reads_the_clock(document):
     text = render_skeleton(document, stem="20240115 demo talk")
 
     assert "date: 2024-01-15" in text
+
+
+# --------------------------------------------------------------------------
+# `l2n render`: the line it prints has to name the profile it actually used
+# --------------------------------------------------------------------------
+def _render_document(tmp_path: Path, document, monkeypatch) -> Path:
+    """A minimal renderable document on disk, in an overlay-free workspace.
+
+    HOME and the working directory are repointed at tmp_path so that a
+    `.lecture2notes/` overlay on the machine running the tests cannot
+    decide which profile these assertions see.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "20240115 demo talk.json"
+    path.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8", newline="\n",
+    )
+    return path
+
+
+def test_render_reports_the_profile_the_command_line_chose(
+    tmp_path, document, capsys, monkeypatch
+):
+    """`--profile radiology` decides the template, so it decides the message.
+
+    The document's own `profile` field is the lowest-ranked of the layers that
+    can name a profile. Printing it made `render --profile radiology` report
+    "profile generic" while rendering from the radiology template: the one line
+    a person reads to confirm what just happened said the opposite of the truth.
+    """
+    from lecture2notes import exit_codes
+    from lecture2notes.cli.main import main
+
+    document["profile"] = "generic"
+    path = _render_document(tmp_path, document, monkeypatch)
+
+    assert main(["render", str(path), "--profile", "radiology"]) == exit_codes.OK
+
+    assert "profile radiology" in capsys.readouterr().out
+
+
+def test_render_reports_the_document_profile_when_nothing_overrides_it(
+    tmp_path, document, capsys, monkeypatch
+):
+    from lecture2notes import exit_codes
+    from lecture2notes.cli.main import main
+
+    document["profile"] = "generic"
+    path = _render_document(tmp_path, document, monkeypatch)
+
+    assert main(["render", str(path)]) == exit_codes.OK
+
+    assert "profile generic" in capsys.readouterr().out

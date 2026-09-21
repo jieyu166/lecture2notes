@@ -383,7 +383,13 @@ def cmd_render(args: argparse.Namespace) -> int:
     if path is None:
         return exit_codes.ERROR
 
-    profile = str(data.get("profile") or loader.BUILTIN_PROFILE)
+    # The document names a profile, but it is only one layer: `--profile` and an
+    # overlay both outrank it, and both already decide which template and which
+    # settings this render actually uses. Resolving here means the line the
+    # command prints names the same profile the output was built from -- it used
+    # to print the document's field and so reported "generic" for a note
+    # rendered from the radiology template.
+    profile = loader.resolve(str(data.get("profile") or loader.BUILTIN_PROFILE)).profile
     if not (loader.profile_dir(profile) / loader.NOTE_TEMPLATE).is_file():
         profile = loader.BUILTIN_PROFILE
     style = loader.note_style(profile, getattr(args, "style", None))
