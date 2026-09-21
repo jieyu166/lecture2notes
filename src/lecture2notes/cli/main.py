@@ -38,6 +38,7 @@ from lecture2notes.notes import guideline, render
 from lecture2notes.outputs import hub as hub_mod
 from lecture2notes.outputs import pbf as pbf_mod
 from lecture2notes.outputs import viewer as viewer_mod
+from lecture2notes.outputs.plan import plan_for
 from lecture2notes.profiles import loader
 from lecture2notes.schema.io import read_json, write_json_atomic
 from lecture2notes.schema.migrate import migrate_file
@@ -634,8 +635,73 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+class RunPaths:
+    """Every file `l2n run` can write for one recording, resolved once.
+
+    Resolved before any stage starts so ``--preflight`` and the run itself
+    answer from the same list: a preflight that computed its targets separately
+    would be a second implementation of the thing it is supposed to predict.
+    """
+
+    def __init__(self, video: Path, profile: str = loader.BUILTIN_PROFILE) -> None:
+        self.video = Path(video)
+        self.base = self.video.parent
+        self.stem = scene_mod.video_stem(self.video)
+        self.subtitle = self.base / (self.stem + ".srt")
+        self.manifest = self.base / (self.stem + ".frames.json")
+        self.frames_dir = self.base / "frames"
+        self.document = self.base / (self.stem + ".json")
+        self.ocr_cache = ocr_mod.cache_path_for(self.document)
+        self.note = self.base / (self.stem + ".v4.md")
+        self.viewer = viewer_mod.viewer_path(self.document)
+        self.pbf = self.base / (self.stem + ".pbf")
+        self.profile = profile
+
+    def pbf_enabled(self) -> bool:
+        return pbf_mod.is_enabled(loader.outputs(self.profile))
+
+    def planned(self) -> List[Path]:
+        """The write targets, in the order the stages reach them."""
+        targets = [
+            self.subtitle, self.manifest, self.ocr_cache,
+            self.document, self.note, self.viewer,
+        ]
+        if self.pbf_enabled():
+            targets.append(self.pbf)
+        return targets
+
+
+def _run_profile(paths_document: Path) -> str:
+    """The profile the document declares, or the built-in one."""
+    if not paths_document.is_file():
+        return loader.BUILTIN_PROFILE
+    try:
+        data = read_json(paths_document)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return loader.BUILTIN_PROFILE
+    name = data.get("profile") if isinstance(data, dict) else None
+    if isinstance(name, str) and name and loader.profile_dir(name).is_dir():
+        return name
+    return loader.BUILTIN_PROFILE
+
+
 def cmd_run(args: argparse.Namespace) -> int:
+    # The language gate comes before everything, including --preflight: it is
+    # the one contract that must fire before any path is even resolved.
     require_lang(args)
+    video = getattr(args, "video", None)
+    if not video:
+        _out.error("run needs a video file")
+        return exit_codes.ERROR
+    source = Path(video)
+    if not source.is_file():
+        _out.error("no such file: %s" % source)
+        return exit_codes.ERROR
+    paths = RunPaths(source, _run_profile(Path(source).with_suffix(".json")))
+    if getattr(args, "preflight", False):
+        # No dependency check: listing what a run would write must work on a
+        # machine that cannot run it, which is exactly when it is most useful.
+        return _emit_plan("run", plan_for(paths.planned()))
     _deps.require("ffmpeg")
     not_implemented("run")
     return exit_codes.OK
@@ -865,6 +931,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", default=None, help="模型名稱或大小")
     p.add_argument(
         "--allow-cloud", action="store_true", help="允許使用非本機引擎（預設拒絕）"
+    )
+    p.add_argument(
+        "--style",
+        choices=["faithful", "concise"],
+        default=None,
+        help="骨架筆記與 check note 的風格（預設取 profile）",
+    )
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="只列出將建立或覆蓋的檔案，不寫入任何東西",
     )
     p.set_defaults(func=cmd_run)
 
