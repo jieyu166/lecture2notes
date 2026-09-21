@@ -94,6 +94,16 @@ def _common_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force", action="store_true", help="忽略既有產物，重跑本階段"
     )
+    # The cli layer of the configuration stack. Shared by every subcommand
+    # rather than added one at a time, because "which profile am I running
+    # under" is a question every stage that reads a template or a setting has
+    # to answer the same way. `main` installs it once around the dispatch, so a
+    # stage body never has to pass it down.
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="profile 名稱（最高優先層，勝過 overlay 與文件內的設定）",
+    )
     return parser
 
 
@@ -621,8 +631,48 @@ def cmd_convert_model(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+PROFILE_ACTIONS = ("show",)
+
+
+def _profile_value(value: Any) -> str:
+    """One setting's value as a single console line.
+
+    ``json.dumps`` rather than ``repr`` so ``true``/``false`` read as the TOML
+    the user wrote, and ASCII-escaped so the line survives a cp950 console
+    without the escape hatch in ``_out`` having to replace characters.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    return json.dumps(value)
+
+
 def cmd_profile(args: argparse.Namespace) -> int:
-    not_implemented("profile")
+    """`l2n profile show`: every effective key, its value and its source layer."""
+    action = getattr(args, "action", None) or "show"
+    if action not in PROFILE_ACTIONS:
+        _out.error(
+            "unknown profile action: %s (known: %s)"
+            % (action, " / ".join(PROFILE_ACTIONS))
+        )
+        return exit_codes.ERROR
+
+    resolved = loader.resolve(overrides={"note.style": getattr(args, "style", None)})
+
+    if getattr(args, "as_json", False):
+        # ASCII-escaped on purpose: a correction key is often Traditional
+        # Chinese, and a cp950 console would otherwise turn the payload into
+        # JSON that no longer parses.
+        _out.line(json.dumps(resolved.as_json(), indent=2))
+        return exit_codes.OK
+
+    _out.stage("profile", "%s (layers: %s)" % (
+        resolved.profile,
+        ", ".join(name for name, _ in resolved.layers),
+    ))
+    for key, setting in resolved.settings().items():
+        _out.line("%s = %s  (%s)" % (key, _profile_value(setting.value), setting.source))
     return exit_codes.OK
 
 
@@ -838,7 +888,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("profile", parents=[common], help="檢視 profile 與 overlay 的生效設定")
     p.add_argument("action", nargs="?", default="show", help="子動作：show")
-    p.add_argument("--profile", default=None, help="profile 名稱")
+    # `--profile` itself comes from the shared option group above.
+    p.add_argument(
+        "--style",
+        choices=["faithful", "concise"],
+        default=None,
+        help="以這個風格當作 cli 層來看生效設定",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="以 JSON 物件輸出，每鍵含 value 與 source",
+    )
     p.set_defaults(func=cmd_profile)
 
     p = sub.add_parser(
@@ -876,7 +938,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return exit_codes.OK
 
     try:
-        return int(func(args))
+        # The cli layer is installed around the dispatch rather than read
+        # inside each stage, so `--profile` reaches the resolver from every
+        # subcommand without every stage body having to pass it along. It is
+        # scoped to this one call: two commands in one process (which is what
+        # an in-process CLI test is) must not inherit each other's flags.
+        with loader.cli_layer(profile=getattr(args, "profile", None)):
+            return int(func(args))
+    except loader.OverlayError as exc:
+        # A configuration file exists but does not parse. Naming the file and
+        # the line is the whole contract: the alternative is running with the
+        # defaults under the user's own settings' name.
+        _out.error(exc.message())
+        return exit_codes.ERROR
     except StageNotImplemented as exc:
         _out.stage(exc.name, "not implemented yet")
         return exit_codes.NOT_IMPLEMENTED
