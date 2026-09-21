@@ -540,3 +540,56 @@ def test_the_count_line_is_ascii(lecture, capsys):
 
     printed = capsys.readouterr().out
     assert not any(marker in printed for marker in "\u2192\u2265\u2713\u2717")
+
+
+# --------------------------------------------------------------------------
+# 15.11 -- `check note` reads the style out of the note it is checking
+# --------------------------------------------------------------------------
+def test_check_note_uses_the_style_the_note_declares(lecture):
+    """Rendered faithful, checked with no flag: R6 must still run.
+
+    `check note` used to fall back to the profile, which is concise by
+    default, so the rule faithful exists to add was silently skipped on every
+    faithful note whose checker was invoked without `--style`.
+    """
+    json_path, note_path = lecture
+    assert render_mod.read_style_marker(
+        note_path.read_text(encoding="utf-8")
+    ) == "faithful"
+    _edit(note_path, lambda lines: [l for l in lines if not l.startswith("> 「")])
+
+    report = check.check_note_stage(json_path, note_path)
+
+    assert "R6" in _codes(report)
+
+
+def test_an_explicit_style_still_wins_and_says_so(lecture, capsys):
+    json_path, note_path = lecture
+
+    report = check.check_note_stage(json_path, note_path, style="concise")
+
+    mismatch = [f for f in report.findings if f.code == "style"]
+    assert len(mismatch) == 1
+    assert mismatch[0].severity == "warn"
+    assert "style mismatch" in mismatch[0].message
+    assert "faithful" in mismatch[0].message and "concise" in mismatch[0].message
+
+
+def test_no_mismatch_when_the_flag_agrees_with_the_marker(lecture):
+    json_path, note_path = lecture
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert "style" not in _codes(report)
+
+
+def test_a_note_without_a_marker_falls_back_to_the_profile(lecture):
+    json_path, note_path = lecture
+    _edit(note_path, lambda lines: [l for l in lines if "l2n:style=" not in l])
+    _edit(note_path, lambda lines: [l for l in lines if not l.startswith("> 「")])
+
+    report = check.check_note_stage(json_path, note_path)
+
+    # generic's default is concise, under which R6 does not run at all.
+    assert "R6" not in _codes(report)
+    assert "style" not in _codes(report)

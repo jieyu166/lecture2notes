@@ -152,6 +152,11 @@ def expand_prompt(
         "",
         "把下面這份骨架筆記就地擴寫成完整筆記。章節順序與 frontmatter 不得更動。",
         "style: %s" % style,
+        # The same value the note itself records after its frontmatter. Saying
+        # so here stops an agent from "tidying up" the marker and silently
+        # changing which rules its work is judged against.
+        "（骨架 frontmatter 之後那行 `<!-- l2n:style=%s ... -->` 是這份筆記的風格來源，不要刪。）"
+        % style,
         "",
         "## 要讀的檔案",
         "",

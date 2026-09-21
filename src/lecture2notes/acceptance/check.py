@@ -30,7 +30,7 @@ from urllib.parse import unquote
 from lecture2notes import _out
 from lecture2notes.engines.base import SRT_TIME
 from lecture2notes.frames.manifest import read_manifest, sha256_file
-from lecture2notes.notes import guideline, rules
+from lecture2notes.notes import guideline, render, rules
 from lecture2notes.profiles import loader
 from lecture2notes.schema.model import (
     AI_DRAFT_MARK,
@@ -1018,10 +1018,28 @@ def check_note_stage(
     effective_profile = profile or str(data.get("profile") or loader.BUILTIN_PROFILE)
     if not loader.profile_dir(effective_profile).is_dir():
         effective_profile = loader.BUILTIN_PROFILE
-    effective_style = loader.note_style(effective_profile, style)
 
     text = note_path.read_text(encoding="utf-8", errors="replace")
     lines = note_lines(text)
+
+    # The note records the contract it was written to. Without `--style`, that
+    # is a better answer than the profile's default: the profile says what the
+    # next render would do, the marker says what this note actually is.
+    declared = render.read_style_marker(text)
+    if declared not in render.STYLES:
+        declared = None
+    if style:
+        effective_style = loader.note_style(effective_profile, style)
+        if declared and declared != effective_style:
+            report.add(
+                "warn", "style", note_path.name,
+                "style mismatch: the note was rendered with --style %s, this "
+                "check ran with --style %s" % (declared, effective_style),
+            )
+    elif declared:
+        effective_style = declared
+    else:
+        effective_style = loader.note_style(effective_profile, None)
     regions = note_regions(lines)
 
     _rule_sections(lines, note_path, report)

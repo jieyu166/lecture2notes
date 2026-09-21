@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from lecture2notes.notes import guideline
+from lecture2notes.notes import render as render_mod
 from lecture2notes.notes.render import (
     CANDIDATE_CALLOUT,
     DRAFT_DECLARATION,
@@ -91,11 +92,20 @@ def test_frontmatter_comes_first(document):
 
 
 def test_the_first_body_line_declares_the_note_is_a_model_draft(document):
-    """A drafted list reads exactly like a written one; the file says which."""
+    """A drafted list reads exactly like a written one; the file says which.
+
+    Task 15.11 put the machine-readable style marker immediately after the
+    frontmatter. It is an HTML comment, so it renders to nothing: the first
+    line a reader sees is still the declaration, which is what 14.2 is about.
+    """
     text = render_skeleton(document)
     body = text.split("---", 2)[2].lstrip()
+    visible = [
+        line for line in body.splitlines()
+        if line.strip() and not line.strip().startswith("<!--")
+    ]
 
-    assert body.splitlines()[0] == DRAFT_DECLARATION
+    assert visible[0] == DRAFT_DECLARATION
     assert "> 本筆記為模型產出的初稿，未經本人確認。" in text
 
 
@@ -382,3 +392,45 @@ def test_render_uses_the_template_of_the_profile_named_on_the_command_line(
         "--profile radiology did not reach the template that defines the note"
     )
     assert "profile radiology" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# 15.11 -- one source of truth for which contract a note was written to
+# --------------------------------------------------------------------------
+def test_the_note_records_the_style_it_was_rendered_with(document):
+    for style in ("faithful", "concise"):
+        text = render_skeleton(document, style=style)
+        assert render_mod.style_marker(style) in text
+        assert render_mod.read_style_marker(text) == style
+
+
+def test_the_marker_sits_immediately_after_the_frontmatter(document):
+    lines = render_skeleton(document, style="faithful").split("\n")
+
+    fences = [i for i, line in enumerate(lines) if line.strip() == "---"]
+    assert lines[fences[1] + 1] == render_mod.style_marker("faithful")
+
+
+def test_the_marker_names_the_guideline_version(document):
+    from lecture2notes.notes.guideline import GUIDELINE_VERSION
+
+    assert "guideline=%s" % GUIDELINE_VERSION in render_skeleton(document)
+
+
+def test_the_marker_does_not_break_determinism(document):
+    first = render_skeleton(document, style="faithful")
+    second = render_skeleton(document, style="faithful")
+
+    assert first == second
+
+
+def test_a_note_that_already_has_a_marker_does_not_get_a_second_one():
+    text = "---\ntitle: x\n---\n<!-- l2n:style=faithful guideline=1.2 -->\nbody\n"
+
+    assert render_mod.insert_style_marker(text, "concise") == text
+
+
+def test_a_note_without_frontmatter_gets_the_marker_at_the_top():
+    out = render_mod.insert_style_marker("# heading\n", "faithful")
+
+    assert out.splitlines()[0] == render_mod.style_marker("faithful")

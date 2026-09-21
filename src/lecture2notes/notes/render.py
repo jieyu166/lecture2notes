@@ -133,6 +133,49 @@ AI_DRAFT_MARK = _AI_DRAFT_MARK
 #: How many candidates the model drafts under "我應該記住的 3 件事".
 REMEMBER_COUNT = 3
 
+#: Which contract this note was written to, recorded in the note itself.
+#: `check note` defaults to the profile's style, and a note rendered faithful
+#: then checked concise skips R6 entirely -- the one rule faithful adds. The
+#: field run hit exactly that and passed a note with no quotation anywhere.
+#: Both values are fixed by the inputs, so the line does not affect determinism.
+STYLE_MARKER = "<!-- l2n:style=%s guideline=%s -->"
+
+#: Reads the marker back. Tolerant of spacing, because a person may retype it.
+STYLE_MARKER_RE = re.compile(
+    r"<!--\s*l2n:style=([A-Za-z_]+)\s+guideline=([0-9.]+)\s*-->"
+)
+
+
+def style_marker(style: str) -> str:
+    """The one line that says which rules this note was written under."""
+    return STYLE_MARKER % (style, guideline.GUIDELINE_VERSION)
+
+
+def read_style_marker(text: str) -> Optional[str]:
+    """The style a note declares, or None when it declares nothing."""
+    match = STYLE_MARKER_RE.search(text)
+    return match.group(1) if match else None
+
+
+def insert_style_marker(text: str, style: str) -> str:
+    """Put the marker straight after the frontmatter, or at the very top.
+
+    After the fence rather than inside it: the frontmatter is the profile's to
+    shape, and an extra YAML key would appear in every Obsidian property list.
+    """
+    if read_style_marker(text) is not None:
+        return text
+    marker = style_marker(style)
+    lines = text.split("\n")
+    if lines and lines[0].strip() == "---":
+        for position in range(1, len(lines)):
+            if lines[position].strip() == "---":
+                return "\n".join(
+                    lines[: position + 1] + [marker] + lines[position + 1:]
+                )
+    return "\n".join([marker] + lines)
+
+
 #: The skeleton's first body line. A list an agent filled in reads exactly like
 #: one a person wrote, and a reader three months later cannot tell them apart,
 #: so the file says which it is before anything else on the page.
@@ -672,6 +715,7 @@ def render_skeleton(
         "title": text_of(data.get("title")),
     }
     text = fill(body.replace("\r\n", "\n"), context)
+    text = insert_style_marker(text, chosen)
     return text.rstrip("\n") + "\n"
 
 
@@ -687,6 +731,11 @@ def write_skeleton(path: Path, data: Mapping[str, Any], **kwargs: Any) -> Path:
 
 __all__ = [
     "AI_DRAFT_MARK",
+    "STYLE_MARKER",
+    "STYLE_MARKER_RE",
+    "insert_style_marker",
+    "read_style_marker",
+    "style_marker",
     "CANDIDATE_CALLOUT",
     "DRAFT_DECLARATION",
     "SUMMARY_SLOTS",

@@ -33,10 +33,21 @@
 5. **驗收（必做）**
 
    ```bash
-   l2n check note <stem>.json --note <stem>.v4.md
+   l2n check note <stem>.json --note <stem>.v4.md --style faithful
    ```
 
+   `--style` 要與當初 `l2n render` 用的一致。不給時，`check note` 會讀筆記
+   frontmatter 之後那一行 `<!-- l2n:style=... guideline=... -->`——那是 `render`
+   寫下的單一真相；兩者不一致會印 `warn style mismatch`。
+   **不要刪掉那一行**：刪了之後 `check note` 會退回 profile 預設（concise），
+   faithful 才檢查的 R6 就整個不跑。
+
    報告第一行會印規範版本。**有任何 error 就回頭修，不要交出去。** exit code：0 全過、1 只有 warning、2 有 error。
+
+   結尾還會多兩行數字（不影響 exit code，但它們是「有沒有人真的動過」的唯一證據）：
+   `note: ai_draft_remaining=N` 是還沒換掉的 `<!-- ai-draft -->` 佔位；
+   `note: unexpanded_segments=K/N` 是本文與 `l2n render` 骨架一字不差的段落數。
+   **兩個都要是 0，才算擴寫完成。**
 
 ## 最容易犯的三個錯
 
