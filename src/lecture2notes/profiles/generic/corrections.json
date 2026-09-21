@@ -1,9 +1,48 @@
 {
-  "_about": "ASR correction table for the generic profile. Written for this project; nothing here is carried over from any private vault. Longer keys win, so a specific phrase is replaced before a shorter key can eat part of it.",
+  "_about": "ASR correction table for the generic profile. Every pair below was written for this project by reading how the local engines mishear general AI and software vocabulary; nothing here is carried over from any private vault or third-party table. Longer keys win, so a specific phrase is replaced before a shorter key can eat part of it.",
   "_sections": {
     "deterministic": "Applied automatically. Only put a pair here when the wrong form is never a legitimate word in this domain.",
     "context_sensitive": "Never applied automatically. Listed so a human or an LLM can judge each occurrence."
   },
-  "deterministic": {},
-  "context_sensitive": {}
+  "_sources": {
+    "deterministic": "lecture2notes-generic",
+    "context_sensitive": "lecture2notes-generic"
+  },
+  "deterministic": {
+    "Co-Pilate": "Copilot",
+    "Copilet": "Copilot",
+    "Markdowm": "Markdown",
+    "Clode": "Claude",
+    "Get Hub": "GitHub",
+    "Git hub": "GitHub",
+    "Yamal": "YAML",
+    "Docka": "Docker",
+    "Pythong": "Python",
+    "Pie torch": "PyTorch",
+    "Hugging Phase": "Hugging Face",
+    "Tocken": "token",
+    "Embeding": "embedding",
+    "Transfomer": "Transformer",
+    "Repositry": "repository",
+    "Terminel": "terminal",
+    "Comand line": "command line",
+    "Visual Studio Cord": "Visual Studio Code",
+    "Obsidean": "Obsidian",
+    "Ubersidian": "Obsidian",
+    "程式馬": "程式碼",
+    "原始馬": "原始碼",
+    "資料褲": "資料庫",
+    "編一器": "編譯器",
+    "版奔控制": "版本控制",
+    "大魚言模型": "大語言模型",
+    "機氣學習": "機器學習",
+    "深度學西": "深度學習",
+    "人工只能": "人工智慧",
+    "提是詞": "提示詞"
+  },
+  "context_sensitive": {
+    "代幣": "token",
+    "代理人": "agent",
+    "模組": "模型"
+  }
 }
