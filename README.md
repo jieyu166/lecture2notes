@@ -121,6 +121,44 @@ Windows 為準，CI 與實測都在 Windows 上進行。
 Linux 與 macOS 為**盡力支援**：純 Python 階段可跑，GPU 引擎與外部二進位（ffmpeg、
 whisper.cpp）需自行確認。回報問題時請附上平台。
 
+## 疑難排解
+
+### `l2n --help` 在 cp950 主控台看起來像亂碼
+
+**結論：在真實的 `cmd.exe` 下重現不出來。** `--help` 的中文在 cp950 主控台是完整正確的。
+
+實測（2026-09-21，Windows 11、Python 3.14、`cmd.exe`）：
+
+```bat
+chcp 950
+set PYTHONIOENCODING=
+l2n --help > help.txt 2>&1
+```
+
+`help.txt` 以 cp950 解碼可完整還原：exit code 0、`U+FFFD` 取代字元 0 個、
+被降級成 `?` 的字元 0 個，`sys.stdout.encoding` 回報 `cp950`。
+
+會看起來像亂碼，通常是**讀取端**而不是產生端：
+
+- 把 cp950 的輸出當成 UTF-8 解碼（多數 agent／CI 的輸出擷取、Git Bash、
+  VS Code 終端機的預設值都可能這樣）。對策：`chcp 65001`，或設
+  `PYTHONIOENCODING=utf-8` 再把擷取端也設成 UTF-8，兩邊要一致。
+- 反過來把 UTF-8 的輸出當成 cp950 解碼。症狀是中文變成一串看得懂邊界的怪字，
+  而不是問號。
+
+判斷方法：把輸出導到檔案再檢查位元組，不要只看終端機畫面——
+
+```bash
+python -c "print(open('help.txt','rb').read().decode('cp950'))"
+```
+
+這一行跑得過，問題就在終端機或擷取端，不在 `l2n`。
+
+套件這一側的保證沒有變：主控台標記只用 ASCII（`[ok] [warn] [error] [skip] ->`），
+所有輸出都走 `_out` 的編碼安全寫入器（真的編不出來時退為 `errors="replace"`
+而不是丟 `UnicodeEncodeError`），而且 CI 有一個專門在 `PYTHONIOENCODING=cp950`
+下跑整套測試的 job。
+
 ## 轉錄引擎相容表
 
 `l2n transcribe --list-engines` 會依本機現況印出同樣四行並標示相依是否滿足。

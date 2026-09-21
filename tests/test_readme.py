@@ -195,3 +195,28 @@ def test_readme_console_markers_stay_cp950_safe():
     forbidden = set("→≥≤✓✗✔✘")
     found = forbidden & set(_readme_text())
     assert not found, "README contains cp950-unsafe symbol(s) %s" % sorted(found)
+
+
+# --------------------------------------------------------------------------
+# 15.9 -- the cp950 help question, and the answer that was measured
+# --------------------------------------------------------------------------
+def test_readme_has_a_troubleshooting_section():
+    assert "## 疑難排解" in _readme_text()
+
+
+def test_troubleshooting_records_the_cp950_help_finding_and_how_to_repeat_it():
+    """A "looks like mojibake" report needs a reproduction, not a reassurance.
+
+    The field run saw garbled `l2n --help`. Reproduced under a real cmd.exe
+    with `chcp 950` and no PYTHONIOENCODING, the output decodes cleanly, so
+    the README records the steps and the measurement rather than the guess.
+    """
+    text = _readme_text()
+    body = text.split("## 疑難排解", 1)[1].split("\n## ", 1)[0]
+
+    assert "chcp 950" in body
+    assert "PYTHONIOENCODING" in body
+    assert "cp950" in body
+    # The conclusion, and the measurement it rests on.
+    assert "重現不出來" in body
+    assert "U+FFFD" in body
