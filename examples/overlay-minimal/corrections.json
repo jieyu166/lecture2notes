@@ -1,0 +1,19 @@
+{
+  "_about": "Your own ASR correction table. Merges key by key with the profile's table: a pair the profile does not have is added, and a pair it does have is overridden by this one. Longer keys win, so a specific phrase is replaced before a shorter key can eat part of it.",
+  "_sections": {
+    "deterministic": "Applied automatically. Only put a pair here when the wrong form is never a legitimate word in the lectures you actually watch.",
+    "context_sensitive": "Never applied automatically. Listed so a human or an LLM can judge each occurrence."
+  },
+  "_sources": {
+    "deterministic": "my-overlay",
+    "context_sensitive": "my-overlay"
+  },
+  "deterministic": {
+    "PLACEHOLDER-heard": "PLACEHOLDER-correct",
+    "股利再頭子": "股利再投資",
+    "複力效果": "複利效果"
+  },
+  "context_sensitive": {
+    "部位": "倉位"
+  }
+}

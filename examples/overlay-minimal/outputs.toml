@@ -1,0 +1,29 @@
+# Output settings. Merges key by key with the layer below, so you only have to
+# state what you want to change -- everything left out keeps the profile's
+# answer, and deleting a key here hands the question back rather than setting
+# it to false.
+
+# Which profile the layers below this one should be read from. Left commented
+# out, so the default (generic) stands; uncomment to switch.
+# profile = "radiology"
+
+# PotPlayer chapter file. Stated explicitly even though it matches the default,
+# because a `.pbf` beside a video changes what the player does with that video
+# and this is the kind of setting worth being able to point at.
+pbf = false
+
+# Course home page and cross-lecture search index.
+hub = true
+
+# Three-pane time-synced player page.
+viewer = true
+
+[note]
+# faithful keeps every quote the speaker actually said; concise keeps at most
+# one per section. The public default is concise; this overlay wants the quotes.
+style = "faithful"
+
+[guideline]
+# Severity `l2n check note` reports R5 (a run of transcript pasted into the
+# note unmarked) at: "warning" or "error".
+transcript_paste = "error"

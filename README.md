@@ -84,6 +84,50 @@ DashScope 的 `qwen3-asr-flash` 是**雲端付費 API**，與上述開源權重�
 
 Exit code 約定：0 成功、1 有警告、2 合約或參數錯誤、3 缺外部相依、4 該階段尚未實作。
 
+## Profile 與 overlay
+
+設定由五層決定，由高到低：命令列參數 > 專案 `./.lecture2notes/` > 使用者 `~/.lecture2notes/` >
+`profiles/<name>/` > 套件內建預設。可覆寫的檔案只有五個：
+
+| 檔案 | 合併方式 |
+|---|---|
+| `note.frontmatter.yaml` | 整檔取代下層 |
+| `note.template.md` | 整檔取代下層 |
+| `outputs.toml` | 逐鍵合併，高層勝 |
+| `privacy.toml` | 逐鍵合併，高層勝 |
+| `corrections.json` | 逐鍵合併，高層勝 |
+
+某一層沒有某個檔案，就是對那個檔案沒有意見——不會把值重設回預設。內建 profile 有兩個：
+`generic`（預設）與 `radiology`（閱片 callout 模板、放射術語表、病患識別模式，不預設啟用；
+用 `--profile radiology`，或在 overlay 的 `outputs.toml` 寫 `profile = "radiology"` 才會生效）。
+
+把自己的設定變成 overlay，最快的方式是複製範例到家目錄：
+
+```bash
+# macOS / Linux
+mkdir -p ~/.lecture2notes
+cp examples/overlay-minimal/*.yaml examples/overlay-minimal/*.md \
+   examples/overlay-minimal/*.json examples/overlay-minimal/*.toml ~/.lecture2notes/
+```
+
+```powershell
+# Windows PowerShell
+New-Item -ItemType Directory -Force $HOME\.lecture2notes | Out-Null
+Copy-Item examples\overlay-minimal\note.frontmatter.yaml, examples\overlay-minimal\note.template.md, examples\overlay-minimal\outputs.toml, examples\overlay-minimal\privacy.toml, examples\overlay-minimal\corrections.json $HOME\.lecture2notes\
+```
+
+`examples/overlay-minimal/` 是五個檔案各一份的合法佔位範例（含 `消化層級` 這種自訂
+frontmatter 欄位，註解說明 0–3 各代表什麼）。複製完後跑：
+
+```bash
+l2n profile show          # 每個生效的鍵，值與來源層
+l2n profile show --json   # 同樣內容，每鍵含 value 與 source
+```
+
+範例裡定義的每一個鍵，來源層都會顯示 `user`。只想套用在某一門課，就把同樣的檔案放進課程
+資料夾的 `./.lecture2notes/`，那一層比家目錄更高。設定檔壞掉時不會默默用預設值：會印出檔案
+路徑與 `line N`、以 exit code 2 結束，而且那個檔案一個鍵都不套用。
+
 ## 隱私邊界 / Privacy boundary
 
 本機 ASR 引擎在你自己的電腦上完成轉錄，音訊與影片不會上傳到任何伺服器（首次下載模型權重除外）。
