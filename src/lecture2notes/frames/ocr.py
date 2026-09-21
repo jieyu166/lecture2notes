@@ -18,15 +18,18 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from urllib.parse import unquote
 
 from lecture2notes import _deps, _out
-from lecture2notes.schema.io import write_json_atomic
+from lecture2notes.schema.io import read_json, write_json_atomic
 
 IMG_EXT = (".png", ".jpg", ".jpeg", ".webp")
+CACHE_SUFFIX = ".frames_ocr.json"
+DOCUMENT_SUFFIX = ".json"
 ENGINE_NAME = "rapidocr-onnxruntime"
 DEFAULT_MIN_CONF = 0.5
 
@@ -235,7 +238,112 @@ def merge_ocr_into_segments(
     return result
 
 
+# ---------------------------------------------------------------------------
+# the stage itself
+# ---------------------------------------------------------------------------
+@dataclass
+class OcrResult:
+    """What one ``l2n ocr`` run did, in numbers a caller can assert on."""
+
+    target: Path
+    cache_path: Path
+    frames: List[str] = field(default_factory=list)
+    recognised: List[str] = field(default_factory=list)
+    cached: int = 0
+    engine_calls: int = 0
+    document: Optional[Path] = None
+
+    @property
+    def total(self) -> int:
+        return len(self.frames)
+
+    @property
+    def pending(self) -> int:
+        return self.total - self.cached
+
+
+def cache_path_for(target: Path) -> Path:
+    """``<stem>.frames_ocr.json`` beside the document, or beside the folder."""
+    target = Path(target)
+    if target.is_dir():
+        return target.parent / (target.name + CACHE_SUFFIX)
+    name = target.name
+    if name.endswith(DOCUMENT_SUFFIX):
+        name = name[: -len(DOCUMENT_SUFFIX)]
+    return target.parent / (name + CACHE_SUFFIX)
+
+
+def run_ocr(
+    target: Path,
+    min_conf: float = DEFAULT_MIN_CONF,
+    s2t: bool = True,
+    force: bool = False,
+    engine_factory: Optional[Callable[[], Any]] = None,
+    progress_interval: float = 5.0,
+) -> OcrResult:
+    """OCR every frame the target references, using the cache where it can.
+
+    The engine is built lazily and only when at least one frame actually needs
+    recognising. RapidOCR loads an ONNX runtime and several hundred megabytes of
+    model; paying that to discover there is nothing to do is the difference
+    between a cached re-run taking a second and taking half a minute.
+    """
+    target = Path(target)
+    document: Optional[Path] = None
+    data: Optional[Dict[str, Any]] = None
+    if target.is_dir():
+        base_dir = target.parent
+        frames = collect_frames(None, target)
+    else:
+        document = target
+        data = read_json(target)
+        base_dir = target.parent
+        frames = collect_frames(data, None)
+
+    cache_file = cache_path_for(target)
+    cache = read_cache(cache_file)
+    todo = pending_frames(frames, cache, base_dir, force)
+    result = OcrResult(
+        target=target,
+        cache_path=cache_file,
+        frames=list(frames),
+        cached=len(frames) - len(todo),
+        document=document,
+    )
+    _out.stage("ocr", cache_report(len(frames), len(todo)))
+
+    if todo:
+        engine = (engine_factory or load_engine)()
+        convert = load_s2t(s2t)
+        progress = _out.Progress("ocr", len(todo), interval=progress_interval)
+        for frame in todo:
+            path = Path(base_dir) / unquote(frame)
+            text = strip_ui(ocr_one(engine, path, min_conf))
+            result.engine_calls += 1
+            if convert is not None and text:
+                text = convert(text)
+            cache[frame] = {
+                "fingerprint": fingerprint(path),
+                "chars": len(text),
+                "text": text,
+            }
+            if text:
+                result.recognised.append(frame)
+            progress.advance()
+        progress.finish()
+        write_cache(cache_file, cache)
+    else:
+        result.recognised = [
+            frame for frame in frames if (cache.get(frame) or {}).get("text")
+        ]
+
+    if data is not None and document is not None:
+        write_json_atomic(document, merge_ocr_into_segments(data, cache, min_conf, s2t))
+    return result
+
+
 __all__ = [
+    "CACHE_SUFFIX",
     "DEFAULT_MIN_CONF",
     "ENGINE_NAME",
     "IMG_EXT",
@@ -247,10 +355,13 @@ __all__ = [
     "lines_from_result",
     "load_engine",
     "load_s2t",
+    "OcrResult",
+    "cache_path_for",
     "merge_ocr_into_segments",
     "ocr_one",
     "pending_frames",
     "read_cache",
+    "run_ocr",
     "strip_ui",
     "write_cache",
 ]

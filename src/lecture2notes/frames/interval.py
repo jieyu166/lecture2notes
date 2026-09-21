@@ -36,11 +36,27 @@ SIGNATURE_SIZE = (64, 36)
 DEFAULT_WIDTH = 1280
 
 
-def plan_marks(duration_sec: float, every: int = DEFAULT_INTERVAL) -> List[int]:
-    """The sample times for a recording of this length."""
+def plan_marks(duration_sec: float, every: float = DEFAULT_INTERVAL) -> List[float]:
+    """The sample times for a recording of this length.
+
+    A whole-second interval yields whole-second marks, because that is what the
+    ``<stem>-<MMSS>.png`` filenames are built from and a float there would read
+    as a bug. A fractional interval is honoured as given: a short fixture needs
+    to sample faster than once a second, and silently rounding it up to 1 would
+    make every such test produce a single frame.
+    """
+    every = float(every)
     if every <= 0:
         raise ValueError("interval must be positive")
-    return list(range(0, int(duration_sec), int(every)))
+    whole = every.is_integer()
+    marks: List[float] = []
+    index = 0
+    while True:
+        position = index * every
+        if position >= float(duration_sec):
+            return marks
+        marks.append(int(position) if whole else round(position, 3))
+        index += 1
 
 
 def mean_abs_diff(left: Sequence[int], right: Sequence[int]) -> float:

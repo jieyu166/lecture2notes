@@ -32,6 +32,12 @@ DEFAULT_CONTENT_THRESHOLD = 27.0
 DEFAULT_FFMPEG_THRESHOLD = 0.3
 DETECTORS = ("adaptive", "content", "ffmpeg")
 
+#: Printed verbatim when PySceneDetect is missing. The wording is part of the
+#: frame-capture contract, so it is a constant rather than an inline literal: a
+#: silent downgrade produces a lecture with four frames and no explanation, and
+#: the acceptance scenario asserts on this exact line.
+FALLBACK_MESSAGE = "[frames] scenedetect not installed, using ffmpeg scene filter"
+
 PTS_TIME = re.compile(r"pts_time:([\d.]+)")
 SUBTITLE_SUFFIX = re.compile(r"\.(zh(-TW)?|en|orig)$")
 VIDEO_EXT = (".mp4", ".mkv", ".mov", ".webm", ".avi", ".m4v")
@@ -116,7 +122,10 @@ def detect_scenes(
         from scenedetect import SceneManager, open_video  # type: ignore
         from scenedetect.detectors import AdaptiveDetector, ContentDetector  # type: ignore
     except ImportError:
-        _out.say("warn", "scenedetect not installed; falling back to the ffmpeg scene filter")
+        # _out.line rather than _out.say: a downgrade must still be announced
+        # under --quiet, and the line must carry no severity marker so it
+        # matches the contract exactly.
+        _out.line(FALLBACK_MESSAGE)
         _out.say("info", "install: %s" % _deps.INSTALL_HINTS["scenedetect"])
         return detect_ffmpeg(video_path, DEFAULT_FFMPEG_THRESHOLD)
 
@@ -160,6 +169,7 @@ def extract_frame(
 
 __all__ = [
     "DETECTORS",
+    "FALLBACK_MESSAGE",
     "DEFAULT_WIDTH",
     "SEEK_PADDING",
     "detect_ffmpeg",

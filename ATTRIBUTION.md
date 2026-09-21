@@ -104,6 +104,8 @@ Relation values:
 | `engines/registry.py` | original | — | This package's own `--engine` lookup and `--allow-cloud` gate; no prior script. |
 | `engines/whisper_cpp.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/whisper-srt-zh/scripts/transcribe.py` (the `--engine whisper.cpp` subprocess branch). |
 | `frames/__init__.py` | original | — | Package marker. |
+| `frames/capture.py` | original | — | Written for this package: runs a capture mode end to end (plan sample times, grab, dedup, hash, write one manifest, merge into the canonical JSON). No `rad-workflow` or upstream counterpart — both sources drive their capture from an argparse `main()` per script. |
+| `frames/curation.py` | original | — | Written for this package: verifies staged manifest rows by sha256 and promotes the survivors into `frames/` under a per-segment cap. Distinct from `frames/curator.py`, which ranks a richer candidate shape ported from `rad-workflow`. |
 | `frames/curator.py` | inspired | `scripts/extract_slides.py` | Both use perceptual-hash + Hamming-distance near-duplicate detection — a well-known, generic computer-vision technique, not upstream-specific code — embedded in an otherwise unrelated staging/promotion/manifest workflow with no upstream counterpart. |
 | `frames/interval.py` | original | — | Session-written fixed-interval frame sampling with a grayscale mean-abs-diff dedup (`pacs_frames.py` in `rad-workflow`, itself never a port of an upstream file). No upstream analog. |
 | `frames/manifest.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/lecture-to-notes/scripts/slide_frames.py` (JSON-merge portion); the shared manifest record format itself is this package's own addition. |

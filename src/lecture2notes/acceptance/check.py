@@ -29,6 +29,7 @@ from urllib.parse import unquote
 
 from lecture2notes import _out
 from lecture2notes.engines.base import SRT_TIME
+from lecture2notes.frames.manifest import read_manifest, sha256_file
 from lecture2notes.schema.model import (
     MAX_SUMMARY_CHARS,
     MAX_TAKEAWAYS,
@@ -525,6 +526,92 @@ def check_json_frames(
                 )
 
 
+#: How much of a digest the ``sha256`` finding prints. Four hex characters
+#: identify a mismatch at a glance without turning one finding into a 140
+#: character line; the full pair is available from
+#: ``frames.manifest.verify_manifest``.
+DIGEST_PREVIEW = 4
+
+
+def _digest_preview(digest: str) -> str:
+    return "%s.." % str(digest)[:DIGEST_PREVIEW]
+
+
+def check_frames(path: Path) -> StageReport:
+    """The ``frames`` stage check over one ``<stem>.frames.json``.
+
+    Three rules, all mechanical: every listed file exists and still hashes to
+    the value the manifest recorded, timestamps strictly increase, and there is
+    at least one frame. The hash rule is the reason the manifest carries
+    ``sha256`` at all -- a frame regenerated after the manifest was written
+    looks perfectly fine on disk and silently un-anchors every reference to it.
+    """
+    target = Path(path)
+    report = StageReport("frames", target.name)
+
+    try:
+        rows = read_manifest(target)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        report.add("error", "parse", target.name, "manifest is unreadable: %s" % exc)
+        return report
+
+    if not rows:
+        report.add(
+            "error", "frames", target.name,
+            "manifest lists no frames; capture produced nothing",
+        )
+        return report
+
+    base_dir = target.parent
+    previous: Optional[float] = None
+    for position, row in enumerate(rows, 1):
+        if not isinstance(row, Mapping):
+            report.add("error", "row", "frames[%d]" % position, "row is not an object")
+            continue
+        name = str(row.get("frame") or "")
+        location = name or "frames[%d]" % position
+
+        second = row.get("timestamp_sec")
+        if isinstance(second, bool) or not isinstance(second, (int, float)):
+            report.add(
+                "error", "timestamp_sec", location,
+                "timestamp_sec is missing or not a number: %r" % (second,),
+            )
+        else:
+            if previous is not None and float(second) <= previous:
+                report.add(
+                    "error", "timestamp", location,
+                    "timestamp %g does not increase after %g" % (second, previous),
+                )
+            previous = float(second)
+
+        relative = safe_relative_frame_path(unquote(name))
+        resolved = (
+            path_within_base(base_dir, relative) if relative is not None else None
+        )
+        if resolved is None:
+            report.add(
+                "error", "frame_path", location,
+                "frame path is not a safe relative path: %s" % (name or "(empty)"),
+            )
+            continue
+        if not resolved.is_file():
+            report.add("error", "frame_missing", location, "file does not exist")
+            continue
+        expected = row.get("sha256")
+        if not isinstance(expected, str) or not expected:
+            report.add("warn", "sha256", location, "manifest row carries no sha256")
+            continue
+        actual = sha256_file(resolved)
+        if actual != expected:
+            report.add(
+                "error", "sha256", location,
+                "manifest %s actual %s"
+                % (_digest_preview(expected), _digest_preview(actual)),
+            )
+    return report
+
+
 def check_json(path: Path, require_frames: bool = True) -> StageReport:
     """The ``json`` stage check over one canonical document.
 
@@ -564,6 +651,7 @@ __all__ = [
     "CLOCK_TOLERANCE_SEC",
     "CORRECTIONS_SUFFIX",
     "CUE_OVERLAP_TOLERANCE_SEC",
+    "DIGEST_PREVIEW",
     "MIN_CUE_SEC",
     "RAW_SUFFIX",
     "MAX_SEGMENT_GAP_SEC",
@@ -576,6 +664,7 @@ __all__ = [
     "Report",
     "StageReport",
     "check_document",
+    "check_frames",
     "check_json",
     "check_json_frames",
     "check_note",
