@@ -330,7 +330,6 @@ def run_ocr(
             if text:
                 result.recognised.append(frame)
             progress.advance()
-        progress.finish()
         write_cache(cache_file, cache)
     else:
         result.recognised = [

@@ -198,7 +198,8 @@ def capture(
             previous = signature
         result.records.append(record_for_file(second, target, root))
         progress.advance()
-    progress.finish()
+    # No progress.finish(): advance() already emits on the final unit, and with
+    # nothing planned a "0/0" line would be noise the stage summary repeats.
 
     write_manifest(result.manifest_path, result.records)
     _out.stage("frames", result.summary())

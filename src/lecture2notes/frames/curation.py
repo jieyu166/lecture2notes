@@ -237,7 +237,6 @@ def curate(
         result.promoted.append(promoted)
         taken[index] = taken.get(index, 0) + 1
         progress.advance()
-    progress.finish()
     return result
 
 
