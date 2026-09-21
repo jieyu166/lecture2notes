@@ -183,8 +183,16 @@ def transcribe_video(
     result.cues = cues
     _out.stage("transcribe", "%d cues -> %s" % (len(cues), srt_path.name))
 
-    if pairs is not None:
-        applied = apply_table(srt_path, pairs, cues, table_path=table_path, s2t=s2t)
+    # Conversion to traditional Chinese is a separate promise from the
+    # correction table: ``--no-s2t`` documents it as on by default, so a run
+    # with no ``--corrections`` still owes the user that pass. Gating the whole
+    # block on ``pairs is not None`` skipped it silently, which went unnoticed
+    # while every engine happened to emit traditional Chinese already; qwen3_asr
+    # emits simplified, so the gap reached the subtitles.
+    if pairs is not None or s2t:
+        applied = apply_table(
+            srt_path, pairs or [], cues, table_path=table_path, s2t=s2t
+        )
         result.raw = Path(applied["raw"])
         result.sidecar = Path(applied["sidecar"]) if applied.get("sidecar") else None
         result.corrections = list(applied.get("hits") or [])

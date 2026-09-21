@@ -114,12 +114,26 @@ def media_duration(source: Path, runner: Runner = _run) -> float:
         return 0.0
 
 
+#: A final window shorter than this is dropped rather than transcribed. The
+#: window before it already reaches the end of the recording, so the only thing
+#: lost is a sliver of trailing audio -- and feeding that sliver to a model is
+#: not a lesser evil: Qwen3-ASR raises "Padding size should be less than the
+#: corresponding input dimension" on a 33 ms window and takes the whole run down
+#: with it at the very last step.
+MIN_TAIL_SEC = 1.0
+
+
 def plan_chunks(duration_sec: float, chunk_sec: float, overlap_sec: float = 0.0) -> List[float]:
     """Start times covering ``duration_sec`` in windows of ``chunk_sec``.
 
     Some backends cannot process an arbitrarily long recording in one pass, so a
     long lecture is transcribed window by window and the cue times are shifted
     back afterwards.
+
+    A duration a hair over an exact multiple of ``chunk_sec`` is the normal case,
+    not a corner case: container durations carry milliseconds, so a 6-minute clip
+    probed at 360.033 s used to plan a fourth 33 ms window at 360 s. Any window
+    shorter than :data:`MIN_TAIL_SEC` is therefore dropped.
     """
     if chunk_sec <= 0:
         raise ValueError("chunk_sec must be positive")
@@ -129,6 +143,11 @@ def plan_chunks(duration_sec: float, chunk_sec: float, overlap_sec: float = 0.0)
     starts: List[float] = []
     position = 0.0
     while position < duration_sec:
+        # Never drop the first window: a recording shorter than MIN_TAIL_SEC
+        # still has to be transcribed, and the guard above already returned for
+        # anything that fits in one window.
+        if starts and duration_sec - position < MIN_TAIL_SEC:
+            break
         starts.append(round(position, 3))
         position += step
     return starts
@@ -136,6 +155,7 @@ def plan_chunks(duration_sec: float, chunk_sec: float, overlap_sec: float = 0.0)
 
 __all__ = [
     "CHANNELS",
+    "MIN_TAIL_SEC",
     "READY_SUFFIXES",
     "SAMPLE_RATE",
     "build_extract_command",

@@ -513,10 +513,15 @@ def test_qwen3_asr_transcribes_a_real_clip_into_a_valid_srt(tmp_path):
     """Real weights, real CUDA, real audio. Skipped unless all three are present.
 
     Set LECTURE2NOTES_QWEN_MODEL_DIR and LECTURE2NOTES_QWEN_ALIGNER_DIR to
-    already-downloaded weight directories, and drop a short CC-licensed clip at
-    tests/fixtures/sample.mp4. Nothing here downloads anything.
+    already-downloaded weight directories. The recording is the one CC BY clip
+    the repository already carries, so nothing here downloads anything: an
+    earlier revision pointed at ``tests/fixtures/sample.mp4``, a file
+    ``test_fixture_media`` forbids anyone from adding, which made this test skip
+    even on a machine that had every other piece.
     """
     import os
+
+    from fixture_paths import FIXTURE_CLIP
 
     if not _deps.module_available("qwen_asr"):
         pytest.skip("qwen-asr is not installed")
@@ -528,16 +533,21 @@ def test_qwen3_asr_transcribes_a_real_clip_into_a_valid_srt(tmp_path):
         pytest.skip("set %s to a downloaded Qwen3-ASR directory" % QWEN_WEIGHTS_ENV)
     if not aligner_dir or not Path(aligner_dir).is_dir():
         pytest.skip("set %s to a downloaded aligner directory" % QWEN_ALIGNER_ENV)
-    clip = Path(__file__).parent / "fixtures" / "sample.mp4"
-    if not clip.is_file():
-        pytest.skip("no tests/fixtures/sample.mp4 to transcribe")
+    if not FIXTURE_CLIP.is_file():
+        pytest.skip("the committed fixture clip is missing")
 
     from lecture2notes.acceptance import check as check_mod
     from lecture2notes.engines import pipeline
 
     engine = qwen.Qwen3AsrEngine(model_dir=model_dir, aligner_dir=aligner_dir)
     result = pipeline.transcribe_video(
-        clip, "zh", engine, out_dir=tmp_path, workdir=tmp_path / "work"
+        # The clip is an English lecture excerpt; transcribing it as Chinese
+        # asks the model to invent one.
+        FIXTURE_CLIP,
+        "en",
+        engine,
+        out_dir=tmp_path,
+        workdir=tmp_path / "work",
     )
     assert result.srt.is_file()
     report = check_mod.Report(result.srt.name)

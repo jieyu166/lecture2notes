@@ -26,7 +26,9 @@ upstream source on 2026-09-21 (links in README's engine table):
 3. **The aligner is documented for up to five minutes of speech.** A lecture is
    an hour or three, so this engine declares :attr:`chunk_sec`; the transcribe
    stage cuts the audio into windows of that length and shifts each window's
-   cues back onto the recording's clock.
+   cues back onto the recording's clock. The window is 120 s rather than a value
+   just under the documented ceiling because a 240 s window measurably loses
+   speech -- see :data:`DEFAULT_CHUNK_SEC`.
 
 ``start_time`` and ``end_time`` on an alignment item are **seconds**, despite
 being annotated ``int`` upstream: the aligner divides its internal milliseconds
@@ -64,8 +66,17 @@ LANGUAGE_NAMES: Dict[str, Optional[str]] = {
     "auto": None,
 }
 
-#: The aligner is documented for up to five minutes of speech; stay under it.
-DEFAULT_CHUNK_SEC = 240.0
+#: The aligner is documented for up to five minutes of speech, but staying just
+#: under that documented ceiling turned out not to be enough. Measured on
+#: 2026-09-21 against a six-minute Mandarin lecture (RTX 4060 Laptop 8 GB, 0.6B
+#: plus aligner, transformers backend): at 240 s the run reproducibly dropped a
+#: continuous 23.5 s stretch of speech out of the middle of the first window --
+#: 1767 transcribed characters against 1902 at 120 s, with the missing span
+#: confirmed present in a Breeze-ASR-25 transcript of the same audio. At 120 s
+#: nothing was lost and wall time was comparable, so the shorter window is the
+#: default; ``--chunk-sec`` raises it for anyone who would rather have fewer
+#: model calls than every sentence.
+DEFAULT_CHUNK_SEC = 120.0
 
 #: Cue assembly limits. A cue ends at sentence punctuation, or when one of these
 #: is reached, whichever comes first.
