@@ -198,3 +198,52 @@ def test_the_report_is_not_written_when_no_report_path_is_given(
     cli_entry(["check", "--all", str(synthetic_lecture.document), "--style", "faithful"])
 
     assert {p.name for p in synthetic_lecture.root.iterdir()} == before
+
+
+# -- the derivative comparison: the note is judged on its spine, not its bytes
+def test_an_expanded_note_is_not_a_derivative_mismatch(synthetic_lecture):
+    """The note is expanded in place, so a byte comparison could never pass."""
+    document = json.loads(synthetic_lecture.document.read_text(encoding="utf-8"))
+    text = synthetic_lecture.note.read_text(encoding="utf-8")
+    synthetic_lecture.note.write_text(
+        text.replace(
+            "### References", "這段是模型擴寫出來的內文。\n\n### References", 1
+        ),
+        encoding="utf-8",
+    )
+
+    assert audit.compare_derived(document, note_path=synthetic_lecture.note) == []
+
+
+def test_a_note_that_lost_a_segment_is_a_structural_error(synthetic_lecture):
+    document = json.loads(synthetic_lecture.document.read_text(encoding="utf-8"))
+    lines = synthetic_lecture.note.read_text(encoding="utf-8").split("\n")
+    at = next(i for i, line in enumerate(lines) if line.startswith("## 3、"))
+    stop = next(
+        (i for i in range(at + 1, len(lines)) if lines[i].startswith("### ")),
+        len(lines),
+    )
+    synthetic_lecture.note.write_text(
+        "\n".join(lines[:at] + lines[stop:]), encoding="utf-8"
+    )
+
+    findings = audit.compare_derived(document, note_path=synthetic_lecture.note)
+
+    assert [finding.code for finding in findings] == ["note_segment_mismatch"]
+
+
+def test_a_missing_note_is_still_reported(synthetic_lecture):
+    document = json.loads(synthetic_lecture.document.read_text(encoding="utf-8"))
+    synthetic_lecture.note.unlink()
+
+    findings = audit.compare_derived(document, note_path=synthetic_lecture.note)
+
+    assert [finding.code for finding in findings] == ["note_missing"]
+
+
+def test_the_spine_is_what_the_skeleton_writes(synthetic_lecture):
+    document = json.loads(synthetic_lecture.document.read_text(encoding="utf-8"))
+    text = synthetic_lecture.note.read_text(encoding="utf-8")
+
+    for heading in audit.note_spine(document):
+        assert "## %s" % heading in text
