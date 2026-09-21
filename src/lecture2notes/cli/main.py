@@ -355,15 +355,23 @@ def cmd_ocr(args: argparse.Namespace) -> int:
     if not path.exists():
         _out.error("no such file or folder: %s" % path)
         return exit_codes.ERROR
-    result = ocr_mod.run_ocr(
-        path,
-        min_conf=getattr(args, "min_conf", ocr_mod.DEFAULT_MIN_CONF),
-        s2t=not getattr(args, "no_s2t", False),
-        force=getattr(args, "force", False),
-    )
+    try:
+        result = ocr_mod.run_ocr(
+            path,
+            min_conf=getattr(args, "min_conf", ocr_mod.DEFAULT_MIN_CONF),
+            s2t=not getattr(args, "no_s2t", False),
+            force=getattr(args, "force", False),
+        )
+    except ocr_mod.OcrTargetError as exc:
+        # A frames folder that names no lecture, or more than one. Writing an
+        # orphan cache nobody reads is the failure this replaces.
+        _out.error("ocr: %s" % exc.message)
+        return exit_codes.ERROR
     _out.ok(
         "ocr: %d frames, %d with text" % (result.total, len(result.recognised))
     )
+    if result.document is not None:
+        _out.stage("ocr", "merged into %s" % result.document.name)
     return exit_codes.OK
 
 

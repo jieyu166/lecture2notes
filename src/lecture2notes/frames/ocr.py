@@ -30,6 +30,11 @@ from lecture2notes.schema.io import read_json, write_json_atomic
 IMG_EXT = (".png", ".jpg", ".jpeg", ".webp")
 CACHE_SUFFIX = ".frames_ocr.json"
 DOCUMENT_SUFFIX = ".json"
+MANIFEST_SUFFIX = ".frames.json"
+#: JSON files beside a lecture that are sidecars rather than the lecture. Their
+#: names must never be mistaken for a stem, or `l2n ocr <folder>` would resolve
+#: a folder to its own cache.
+SIDECAR_SUFFIXES = (CACHE_SUFFIX, ".corrections.json", ".audit.json", ".package.json")
 ENGINE_NAME = "rapidocr-onnxruntime"
 DEFAULT_MIN_CONF = 0.5
 
@@ -261,11 +266,75 @@ class OcrResult:
         return self.total - self.cached
 
 
-def cache_path_for(target: Path) -> Path:
+class OcrTargetError(ValueError):
+    """A frames folder that does not resolve to exactly one lecture stem."""
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(message)
+
+
+def folder_stems(folder: Path) -> List[str]:
+    """Lecture stems named by the JSON files beside *folder*, sorted, unique.
+
+    A lecture is named by ``<stem>.json`` or by ``<stem>.frames.json``; every
+    other JSON beside it is a sidecar of one of those two and must not be read
+    as a stem of its own.
+    """
+    folder = Path(folder)
+    stems: List[str] = []
+    seen: set = set()
+    if not folder.parent.is_dir():
+        return stems
+    for path in sorted(folder.parent.iterdir()):
+        name = path.name
+        if not path.is_file() or not name.endswith(DOCUMENT_SUFFIX):
+            continue
+        if name.startswith("_") or any(name.endswith(s) for s in SIDECAR_SUFFIXES):
+            continue
+        if name.endswith(MANIFEST_SUFFIX):
+            stem = name[: -len(MANIFEST_SUFFIX)]
+        else:
+            stem = name[: -len(DOCUMENT_SUFFIX)]
+        if stem and stem not in seen:
+            seen.add(stem)
+            stems.append(stem)
+    return stems
+
+
+def resolve_folder_target(folder: Path):
+    """``(stem, document_or_None)`` for a frames folder, or raise.
+
+    A folder does not say which lecture it belongs to; its name is almost
+    always just ``frames``. Deriving the stem from the folder name produced
+    ``frames.frames_ocr.json`` -- a cache no stage ever reads again, beside a
+    document that never received the OCR text. Refusing is better than writing
+    an orphan: the caller is one flag away from naming the document itself.
+    """
+    folder = Path(folder)
+    stems = folder_stems(folder)
+    if not stems:
+        raise OcrTargetError(
+            "no <stem>.json or <stem>.frames.json beside %s, so ocr cannot tell "
+            "which lecture these frames belong to; run `l2n ocr <stem>.json`"
+            % folder
+        )
+    if len(stems) > 1:
+        raise OcrTargetError(
+            "%d lectures sit beside %s (%s); run `l2n ocr <stem>.json` to say "
+            "which one these frames belong to" % (len(stems), folder, ", ".join(stems))
+        )
+    stem = stems[0]
+    document = folder.parent / (stem + DOCUMENT_SUFFIX)
+    return stem, (document if document.is_file() else None)
+
+
+def cache_path_for(target: Path, stem: Optional[str] = None) -> Path:
     """``<stem>.frames_ocr.json`` beside the document, or beside the folder."""
     target = Path(target)
     if target.is_dir():
-        return target.parent / (target.name + CACHE_SUFFIX)
+        resolved = stem if stem else resolve_folder_target(target)[0]
+        return target.parent / (resolved + CACHE_SUFFIX)
     name = target.name
     if name.endswith(DOCUMENT_SUFFIX):
         name = name[: -len(DOCUMENT_SUFFIX)]
@@ -290,16 +359,26 @@ def run_ocr(
     target = Path(target)
     document: Optional[Path] = None
     data: Optional[Dict[str, Any]] = None
+    stem: Optional[str] = None
     if target.is_dir():
+        # A folder is resolved to the lecture beside it rather than to its own
+        # name, so the cache lands on `<stem>.frames_ocr.json` and the text
+        # reaches the document. Raises OcrTargetError when that is ambiguous.
+        stem, document = resolve_folder_target(target)
         base_dir = target.parent
         frames = collect_frames(None, target)
+        if document is not None:
+            data = read_json(document)
+            for frame in collect_frames(data, None):
+                if frame not in frames:
+                    frames.append(frame)
     else:
         document = target
         data = read_json(target)
         base_dir = target.parent
         frames = collect_frames(data, None)
 
-    cache_file = cache_path_for(target)
+    cache_file = cache_path_for(target, stem)
     cache = read_cache(cache_file)
     todo = pending_frames(frames, cache, base_dir, force)
     result = OcrResult(
@@ -353,8 +432,13 @@ __all__ = [
     "lines_from_result",
     "load_engine",
     "load_s2t",
+    "MANIFEST_SUFFIX",
     "OcrResult",
+    "OcrTargetError",
+    "SIDECAR_SUFFIXES",
     "cache_path_for",
+    "folder_stems",
+    "resolve_folder_target",
     "merge_ocr_into_segments",
     "ocr_one",
     "pending_frames",

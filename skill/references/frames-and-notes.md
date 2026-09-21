@@ -22,10 +22,16 @@ l2n frames <video> --mode interval --every 45
 ## OCR
 
 ```bash
-l2n ocr <frames 資料夾或 stem.json>
+l2n ocr <stem>.json          # 建議寫法
+l2n ocr <frames 資料夾>       # 只有在同層剛好一場講座時才可用
 ```
 
 旗標：`--min-conf`（低於此信心值直接丟棄）、`--no-s2t`（預設會簡轉繁）。
+
+傳資料夾時，stem 取自**同層唯一**的 `<stem>.json` 或 `<stem>.frames.json`；
+找不到或不只一個就 exit 2 並說明，不會自己拿資料夾名當 stem。
+（舊行為會寫出 `frames.frames_ocr.json` 這種沒人會再讀的孤兒快取，
+而 `<stem>.json` 一個字的 OCR 都拿不到。）
 
 OCR 結果只寫進 JSON 的 `frame_ocr`，作用是**讓你決定要打開哪一張影格**。
 辨識結果會把字讀錯，所以 **OCR 文字不可以抄進筆記**。這是 HARD RULE 3。

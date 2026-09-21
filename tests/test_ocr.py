@@ -204,14 +204,64 @@ def test_meeting_toolbar_lines_are_stripped(tmp_path: Path, no_s2t):
     assert data["segments"][0]["frame_ocr"][0]["text"] == "Lung-RADS 4B"
 
 
-def test_a_frames_folder_can_be_ocred_without_a_document(tmp_path: Path, no_s2t):
-    build_lecture(tmp_path, frame_count=2)
+def test_a_frames_folder_resolves_to_the_lecture_beside_it(tmp_path: Path, no_s2t):
+    """Task 15.2. The folder is named `frames`; the lecture is not.
+
+    Deriving the stem from the folder name wrote `frames.frames_ocr.json`, a
+    cache no later stage ever opens, and left `talk.json` without a single
+    character of OCR text. A field run did exactly this and only noticed at the
+    note-writing stage.
+    """
+    document = build_lecture(tmp_path, frame_count=2)
 
     result = ocr_mod.run_ocr(tmp_path / "frames", engine_factory=CountingEngine)
 
     assert result.total == 2
+    assert result.document == document
+    assert (tmp_path / "talk.frames_ocr.json").is_file()
+    assert not (tmp_path / "frames.frames_ocr.json").exists()
+    assert read_json(document)["segments"][0]["frame_ocr"]
+
+
+def test_a_frames_folder_beside_a_manifest_alone_still_resolves(tmp_path: Path, no_s2t):
+    """`<stem>.frames.json` names the stem even before the document exists."""
+    build_lecture(tmp_path, frame_count=1)
+    (tmp_path / "talk.json").rename(tmp_path / "talk.frames.json")
+
+    result = ocr_mod.run_ocr(tmp_path / "frames", engine_factory=CountingEngine)
+
     assert result.document is None
-    assert (tmp_path / "frames.frames_ocr.json").is_file()
+    assert (tmp_path / "talk.frames_ocr.json").is_file()
+
+
+def test_a_frames_folder_with_no_lecture_beside_it_is_refused(tmp_path: Path, no_s2t):
+    build_lecture(tmp_path, frame_count=1)
+    (tmp_path / "talk.json").unlink()
+
+    with pytest.raises(ocr_mod.OcrTargetError) as excinfo:
+        ocr_mod.run_ocr(tmp_path / "frames", engine_factory=CountingEngine)
+
+    assert "which lecture" in str(excinfo.value)
+    assert not list(tmp_path.glob("*.frames_ocr.json"))
+
+
+def test_two_lectures_beside_one_frames_folder_are_refused(tmp_path: Path, no_s2t):
+    build_lecture(tmp_path, frame_count=1)
+    (tmp_path / "other.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ocr_mod.OcrTargetError) as excinfo:
+        ocr_mod.run_ocr(tmp_path / "frames", engine_factory=CountingEngine)
+
+    assert "other" in str(excinfo.value) and "talk" in str(excinfo.value)
+
+
+def test_sidecars_beside_a_folder_are_not_mistaken_for_lectures(tmp_path: Path):
+    build_lecture(tmp_path, frame_count=1)
+    for name in ("talk.frames.json", "talk.frames_ocr.json",
+                 "talk.corrections.json", "_course.json"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+
+    assert ocr_mod.folder_stems(tmp_path / "frames") == ["talk"]
 
 
 def test_progress_is_reported_and_stays_ascii(tmp_path: Path, capsys, no_s2t):
@@ -255,3 +305,32 @@ def test_cli_ocr_on_a_missing_target_is_a_usage_error(tmp_path: Path, monkeypatc
     monkeypatch.setitem(_deps._CHECKS, "rapidocr", lambda *a, **k: object())
 
     assert cli_entry(["ocr", str(tmp_path / "nope.json")]) == 2
+
+
+def test_cli_ocr_on_a_frames_folder_writes_the_lecture_cache(
+    tmp_path: Path, monkeypatch, no_s2t
+):
+    document = build_lecture(tmp_path, frame_count=2)
+    monkeypatch.setitem(_deps._CHECKS, "rapidocr", lambda *a, **k: object())
+    monkeypatch.setattr(ocr_mod, "load_engine", CountingEngine)
+
+    assert cli_entry(["ocr", str(tmp_path / "frames")]) == 0
+
+    assert (tmp_path / "talk.frames_ocr.json").is_file()
+    assert not (tmp_path / "frames.frames_ocr.json").exists()
+    assert read_json(document)["segments"][0]["frame_ocr"]
+
+
+def test_cli_ocr_on_an_ambiguous_frames_folder_exits_2(
+    tmp_path: Path, monkeypatch, capsys, no_s2t
+):
+    build_lecture(tmp_path, frame_count=1)
+    (tmp_path / "other.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setitem(_deps._CHECKS, "rapidocr", lambda *a, **k: object())
+    monkeypatch.setattr(ocr_mod, "load_engine", CountingEngine)
+
+    assert cli_entry(["ocr", str(tmp_path / "frames")]) == 2
+
+    printed = capsys.readouterr().out
+    assert "[error] ocr:" in printed
+    assert not list(tmp_path.glob("*.frames_ocr.json"))
