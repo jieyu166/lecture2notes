@@ -80,7 +80,7 @@ DashScope 的 `qwen3-asr-flash` 是**雲端付費 API**，與上述開源權重�
 ## 子命令
 
 `transcribe`、`calibrate-subs`、`frames`、`ocr`、`scaffold`、`render`、`viewer`、`pbf`、
-`hub`、`check`、`migrate`、`run`、`convert-model`、`profile`、`install-skill`。
+`hub`、`publish`、`check`、`migrate`、`run`、`convert-model`、`profile`、`install-skill`。
 
 Exit code 約定：0 成功、1 有警告、2 合約或參數錯誤、3 缺外部相依、4 該階段尚未實作。
 

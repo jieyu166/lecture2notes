@@ -30,12 +30,33 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from lecture2notes import _out
 from lecture2notes.schema.model import write_json_atomic
 
 #: A sortable local timestamp, with a numeric suffix when two runs collide.
 RUN_ID_RE = re.compile(r"^(\d{8}-\d{6})(?:-(\d{2,}))?$")
+
+#: Where the backups of a destination live: a sibling of the destination, so a
+#: published folder never carries its own previous versions inside itself and a
+#: hub built over the destination cannot accidentally index them.
+BACKUP_SUFFIX = ".l2n-backup"
+
+#: The record a completed publication leaves in the destination.
+SUMMARY_SUFFIX = ".publish.json"
+
+#: Temporary copies are hidden and carry the run ID, so a crashed run leaves
+#: something identifiable rather than a mystery file next to the real ones.
+TEMP_PREFIX = "."
+
+
+class PublishFailure(IOError):
+    """A failure that knows which file it happened on."""
+
+    def __init__(self, message: str, relative_path: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.relative_path = relative_path
 
 
 @dataclass
@@ -69,6 +90,10 @@ class PublishManifest:
     error: Optional[str] = None
     rollback_errors: List[str] = field(default_factory=list)
     persistence_errors: List[str] = field(default_factory=list)
+    #: Which file the transaction died on, when it died on one. The message in
+    #: ``error`` already names it, but a caller should not have to parse prose
+    #: to tell the user which file to look at.
+    failed_path: Optional[str] = None
 
 
 @dataclass
@@ -298,8 +323,20 @@ def publish(
         if manifest.persistence_errors:
             try:
                 _write_recovery_evidence(manifest)
-            except Exception:
-                pass
+            except Exception as evidence_exc:
+                # The rollback already happened; what is lost here is the record
+                # of it. Swallowing that silently is the worst case in this
+                # module: the files are fine and nothing says the transaction
+                # ever ran, so nobody knows to look.
+                manifest.rollback_errors.append(
+                    "recovery evidence: %s: %s"
+                    % (type(evidence_exc).__name__, evidence_exc)
+                )
+                _out.say(
+                    "warn",
+                    "could not write recovery evidence to %s: %s"
+                    % (manifest.recovery_path, evidence_exc),
+                )
         return result
 
 
@@ -319,6 +356,7 @@ def load_manifest(path: Path) -> PublishManifest:
         error=raw.get("error"),
         rollback_errors=list(raw.get("rollback_errors", [])),
         persistence_errors=list(raw.get("persistence_errors", [])),
+        failed_path=raw.get("failed_path"),
     )
 
 
@@ -332,14 +370,21 @@ def recover(path: Path) -> PublishResult:
 
 def publish_summary(manifest: PublishManifest) -> Dict[str, Any]:
     """The ``<stem>.publish.json`` payload: every file with the hash published."""
+    replaced_any = any(entry.old_exists for entry in manifest.entries)
     return {
         "run_id": manifest.run_id,
         "lecture_id": manifest.lecture_id,
         "state": manifest.state,
         "published_at": manifest.updated_at,
+        # Null when nothing was replaced: there is then no previous version to
+        # go back to, and pointing at a directory holding only the transaction
+        # record would imply there is.
+        "backup_dir": manifest.backup_path if replaced_any else None,
         "files": [
             {
                 "path": entry.relative_path,
+                "source": entry.staged,
+                "dest": entry.live,
                 "sha256": entry.verified_sha256 or entry.new_sha256,
                 "replaced": entry.old_exists,
             }
@@ -348,14 +393,296 @@ def publish_summary(manifest: PublishManifest) -> Dict[str, Any]:
     }
 
 
+# ==========================================================================
+# the batch transaction behind `l2n publish`
+# ==========================================================================
+# `publish` above replaces one file at a time: copy, verify, rename, next. That
+# is what the source did and it is recoverable, but it leaves a window in which
+# the destination holds a mixture -- three new files, three old ones -- and the
+# only way back out is the backups.
+#
+# `publish_batch` closes the window. Every file is copied to a temporary name
+# and hashed first; only when all of them verify does anything get renamed. A
+# verification failure therefore happens before the destination has been touched
+# at all, which is what makes "the destination contains exactly the files it had
+# before" true by construction rather than by the rollback working correctly.
+
+
+def _verify_copy(path: Path, expected: str) -> bool:
+    """Does the temporary copy hash to what the manifest recorded?
+
+    A named function rather than an inline comparison because this is the point
+    the rollback test has to fail on, and a test that had to corrupt a file on
+    disk to get there would be testing the filesystem instead.
+    """
+    return sha256(Path(path)) == expected
+
+
+def _temp_name(live: Path, run_id: str, position: int) -> Path:
+    return live.with_name(
+        "%s%s.publish-%s-%03d.tmp" % (TEMP_PREFIX, live.name, run_id, position)
+    )
+
+
+def _discard(path: Path) -> None:
+    try:
+        Path(path).unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        _out.say("warn", "could not remove temporary file %s: %s" % (path, exc))
+
+
+def publish_batch(
+    manifest: PublishManifest,
+    replace_func: Callable[[str, str], Any] = os.replace,
+) -> PublishResult:
+    """Back up, stage and verify every file, then rename them all, or roll back."""
+    validate_run_id(manifest.run_id)
+    staged: List[Tuple[ManifestEntry, Path]] = []
+    try:
+        _require_manifest_write(manifest)
+        manifest.state = "backing_up"
+        _require_manifest_write(manifest)
+        for entry in manifest.entries:
+            if entry.old_exists:
+                backup = Path(entry.backup)
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(entry.live, backup)
+                if entry.old_sha256 is None or sha256(backup) != entry.old_sha256:
+                    raise PublishFailure(
+                        "backup hash mismatch: %s" % entry.relative_path,
+                        entry.relative_path,
+                    )
+            entry.state = "backed_up"
+        _require_manifest_write(manifest)
+
+        manifest.state = "staging"
+        _require_manifest_write(manifest)
+        for position, entry in enumerate(manifest.entries):
+            live = Path(entry.live)
+            live.parent.mkdir(parents=True, exist_ok=True)
+            temporary = _temp_name(live, manifest.run_id, position)
+            shutil.copy2(entry.staged, temporary)
+            staged.append((entry, temporary))
+            if not _verify_copy(temporary, entry.new_sha256):
+                raise PublishFailure(
+                    "staged copy hash mismatch: %s" % entry.relative_path,
+                    entry.relative_path,
+                )
+
+        manifest.state = "replacing"
+        _require_manifest_write(manifest)
+        for entry, temporary in staged:
+            entry.state = "replace_started"
+            replace_func(str(temporary), str(entry.live))
+            entry.verified_sha256 = entry.new_sha256
+            entry.state = "replaced"
+        manifest.state = "committed"
+        _require_manifest_write(manifest)
+        return PublishResult(True, False)
+    except Exception as exc:
+        manifest.error = "%s: %s" % (type(exc).__name__, exc)
+        manifest.failed_path = getattr(exc, "relative_path", None)
+        return rollback(manifest)
+    finally:
+        # A committed entry's temporary name no longer exists; an abandoned
+        # one's does. Both are handled the same way so no path leaves a .tmp
+        # behind for someone to find later and wonder about.
+        for _, temporary in staged:
+            _discard(temporary)
+
+
+# ==========================================================================
+# `l2n publish <stem> --dest <dir>`
+# ==========================================================================
+
+
+@dataclass
+class PublishOutcome:
+    """What the command should print and exit with."""
+
+    ok: bool
+    code: int
+    message: str
+    files: List[str] = field(default_factory=list)
+    failed_path: Optional[str] = None
+    backup_dir: Optional[str] = None
+    summary_path: Optional[str] = None
+
+
+def _frame_names(source_dir: Path, stem: str) -> List[str]:
+    """Every frame this lecture owns, from the manifest and from the document.
+
+    Both are read because they can disagree and either disagreement is fatal to
+    the published copy: a frame in the manifest but not the document is dead
+    weight, a frame in the document but not the manifest is a broken embed at
+    the destination. Publishing the union means the destination is at least as
+    complete as the source.
+    """
+    names: List[str] = []
+
+    def add(value: Any) -> None:
+        if isinstance(value, str) and value and value not in names:
+            names.append(value)
+
+    manifest_path = source_dir / (stem + ".frames.json")
+    if manifest_path.is_file():
+        try:
+            rows = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            rows = []
+        if isinstance(rows, dict):
+            rows = rows.get("frames") or []
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict):
+                add(row.get("frame"))
+
+    document_path = source_dir / (stem + ".json")
+    if document_path.is_file():
+        try:
+            data = json.loads(document_path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            data = {}
+        for segment in (data.get("segments") or []) if isinstance(data, dict) else []:
+            if not isinstance(segment, dict):
+                continue
+            add(segment.get("frame"))
+            for item in segment.get("frames") or []:
+                add(item)
+            for item in segment.get("frame_ocr") or []:
+                if isinstance(item, dict):
+                    add(item.get("frame"))
+    return names
+
+
+def lecture_relative_paths(
+    stem: str, source_dir: Path, pbf_enabled: bool = False
+) -> List[str]:
+    """The derivative set, in the order it is published.
+
+    Order is fixed rather than sorted so a failure is reproducible: the third
+    file is the third file on every machine. The canonical JSON comes first
+    because everything else is a projection of it.
+    """
+    from lecture2notes.outputs.viewer import viewer_path
+
+    source_dir = Path(source_dir)
+    names: List[str] = []
+
+    def add(path: Path) -> None:
+        if not path.is_file():
+            return
+        try:
+            relative = path.resolve().relative_to(source_dir.resolve()).as_posix()
+        except ValueError:
+            return
+        if relative not in names:
+            names.append(relative)
+
+    document = source_dir / (stem + ".json")
+    add(document)
+    add(source_dir / (stem + ".srt"))
+    add(source_dir / (stem + ".frames.json"))
+    add(source_dir / (stem + ".v4.md"))
+    add(viewer_path(document))
+    if pbf_enabled:
+        add(source_dir / (stem + ".pbf"))
+    for name in _frame_names(source_dir, stem):
+        add(source_dir / name)
+    return names
+
+
+def _remove_run_dir(run_dir: Path, backup_root: Path) -> None:
+    """Delete a rolled-back run's backup directory, and the root if it emptied."""
+    shutil.rmtree(run_dir, ignore_errors=True)
+    try:
+        if backup_root.is_dir() and not any(backup_root.iterdir()):
+            backup_root.rmdir()
+    except OSError as exc:  # pragma: no cover - a locked directory is not fatal
+        _out.say("warn", "could not remove backup directory %s: %s" % (backup_root, exc))
+
+
+def publish_lecture(
+    stem: str,
+    dest: Path,
+    source_dir: Path,
+    pbf_enabled: bool = False,
+    run_id: Optional[str] = None,
+    replace_func: Callable[[str, str], Any] = os.replace,
+) -> PublishOutcome:
+    """Publish one lecture's derivative set into *dest* as a single transaction."""
+    source_dir = Path(source_dir)
+    dest = Path(dest)
+
+    if not same_filesystem(dest, source_dir):
+        return PublishOutcome(
+            False, 2,
+            "publish refuses: %s and %s are on different filesystems, so the "
+            "final rename could not be atomic" % (source_dir, dest),
+        )
+    if dest.resolve() == source_dir.resolve():
+        return PublishOutcome(
+            False, 2, "publish refuses: the destination is the source folder",
+        )
+
+    relative = lecture_relative_paths(stem, source_dir, pbf_enabled=pbf_enabled)
+    if not relative:
+        return PublishOutcome(
+            False, 2, "publish: nothing to publish for %s" % stem,
+        )
+
+    dest.mkdir(parents=True, exist_ok=True)
+    backup_root = dest.parent / (dest.name + BACKUP_SUFFIX)
+    try:
+        manifest = build_manifest(
+            stem, dest, source_dir, backup_root, relative, run_id=run_id
+        )
+    except (ValueError, FileNotFoundError, FileExistsError) as exc:
+        return PublishOutcome(False, 2, "publish: %s" % exc)
+
+    run_dir = Path(manifest.backup_path)
+    result = publish_batch(manifest, replace_func=replace_func)
+    if not result.ok:
+        if result.rolled_back and not manifest.rollback_errors:
+            _remove_run_dir(run_dir, backup_root)
+            recovery = None
+        else:
+            recovery = str(run_dir)
+        return PublishOutcome(
+            False, 2,
+            manifest.error or "publish failed",
+            failed_path=manifest.failed_path,
+            backup_dir=recovery,
+        )
+
+    summary = publish_summary(manifest)
+    summary_path = write_json_atomic(dest / (stem + SUMMARY_SUFFIX), summary)
+    return PublishOutcome(
+        True, 0,
+        "publish: %d files -> %s" % (len(relative), dest),
+        files=relative,
+        backup_dir=summary["backup_dir"],
+        summary_path=str(summary_path),
+    )
+
+
 __all__ = [
+    "BACKUP_SUFFIX",
     "ManifestEntry",
+    "PublishFailure",
     "PublishManifest",
+    "PublishOutcome",
     "PublishResult",
     "RUN_ID_RE",
+    "SUMMARY_SUFFIX",
+    "TEMP_PREFIX",
     "build_manifest",
+    "lecture_relative_paths",
     "load_manifest",
     "publish",
+    "publish_batch",
+    "publish_lecture",
     "publish_summary",
     "recover",
     "resolve_run_id",

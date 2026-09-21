@@ -56,7 +56,9 @@ def test_root_help_lists_every_subcommand():
     assert proc.returncode == 0, proc.stderr
     for command in SUBCOMMANDS:
         assert command in proc.stdout, command
-    assert len(SUBCOMMANDS) == 15
+    # 15 in the CLI specification's scenario, plus `publish`, which the
+    # stage-acceptance specification requires as `l2n publish <stem> --dest`.
+    assert len(SUBCOMMANDS) == 16
 
 
 def test_fake_progress_loop_survives_cp950():

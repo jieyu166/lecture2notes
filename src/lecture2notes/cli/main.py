@@ -37,6 +37,7 @@ from lecture2notes.frames.manifest import read_manifest, write_manifest
 from lecture2notes.notes import guideline, render
 from lecture2notes.outputs import hub as hub_mod
 from lecture2notes.outputs import pbf as pbf_mod
+from lecture2notes.outputs import publish as publish_mod
 from lecture2notes.outputs import viewer as viewer_mod
 from lecture2notes.outputs.plan import plan_for
 from lecture2notes.profiles import loader
@@ -58,6 +59,7 @@ SUBCOMMANDS: List[str] = [
     "viewer",
     "pbf",
     "hub",
+    "publish",
     "check",
     "migrate",
     "run",
@@ -489,6 +491,54 @@ def cmd_hub(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+def cmd_publish(args: argparse.Namespace) -> int:
+    """`l2n publish <stem> --dest <dir>`: the derivative set, as one transaction.
+
+    Publishing means replacing several files at once. One at a time means a
+    failure halfway leaves the destination holding a new viewer, an old chapter
+    file and a note from neither: the pieces disagree and nothing records that
+    they do. So either all of them land or none of them do.
+    """
+    stem_arg = getattr(args, "stem", None)
+    destination = getattr(args, "dest", None)
+    if not stem_arg:
+        _out.error("publish needs a lecture stem")
+        return exit_codes.ERROR
+    if not destination:
+        _out.error("publish needs --dest <dir>")
+        return exit_codes.ERROR
+
+    base = check.stem_path(Path(stem_arg))
+    source_dir = base.parent if str(base.parent) else Path(".")
+    document = base.with_name(base.name + ".json")
+    if not document.is_file():
+        _out.error("publish：找不到正式 JSON %s" % document)
+        return exit_codes.ERROR
+
+    profile = _run_profile(document)
+    outcome = publish_mod.publish_lecture(
+        base.name,
+        Path(destination),
+        source_dir,
+        pbf_enabled=pbf_mod.is_enabled(loader.outputs(profile)),
+    )
+    if not outcome.ok:
+        if outcome.failed_path:
+            _out.error("publish failed on %s" % outcome.failed_path)
+        _out.error(outcome.message)
+        if outcome.backup_dir:
+            _out.warn(
+                "rollback did not finish; the backups are in %s" % outcome.backup_dir
+            )
+        return exit_codes.ERROR
+
+    for name in outcome.files:
+        _out.line("publish -> %s" % name)
+    _out.ok(outcome.message)
+    _out.line("publish backup_dir: %s" % (outcome.backup_dir or "none"))
+    return exit_codes.OK
+
+
 #: Stages `l2n check` knows about. Only the ones with a handler are wired up;
 #: the rest still report "not implemented yet" rather than silently passing.
 CHECK_STAGES = ("transcribe", "frames", "json", "note")
@@ -892,6 +942,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="只列出將建立或覆蓋的檔案，不寫入任何東西",
     )
     p.set_defaults(func=cmd_hub)
+
+    p = sub.add_parser(
+        "publish", parents=[common], help="把一場講座的衍生產物交易式發佈到目標資料夾"
+    )
+    p.add_argument("stem", nargs="?", help="講座 stem 或它的任一個檔案路徑")
+    p.add_argument("--dest", default=None, help="目標資料夾（必須與來源同一個檔案系統）")
+    p.set_defaults(func=cmd_publish)
 
     p = sub.add_parser("check", parents=[common], help="執行各階段的驗收合約")
     p.add_argument(
