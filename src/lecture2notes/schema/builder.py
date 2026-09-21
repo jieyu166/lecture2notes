@@ -1,4 +1,4 @@
-"""Build a canonical lecture document from segment decisions.
+"""Build a canonical schema v2 lecture document from segment decisions.
 
 Consolidated from a segment-builder procedure script written for this project.
 The original took a folder, shelled out to ffprobe for the duration, read the
@@ -21,14 +21,24 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from lecture2notes import _deps, _out
 from lecture2notes.frames.manifest import read_manifest
-from lecture2notes.schema.model import write_json_atomic
+from lecture2notes.schema.io import write_json_atomic
+from lecture2notes.schema.model import (
+    Bullet,
+    LectureDocument,
+    Segment,
+    Source,
+)
 
 VIDEO_EXT = (".mp4", ".m4a", ".webm", ".mov", ".mkv")
 #: Used when the media duration cannot be read: the last segment still needs an end.
 TAIL_PADDING_SEC = 300
 
-#: ``(start_sec, title, summary_zh, bullets)``
-SegmentInput = Tuple[float, str, str, Sequence[str]]
+#: The profile a scaffolded document claims until one is chosen for it.
+DEFAULT_PROFILE = "generic"
+
+#: ``(start_sec, title, summary_zh, bullets)``. A bullet is a plain string or
+#: an already-built ``{text, t, kind}`` object.
+SegmentInput = Tuple[float, str, str, Sequence[Any]]
 
 
 def clock(sec: float) -> str:
@@ -72,8 +82,13 @@ def build_document(
     duration_sec: float,
     frames: Optional[Sequence[Tuple[float, str]]] = None,
     title: Optional[str] = None,
+    source: Optional[Mapping[str, Any]] = None,
+    profile: str = DEFAULT_PROFILE,
+    corrections: Optional[Sequence[Mapping[str, Any]]] = None,
+    unverified_terms: Optional[Sequence[str]] = None,
+    ocr_meta: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Assemble the document. Pure: same input, same bytes.
+    """Assemble a schema v2 document. Pure: same input, same bytes.
 
     A segment ends where the next one starts, and the last one ends at the media
     duration, so ``end_sec`` and the next ``start_sec`` are equal by
@@ -81,6 +96,9 @@ def build_document(
     frame from before it, which is what was actually on screen; ``frames`` stays
     empty in that case so a check can still distinguish "nothing changed" from
     "capture never ran".
+
+    Bullets may be given as plain strings or as ``{text, t, kind}`` objects; both
+    come out as v2 objects, an untimed string becoming a ``synthesis`` bullet.
     """
     if not segments:
         raise ValueError("at least one segment is required")
@@ -88,7 +106,7 @@ def build_document(
     if duration_sec <= 0:
         duration_sec = float(segments[-1][0]) + TAIL_PADDING_SEC
 
-    built: List[Dict[str, Any]] = []
+    built: List[Segment] = []
     for index, (start, seg_title, summary, bullets) in enumerate(segments, 1):
         end = segments[index][0] if index < len(segments) else duration_sec
         inside = [path for sec, path in frames if float(start) <= sec < float(end)]
@@ -97,30 +115,39 @@ def build_document(
         else:
             prior = [path for sec, path in frames if sec < float(start)]
             frame = prior[-1] if prior else (frames[0][1] if frames else None)
-        built.append({
-            "index": index,
-            "start_time": clock(start),
-            "end_time": clock(end),
-            "start_sec": int(start),
-            "end_sec": int(end),
-            "title": seg_title,
-            "summary_zh": summary,
-            "bullets_zh": list(bullets),
-            "frame": frame,
+        built.append(Segment(
+            index=index,
+            start_sec=int(start),
+            end_sec=int(end),
+            start_time=clock(start),
+            end_time=clock(end),
+            title=seg_title,
+            summary_zh=summary,
+            bullets_zh=[Bullet.from_any(bullet) for bullet in bullets],
+            quotes_zh=[],
+            frame=frame,
             # ``frames`` lists only what actually falls inside the segment, so an
             # inherited lead frame never makes it look as if capture found
             # something here.
-            "frames": inside,
-        })
+            frames=inside,
+            frame_ocr=[],
+            editorial_notes_zh=[],
+        ))
 
-    return {
-        "stem": stem,
-        "title": title or stem,
-        "duration_sec": int(duration_sec),
-        "overall_summary_zh": overall_summary,
-        "takeaways_zh": list(takeaways),
-        "segments": built,
-    }
+    document = LectureDocument(
+        stem=stem,
+        title=title or stem,
+        duration_sec=int(duration_sec),
+        source=Source.from_any(source, stem),
+        profile=profile,
+        overall_summary_zh=overall_summary,
+        takeaways_zh=list(takeaways),
+        segments=built,
+        corrections=[dict(item) for item in (corrections or [])],
+        unverified_terms=list(unverified_terms or []),
+        ocr_meta=dict(ocr_meta) if ocr_meta is not None else None,
+    )
+    return document.to_dict()
 
 
 def contiguous(document: Mapping[str, Any]) -> bool:
@@ -167,6 +194,7 @@ def build(
 
 
 __all__ = [
+    "DEFAULT_PROFILE",
     "SegmentInput",
     "TAIL_PADDING_SEC",
     "VIDEO_EXT",

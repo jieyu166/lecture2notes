@@ -28,11 +28,18 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from urllib.parse import unquote
 
 from lecture2notes import _out
+from lecture2notes.schema.model import (
+    MAX_SUMMARY_CHARS,
+    MAX_TAKEAWAYS,
+    MIN_SUMMARY_CHARS,
+    MIN_TAKEAWAYS,
+    Finding,
+    is_legacy,
+    path_within_base,
+    safe_relative_frame_path,
+    validate_document,
+)
 
-MIN_SUMMARY_CHARS = 100
-MAX_SUMMARY_CHARS = 500
-MIN_TAKEAWAYS = 6
-MAX_TAKEAWAYS = 12
 MIN_BULLETS = 2
 #: A gap larger than this between segments probably means a segment is missing.
 MAX_SEGMENT_GAP_SEC = 60
@@ -287,6 +294,177 @@ def check_path(target: Path, note: Optional[Path] = None) -> List[Report]:
     return reports
 
 
+# ==========================================================================
+# stage acceptance: check json
+# ==========================================================================
+# The stage checks share one output contract: one line per finding as
+# ``<severity> <rule-or-field> <location>: <message>``, then
+# ``<stage>: N errors, M warnings``, then exit 0 / 1 / 2. ``Report`` above is
+# the older per-document shape and stays for the note path; ``StageReport`` is
+# the contract shape, and it carries Findings so the structured audit report
+# can be assembled from the same objects.
+
+#: What a legacy document is told to do. The wording is part of the contract.
+LEGACY_MESSAGE = "legacy schema detected; run: l2n migrate %s"
+
+
+@dataclass
+class StageReport:
+    """Findings for one stage check over one target."""
+
+    stage: str
+    target: str
+    findings: List[Finding] = field(default_factory=list)
+
+    def add(
+        self,
+        severity: str,
+        code: str,
+        location: str,
+        message: str,
+        segment_index: Optional[int] = None,
+    ) -> None:
+        self.findings.append(
+            Finding(severity, code, message, segment_index, None, location)
+        )
+
+    @property
+    def errors(self) -> List[Finding]:
+        return [f for f in self.findings if f.severity == "error"]
+
+    @property
+    def warnings(self) -> List[Finding]:
+        return [f for f in self.findings if f.severity == "warn"]
+
+    def lines(self) -> List[str]:
+        """Every finding in the contract's line format."""
+        return [finding.line(self.target) for finding in self.findings]
+
+    def summary_line(self) -> str:
+        return "%s: %d errors, %d warnings" % (
+            self.stage, len(self.errors), len(self.warnings)
+        )
+
+    def emit(self) -> None:
+        """Print the findings and the summary through the ASCII-safe writer."""
+        if not self.findings:
+            _out.stage(self.stage, "ok")
+        for text in self.lines():
+            _out.line(text)
+        _out.line(self.summary_line())
+
+    def exit_code(self) -> int:
+        if self.errors:
+            return 2
+        return 1 if self.warnings else 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "stage": self.stage,
+            "target": self.target,
+            "findings": [finding.to_dict() for finding in self.findings],
+            "errors": len(self.errors),
+            "warnings": len(self.warnings),
+        }
+
+
+def _referenced_frames(segment: Mapping[str, Any]) -> List[str]:
+    """Every frame path one segment points at, in document order, deduplicated."""
+    names: List[str] = []
+    frame = segment.get("frame")
+    if isinstance(frame, str) and frame:
+        names.append(frame)
+    for item in segment.get("frames") or []:
+        if isinstance(item, str) and item:
+            names.append(item)
+    for item in segment.get("frame_ocr") or []:
+        if isinstance(item, Mapping) and isinstance(item.get("frame"), str):
+            if item["frame"]:
+                names.append(item["frame"])
+    seen = set()
+    unique: List[str] = []
+    for name in names:
+        if name not in seen:
+            seen.add(name)
+            unique.append(name)
+    return unique
+
+
+def check_json_frames(
+    data: Mapping[str, Any], base_dir: Path, report: StageReport
+) -> None:
+    """The file-backed half of ``check json``: frames exist and are referenced.
+
+    Split from the structural validator on purpose: the schema rules are decided
+    from the document alone, these need the directory it lives in.
+    """
+    segments = data.get("segments")
+    if not isinstance(segments, list):
+        return
+    for position, segment in enumerate(segments, 1):
+        if not isinstance(segment, Mapping):
+            continue
+        if not segment.get("frame"):
+            report.add(
+                "error", "frame", "segments[%d].frame" % position,
+                "segment %d has no frame" % position, position,
+            )
+        for name in _referenced_frames(segment):
+            relative = safe_relative_frame_path(unquote(name))
+            resolved = (
+                path_within_base(base_dir, relative) if relative is not None else None
+            )
+            if resolved is None:
+                report.add(
+                    "error", "frame_path", "segments[%d]" % position,
+                    "segment %d frame path is not a safe relative path: %s"
+                    % (position, name),
+                    position,
+                )
+                continue
+            if not resolved.is_file():
+                report.add(
+                    "error", "frame_missing", name,
+                    "segment %d references a frame that does not exist" % position,
+                    position,
+                )
+
+
+def check_json(path: Path, require_frames: bool = True) -> StageReport:
+    """The ``json`` stage check over one canonical document.
+
+    Three layers, in this order, because each one only makes sense if the
+    previous passed: the file is readable JSON without a BOM, it is schema v2
+    rather than legacy, and it satisfies every v2 rule plus the frames on disk.
+    """
+    target = Path(path)
+    report = StageReport("json", target.name)
+
+    raw = target.read_bytes()
+    if raw[:3] == b"\xef\xbb\xbf":
+        report.add(
+            "error", "bom", target.name,
+            "file starts with a UTF-8 BOM; canonical JSON must not have one",
+        )
+        raw = raw[3:]
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        report.add("error", "parse", target.name, "JSON is unparseable: %s" % exc)
+        return report
+
+    if is_legacy(data):
+        report.add(
+            "error", "schema_version", target.name, LEGACY_MESSAGE % target.name
+        )
+        return report
+
+    report.findings.extend(validate_document(data))
+    if require_frames:
+        check_json_frames(data, target.parent, report)
+    return report
+
+
 __all__ = [
     "CLOCK_TOLERANCE_SEC",
     "MAX_SEGMENT_GAP_SEC",
@@ -295,8 +473,12 @@ __all__ = [
     "MIN_BULLETS",
     "MIN_SUMMARY_CHARS",
     "MIN_TAKEAWAYS",
+    "LEGACY_MESSAGE",
     "Report",
+    "StageReport",
     "check_document",
+    "check_json",
+    "check_json_frames",
     "check_note",
     "check_path",
     "check_segments",
