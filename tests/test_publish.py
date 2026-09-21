@@ -264,12 +264,18 @@ def test_a_source_on_another_device_is_still_refused(
         )
     else:
         real_stat = os.stat
+        # Resolve once, here, before the patch is installed. `Path.resolve()`
+        # is implemented on top of os.stat on POSIX, so resolving inside the
+        # fake calls the fake, which resolves again: the test died of
+        # RecursionError on Linux while passing on Windows, where this branch
+        # never runs.
+        resolved_dest = dest.resolve()
 
         class _Faked:
             st_dev = -1
 
         def stat(path, *args, **kwargs):
-            if Path(path) == dest.resolve():
+            if Path(path) == resolved_dest:
                 return _Faked()
             return real_stat(path, *args, **kwargs)
 
