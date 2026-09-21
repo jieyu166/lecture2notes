@@ -13,12 +13,14 @@ Exit codes (see ``lecture2notes.exit_codes``):
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
 from lecture2notes import __version__, _deps, _out, exit_codes
 from lecture2notes.acceptance.check import check_json
+from lecture2notes.schema.migrate import migrate_file
 
 LANG_CHOICES = ("zh", "en", "ja", "auto")
 LANG_REQUIRED_MESSAGE = "--lang is required (zh|en|ja|auto)"
@@ -181,7 +183,18 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
-    not_implemented("migrate")
+    path = _existing_path(args.json_file, "migrate")
+    if path is None:
+        return exit_codes.ERROR
+    try:
+        result = migrate_file(path)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        _out.error("migrate：JSON 無法解析 %s（%s）" % (path.name, exc))
+        return exit_codes.ERROR
+    if result.changed:
+        _out.ok(result.summary)
+    else:
+        _out.skip(result.summary)
     return exit_codes.OK
 
 

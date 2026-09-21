@@ -1,0 +1,758 @@
+{
+  "stem": "legacy-talk",
+  "duration_sec": 2460,
+  "overall_summary_zh": "這是一份僅供測試使用的佔位摘要，內容全為虛構，與任何真實講座或課程無關。這是一份僅供測試使用的佔位摘要，內容全為虛構，與任何真實講座或課程無關。這是一份僅供測試使用的佔位摘要，內容全為虛構，與任何真實講座或課程無關。",
+  "takeaways_zh": [
+    "佔位重點第 1 條，僅供結構測試",
+    "佔位重點第 2 條，僅供結構測試",
+    "佔位重點第 3 條，僅供結構測試",
+    "佔位重點第 4 條，僅供結構測試",
+    "佔位重點第 5 條，僅供結構測試",
+    "佔位重點第 6 條，僅供結構測試",
+    "佔位重點第 7 條，僅供結構測試",
+    "佔位重點第 8 條，僅供結構測試"
+  ],
+  "segments": [
+    {
+      "index": 1,
+      "start_time": "00:00:00",
+      "end_time": "00:01:00",
+      "start_sec": 0,
+      "end_sec": 60,
+      "title": "段落 01 佔位標題",
+      "summary_zh": "佔位段落摘要 01，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 01-A",
+        "佔位條列 01-B",
+        "佔位條列 01-C"
+      ],
+      "frame": "frames/legacy-talk-0001.png",
+      "frames": [
+        "frames/legacy-talk-0001.png"
+      ]
+    },
+    {
+      "index": 2,
+      "start_time": "00:01:00",
+      "end_time": "00:02:00",
+      "start_sec": 60,
+      "end_sec": 120,
+      "title": "段落 02 佔位標題",
+      "summary_zh": "佔位段落摘要 02，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 02-A",
+        "佔位條列 02-B",
+        "佔位條列 02-C"
+      ],
+      "frame": "frames/legacy-talk-0002.png",
+      "frames": [
+        "frames/legacy-talk-0002.png"
+      ]
+    },
+    {
+      "index": 3,
+      "start_time": "00:02:00",
+      "end_time": "00:03:00",
+      "start_sec": 120,
+      "end_sec": 180,
+      "title": "段落 03 佔位標題",
+      "summary_zh": "佔位段落摘要 03，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 03-A",
+        "佔位條列 03-B",
+        "佔位條列 03-C"
+      ],
+      "frame": "frames/legacy-talk-0003.png",
+      "frames": [
+        "frames/legacy-talk-0003.png"
+      ]
+    },
+    {
+      "index": 4,
+      "start_time": "00:03:00",
+      "end_time": "00:04:00",
+      "start_sec": 180,
+      "end_sec": 240,
+      "title": "段落 04 佔位標題",
+      "summary_zh": "佔位段落摘要 04，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 04-A",
+        "佔位條列 04-B",
+        "佔位條列 04-C"
+      ],
+      "frame": "frames/legacy-talk-0004.png",
+      "frames": [
+        "frames/legacy-talk-0004.png"
+      ]
+    },
+    {
+      "index": 5,
+      "start_time": "00:04:00",
+      "end_time": "00:05:00",
+      "start_sec": 240,
+      "end_sec": 300,
+      "title": "段落 05 佔位標題",
+      "summary_zh": "佔位段落摘要 05，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 05-A",
+        "佔位條列 05-B",
+        "佔位條列 05-C"
+      ],
+      "frame": "frames/legacy-talk-0005.png",
+      "frames": [
+        "frames/legacy-talk-0005.png"
+      ]
+    },
+    {
+      "index": 6,
+      "start_time": "00:05:00",
+      "end_time": "00:06:00",
+      "start_sec": 300,
+      "end_sec": 360,
+      "title": "段落 06 佔位標題",
+      "summary_zh": "佔位段落摘要 06，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 06-A",
+        "佔位條列 06-B",
+        "佔位條列 06-C"
+      ],
+      "frame": "frames/legacy-talk-0006.png",
+      "frames": [
+        "frames/legacy-talk-0006.png"
+      ]
+    },
+    {
+      "index": 7,
+      "start_time": "00:06:00",
+      "end_time": "00:07:00",
+      "start_sec": 360,
+      "end_sec": 420,
+      "title": "段落 07 佔位標題",
+      "summary_zh": "佔位段落摘要 07，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 07-A",
+        "佔位條列 07-B",
+        "佔位條列 07-C"
+      ],
+      "frame": "frames/legacy-talk-0007.png",
+      "frames": [
+        "frames/legacy-talk-0007.png"
+      ]
+    },
+    {
+      "index": 8,
+      "start_time": "00:07:00",
+      "end_time": "00:08:00",
+      "start_sec": 420,
+      "end_sec": 480,
+      "title": "段落 08 佔位標題",
+      "summary_zh": "佔位段落摘要 08，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 08-A",
+        "佔位條列 08-B",
+        "佔位條列 08-C"
+      ],
+      "frame": "frames/legacy-talk-0008.png",
+      "frames": [
+        "frames/legacy-talk-0008.png"
+      ]
+    },
+    {
+      "index": 9,
+      "start_time": "00:08:00",
+      "end_time": "00:09:00",
+      "start_sec": 480,
+      "end_sec": 540,
+      "title": "段落 09 佔位標題",
+      "summary_zh": "佔位段落摘要 09，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 09-A",
+        "佔位條列 09-B",
+        "佔位條列 09-C"
+      ],
+      "frame": "frames/legacy-talk-0009.png",
+      "frames": [
+        "frames/legacy-talk-0009.png"
+      ]
+    },
+    {
+      "index": 10,
+      "start_time": "00:09:00",
+      "end_time": "00:10:00",
+      "start_sec": 540,
+      "end_sec": 600,
+      "title": "段落 10 佔位標題",
+      "summary_zh": "佔位段落摘要 10，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 10-A",
+        "佔位條列 10-B",
+        "佔位條列 10-C"
+      ],
+      "frame": "frames/legacy-talk-0010.png",
+      "frames": [
+        "frames/legacy-talk-0010.png"
+      ]
+    },
+    {
+      "index": 11,
+      "start_time": "00:10:00",
+      "end_time": "00:11:00",
+      "start_sec": 600,
+      "end_sec": 660,
+      "title": "段落 11 佔位標題",
+      "summary_zh": "佔位段落摘要 11，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 11-A",
+        "佔位條列 11-B",
+        "佔位條列 11-C"
+      ],
+      "frame": "frames/legacy-talk-0011.png",
+      "frames": [
+        "frames/legacy-talk-0011.png"
+      ]
+    },
+    {
+      "index": 12,
+      "start_time": "00:11:00",
+      "end_time": "00:12:00",
+      "start_sec": 660,
+      "end_sec": 720,
+      "title": "段落 12 佔位標題",
+      "summary_zh": "佔位段落摘要 12，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 12-A",
+        "佔位條列 12-B",
+        "佔位條列 12-C"
+      ],
+      "frame": "frames/legacy-talk-0012.png",
+      "frames": [
+        "frames/legacy-talk-0012.png"
+      ]
+    },
+    {
+      "index": 13,
+      "start_time": "00:12:00",
+      "end_time": "00:13:00",
+      "start_sec": 720,
+      "end_sec": 780,
+      "title": "段落 13 佔位標題",
+      "summary_zh": "佔位段落摘要 13，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 13-A",
+        "佔位條列 13-B",
+        "佔位條列 13-C"
+      ],
+      "frame": "frames/legacy-talk-0013.png",
+      "frames": [
+        "frames/legacy-talk-0013.png"
+      ]
+    },
+    {
+      "index": 14,
+      "start_time": "00:13:00",
+      "end_time": "00:14:00",
+      "start_sec": 780,
+      "end_sec": 840,
+      "title": "段落 14 佔位標題",
+      "summary_zh": "佔位段落摘要 14，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 14-A",
+        "佔位條列 14-B",
+        "佔位條列 14-C"
+      ],
+      "frame": "frames/legacy-talk-0014.png",
+      "frames": [
+        "frames/legacy-talk-0014.png"
+      ]
+    },
+    {
+      "index": 15,
+      "start_time": "00:14:00",
+      "end_time": "00:15:00",
+      "start_sec": 840,
+      "end_sec": 900,
+      "title": "段落 15 佔位標題",
+      "summary_zh": "佔位段落摘要 15，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 15-A",
+        "佔位條列 15-B",
+        "佔位條列 15-C"
+      ],
+      "frame": "frames/legacy-talk-0015.png",
+      "frames": [
+        "frames/legacy-talk-0015.png"
+      ]
+    },
+    {
+      "index": 16,
+      "start_time": "00:15:00",
+      "end_time": "00:16:00",
+      "start_sec": 900,
+      "end_sec": 960,
+      "title": "段落 16 佔位標題",
+      "summary_zh": "佔位段落摘要 16，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 16-A",
+        "佔位條列 16-B",
+        "佔位條列 16-C"
+      ],
+      "frame": "frames/legacy-talk-0016.png",
+      "frames": [
+        "frames/legacy-talk-0016.png"
+      ]
+    },
+    {
+      "index": 17,
+      "start_time": "00:16:00",
+      "end_time": "00:17:00",
+      "start_sec": 960,
+      "end_sec": 1020,
+      "title": "段落 17 佔位標題",
+      "summary_zh": "佔位段落摘要 17，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 17-A",
+        "佔位條列 17-B",
+        "佔位條列 17-C"
+      ],
+      "frame": "frames/legacy-talk-0017.png",
+      "frames": [
+        "frames/legacy-talk-0017.png"
+      ]
+    },
+    {
+      "index": 18,
+      "start_time": "00:17:00",
+      "end_time": "00:18:00",
+      "start_sec": 1020,
+      "end_sec": 1080,
+      "title": "段落 18 佔位標題",
+      "summary_zh": "佔位段落摘要 18，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 18-A",
+        "佔位條列 18-B",
+        "佔位條列 18-C"
+      ],
+      "frame": "frames/legacy-talk-0018.png",
+      "frames": [
+        "frames/legacy-talk-0018.png"
+      ]
+    },
+    {
+      "index": 19,
+      "start_time": "00:18:00",
+      "end_time": "00:19:00",
+      "start_sec": 1080,
+      "end_sec": 1140,
+      "title": "段落 19 佔位標題",
+      "summary_zh": "佔位段落摘要 19，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 19-A",
+        "佔位條列 19-B",
+        "佔位條列 19-C"
+      ],
+      "frame": "frames/legacy-talk-0019.png",
+      "frames": [
+        "frames/legacy-talk-0019.png"
+      ]
+    },
+    {
+      "index": 20,
+      "start_time": "00:19:00",
+      "end_time": "00:20:00",
+      "start_sec": 1140,
+      "end_sec": 1200,
+      "title": "段落 20 佔位標題",
+      "summary_zh": "佔位段落摘要 20，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 20-A",
+        "佔位條列 20-B",
+        "佔位條列 20-C"
+      ],
+      "frame": "frames/legacy-talk-0020.png",
+      "frames": [
+        "frames/legacy-talk-0020.png"
+      ]
+    },
+    {
+      "index": 21,
+      "start_time": "00:20:00",
+      "end_time": "00:21:00",
+      "start_sec": 1200,
+      "end_sec": 1260,
+      "title": "段落 21 佔位標題",
+      "summary_zh": "佔位段落摘要 21，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 21-A",
+        "佔位條列 21-B",
+        "佔位條列 21-C"
+      ],
+      "frame": "frames/legacy-talk-0021.png",
+      "frames": [
+        "frames/legacy-talk-0021.png"
+      ]
+    },
+    {
+      "index": 22,
+      "start_time": "00:21:00",
+      "end_time": "00:22:00",
+      "start_sec": 1260,
+      "end_sec": 1320,
+      "title": "段落 22 佔位標題",
+      "summary_zh": "佔位段落摘要 22，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 22-A",
+        "佔位條列 22-B",
+        "佔位條列 22-C"
+      ],
+      "frame": "frames/legacy-talk-0022.png",
+      "frames": [
+        "frames/legacy-talk-0022.png"
+      ]
+    },
+    {
+      "index": 23,
+      "start_time": "00:22:00",
+      "end_time": "00:23:00",
+      "start_sec": 1320,
+      "end_sec": 1380,
+      "title": "段落 23 佔位標題",
+      "summary_zh": "佔位段落摘要 23，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 23-A",
+        "佔位條列 23-B",
+        "佔位條列 23-C"
+      ],
+      "frame": "frames/legacy-talk-0023.png",
+      "frames": [
+        "frames/legacy-talk-0023.png"
+      ]
+    },
+    {
+      "index": 24,
+      "start_time": "00:23:00",
+      "end_time": "00:24:00",
+      "start_sec": 1380,
+      "end_sec": 1440,
+      "title": "段落 24 佔位標題",
+      "summary_zh": "佔位段落摘要 24，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 24-A",
+        "佔位條列 24-B",
+        "佔位條列 24-C"
+      ],
+      "frame": "frames/legacy-talk-0024.png",
+      "frames": [
+        "frames/legacy-talk-0024.png"
+      ]
+    },
+    {
+      "index": 25,
+      "start_time": "00:24:00",
+      "end_time": "00:25:00",
+      "start_sec": 1440,
+      "end_sec": 1500,
+      "title": "段落 25 佔位標題",
+      "summary_zh": "佔位段落摘要 25，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 25-A",
+        "佔位條列 25-B",
+        "佔位條列 25-C"
+      ],
+      "frame": "frames/legacy-talk-0025.png",
+      "frames": [
+        "frames/legacy-talk-0025.png"
+      ]
+    },
+    {
+      "index": 26,
+      "start_time": "00:25:00",
+      "end_time": "00:26:00",
+      "start_sec": 1500,
+      "end_sec": 1560,
+      "title": "段落 26 佔位標題",
+      "summary_zh": "佔位段落摘要 26，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 26-A",
+        "佔位條列 26-B",
+        "佔位條列 26-C"
+      ],
+      "frame": "frames/legacy-talk-0026.png",
+      "frames": [
+        "frames/legacy-talk-0026.png"
+      ]
+    },
+    {
+      "index": 27,
+      "start_time": "00:26:00",
+      "end_time": "00:27:00",
+      "start_sec": 1560,
+      "end_sec": 1620,
+      "title": "段落 27 佔位標題",
+      "summary_zh": "佔位段落摘要 27，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 27-A",
+        "佔位條列 27-B",
+        "佔位條列 27-C"
+      ],
+      "frame": "frames/legacy-talk-0027.png",
+      "frames": [
+        "frames/legacy-talk-0027.png"
+      ]
+    },
+    {
+      "index": 28,
+      "start_time": "00:27:00",
+      "end_time": "00:28:00",
+      "start_sec": 1620,
+      "end_sec": 1680,
+      "title": "段落 28 佔位標題",
+      "summary_zh": "佔位段落摘要 28，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 28-A",
+        "佔位條列 28-B",
+        "佔位條列 28-C"
+      ],
+      "frame": "frames/legacy-talk-0028.png",
+      "frames": [
+        "frames/legacy-talk-0028.png"
+      ]
+    },
+    {
+      "index": 29,
+      "start_time": "00:28:00",
+      "end_time": "00:29:00",
+      "start_sec": 1680,
+      "end_sec": 1740,
+      "title": "段落 29 佔位標題",
+      "summary_zh": "佔位段落摘要 29，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 29-A",
+        "佔位條列 29-B",
+        "佔位條列 29-C"
+      ],
+      "frame": "frames/legacy-talk-0029.png",
+      "frames": [
+        "frames/legacy-talk-0029.png"
+      ]
+    },
+    {
+      "index": 30,
+      "start_time": "00:29:00",
+      "end_time": "00:30:00",
+      "start_sec": 1740,
+      "end_sec": 1800,
+      "title": "段落 30 佔位標題",
+      "summary_zh": "佔位段落摘要 30，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 30-A",
+        "佔位條列 30-B",
+        "佔位條列 30-C"
+      ],
+      "frame": "frames/legacy-talk-0030.png",
+      "frames": [
+        "frames/legacy-talk-0030.png"
+      ]
+    },
+    {
+      "index": 31,
+      "start_time": "00:30:00",
+      "end_time": "00:31:00",
+      "start_sec": 1800,
+      "end_sec": 1860,
+      "title": "段落 31 佔位標題",
+      "summary_zh": "佔位段落摘要 31，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 31-A",
+        "佔位條列 31-B",
+        "佔位條列 31-C"
+      ],
+      "frame": "frames/legacy-talk-0031.png",
+      "frames": [
+        "frames/legacy-talk-0031.png"
+      ]
+    },
+    {
+      "index": 32,
+      "start_time": "00:31:00",
+      "end_time": "00:32:00",
+      "start_sec": 1860,
+      "end_sec": 1920,
+      "title": "段落 32 佔位標題",
+      "summary_zh": "佔位段落摘要 32，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 32-A",
+        "佔位條列 32-B",
+        "佔位條列 32-C"
+      ],
+      "frame": "frames/legacy-talk-0032.png",
+      "frames": [
+        "frames/legacy-talk-0032.png"
+      ]
+    },
+    {
+      "index": 33,
+      "start_time": "00:32:00",
+      "end_time": "00:33:00",
+      "start_sec": 1920,
+      "end_sec": 1980,
+      "title": "段落 33 佔位標題",
+      "summary_zh": "佔位段落摘要 33，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 33-A",
+        "佔位條列 33-B",
+        "佔位條列 33-C"
+      ],
+      "frame": "frames/legacy-talk-0033.png",
+      "frames": [
+        "frames/legacy-talk-0033.png"
+      ]
+    },
+    {
+      "index": 34,
+      "start_time": "00:33:00",
+      "end_time": "00:34:00",
+      "start_sec": 1980,
+      "end_sec": 2040,
+      "title": "段落 34 佔位標題",
+      "summary_zh": "佔位段落摘要 34，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 34-A",
+        "佔位條列 34-B",
+        "佔位條列 34-C"
+      ],
+      "frame": "frames/legacy-talk-0034.png",
+      "frames": [
+        "frames/legacy-talk-0034.png"
+      ]
+    },
+    {
+      "index": 35,
+      "start_time": "00:34:00",
+      "end_time": "00:35:00",
+      "start_sec": 2040,
+      "end_sec": 2100,
+      "title": "段落 35 佔位標題",
+      "summary_zh": "佔位段落摘要 35，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 35-A",
+        "佔位條列 35-B",
+        "佔位條列 35-C"
+      ],
+      "frame": "frames/legacy-talk-0035.png",
+      "frames": [
+        "frames/legacy-talk-0035.png"
+      ]
+    },
+    {
+      "index": 36,
+      "start_time": "00:35:00",
+      "end_time": "00:36:00",
+      "start_sec": 2100,
+      "end_sec": 2160,
+      "title": "段落 36 佔位標題",
+      "summary_zh": "佔位段落摘要 36，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 36-A",
+        "佔位條列 36-B",
+        "佔位條列 36-C"
+      ],
+      "frame": "frames/legacy-talk-0036.png",
+      "frames": [
+        "frames/legacy-talk-0036.png"
+      ]
+    },
+    {
+      "index": 37,
+      "start_time": "00:36:00",
+      "end_time": "00:37:00",
+      "start_sec": 2160,
+      "end_sec": 2220,
+      "title": "段落 37 佔位標題",
+      "summary_zh": "佔位段落摘要 37，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 37-A",
+        "佔位條列 37-B",
+        "佔位條列 37-C"
+      ],
+      "frame": "frames/legacy-talk-0037.png",
+      "frames": [
+        "frames/legacy-talk-0037.png"
+      ]
+    },
+    {
+      "index": 38,
+      "start_time": "00:37:00",
+      "end_time": "00:38:00",
+      "start_sec": 2220,
+      "end_sec": 2280,
+      "title": "段落 38 佔位標題",
+      "summary_zh": "佔位段落摘要 38，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 38-A",
+        "佔位條列 38-B",
+        "佔位條列 38-C"
+      ],
+      "frame": "frames/legacy-talk-0038.png",
+      "frames": [
+        "frames/legacy-talk-0038.png"
+      ]
+    },
+    {
+      "index": 39,
+      "start_time": "00:38:00",
+      "end_time": "00:39:00",
+      "start_sec": 2280,
+      "end_sec": 2340,
+      "title": "段落 39 佔位標題",
+      "summary_zh": "佔位段落摘要 39，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 39-A",
+        "佔位條列 39-B",
+        "佔位條列 39-C"
+      ],
+      "frame": "frames/legacy-talk-0039.png",
+      "frames": [
+        "frames/legacy-talk-0039.png"
+      ]
+    },
+    {
+      "index": 40,
+      "start_time": "00:39:00",
+      "end_time": "00:40:00",
+      "start_sec": 2340,
+      "end_sec": 2400,
+      "title": "段落 40 佔位標題",
+      "summary_zh": "佔位段落摘要 40，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 40-A",
+        "佔位條列 40-B",
+        "佔位條列 40-C"
+      ],
+      "frame": "frames/legacy-talk-0040.png",
+      "frames": [
+        "frames/legacy-talk-0040.png"
+      ]
+    },
+    {
+      "index": 41,
+      "start_time": "00:40:00",
+      "end_time": "00:41:00",
+      "start_sec": 2400,
+      "end_sec": 2460,
+      "title": "段落 41 佔位標題",
+      "summary_zh": "佔位段落摘要 41，僅用於驗證結構。",
+      "bullets_zh": [
+        "佔位條列 41-A",
+        "佔位條列 41-B",
+        "佔位條列 41-C"
+      ],
+      "frame": "frames/legacy-talk-0041.png",
+      "frames": [
+        "frames/legacy-talk-0041.png"
+      ]
+    }
+  ],
+  "frame_ocr": {
+    "frames/legacy-talk-0001.png": "佔位投影片文字 01"
+  }
+}
