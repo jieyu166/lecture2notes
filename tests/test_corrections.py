@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from lecture2notes.engines import audio as audio_mod
 from lecture2notes.engines import corrections as corrections_mod
 from lecture2notes.engines import pipeline
 from lecture2notes.engines.base import Cue, Engine, EngineMeta, parse_srt
@@ -255,15 +256,64 @@ def test_transcribe_stage_writes_srt_raw_and_sidecar(tmp_path):
     assert result.corrections[0]["count"] == 2
 
 
-def test_transcribe_stage_without_a_table_writes_only_the_srt(tmp_path):
+def test_transcribe_stage_with_neither_a_table_nor_s2t_writes_only_the_srt(tmp_path):
+    """Nothing to apply means nothing to audit: one file, no raw, no sidecar."""
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+    result = pipeline.transcribe_video(
+        video, "zh", FakeEngine(), s2t=False,
+        workdir=tmp_path / "work", extract=fake_extract,
+    )
+    assert result.srt.is_file()
+    assert result.raw is None
+    assert result.sidecar is None
+    assert not (tmp_path / "lecture.raw.srt").exists()
+
+
+def test_transcribe_stage_runs_the_s2t_pass_without_a_correction_table(tmp_path):
+    """Conversion is on by default whether or not a table was supplied.
+
+    The stage used to gate the whole correction block on a table being present,
+    so a run without ``--corrections`` skipped simplified-to-traditional
+    conversion silently. That went unnoticed while every engine happened to emit
+    traditional Chinese; qwen3_asr emits simplified, so the gap reached the
+    subtitles with nothing in the audit trail to say conversion never ran.
+    """
     video = tmp_path / "lecture.mp4"
     video.write_bytes(b"x")
     result = pipeline.transcribe_video(
         video, "zh", FakeEngine(), workdir=tmp_path / "work", extract=fake_extract
     )
     assert result.srt.is_file()
-    assert result.raw is None
-    assert not (tmp_path / "lecture.raw.srt").exists()
+    assert result.raw == tmp_path / "lecture.raw.srt"
+    assert result.sidecar == tmp_path / "lecture.corrections.json"
+    payload = json.loads(result.sidecar.read_text(encoding="utf-8"))
+    # No table was supplied, so the sidecar records that honestly rather than
+    # naming one, and the s2t block is what the file is there to report.
+    assert payload["corrections_table"] is None
+    assert payload["corrections"] == []
+    assert "applied" in payload["s2t"]
+
+
+def test_the_s2t_conversion_actually_reaches_the_srt_without_a_table(tmp_path, monkeypatch):
+    """Not just that the pass runs: that its output is what lands on disk.
+
+    OpenCC is optional, so the converter is stubbed here; asserting on real
+    conversion would make this test skip on exactly the machines that most need
+    it to fail loudly.
+    """
+    monkeypatch.setattr(
+        corrections_mod, "convert_simplified", lambda text: (text.replace("佔位", "轉換"), True)
+    )
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+    result = pipeline.transcribe_video(
+        video, "zh", FakeEngine(), workdir=tmp_path / "work", extract=fake_extract
+    )
+    assert "轉換文字" in result.srt.read_text(encoding="utf-8")
+    assert "佔位文字" in result.raw.read_text(encoding="utf-8")
+    payload = json.loads(result.sidecar.read_text(encoding="utf-8"))
+    assert payload["s2t"]["applied"] is True
 
 
 def test_transcribe_stage_skips_an_existing_srt_unless_forced(tmp_path):
@@ -296,6 +346,36 @@ def test_chunked_transcription_shifts_each_window_onto_the_real_clock(tmp_path):
         chunk_sec=60.0, duration_sec=150.0, extract=fake_extract,
     )
     assert [round(c.start, 3) for c in cues] == [0.0, 5.0, 60.0, 65.0, 120.0, 125.0]
+    assert len(engine.calls) == 3
+
+
+def test_a_duration_just_over_a_multiple_of_the_window_plans_no_sliver(tmp_path):
+    """Container durations carry milliseconds, so this is the ordinary case.
+
+    A 6-minute clip probes at 360.033 s, which used to plan a fourth window of
+    33 ms at 360 s. Qwen3-ASR raises "Padding size should be less than the
+    corresponding input dimension" on a window that short, so the whole run died
+    at the very last step after every real window had already been transcribed.
+    """
+    assert audio_mod.plan_chunks(360.033, 120.0) == [0.0, 120.0, 240.0]
+    assert audio_mod.plan_chunks(480.04, 240.0) == [0.0, 240.0]
+    # A tail worth transcribing is still planned.
+    assert audio_mod.plan_chunks(365.0, 120.0) == [0.0, 120.0, 240.0, 360.0]
+
+
+def test_a_recording_shorter_than_the_minimum_tail_still_gets_one_window(tmp_path):
+    """The tail guard must never leave a recording with nothing to transcribe."""
+    assert audio_mod.plan_chunks(0.4, 240.0) == [0.0]
+
+
+def test_the_sliver_window_is_never_handed_to_the_engine(tmp_path):
+    video = tmp_path / "long.mp4"
+    video.write_bytes(b"x")
+    engine = FakeEngine(cues=[Cue(0.0, 5.0, "window")])
+    pipeline.transcribe_audio(
+        engine, video, "zh", tmp_path / "work",
+        chunk_sec=120.0, duration_sec=360.033, extract=fake_extract,
+    )
     assert len(engine.calls) == 3
 
 

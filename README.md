@@ -168,7 +168,7 @@ python -c "print(open('help.txt','rb').read().decode('cp950'))"
 | `breeze_ct2`（預設） | yes | yes | yes | MediaTek-Research/Breeze-ASR-25 | `faster-whisper` + 自行轉檔的 CT2 權重 | 已在 Windows + RTX 4060 使用 |
 | `faster_whisper` | yes | no | yes | large-v3 | `faster-whisper` | CPU 可跑，有 CUDA 更快 |
 | `whisper_cpp` | yes | no | yes | ggml-large-v3-turbo.bin | 自備二進位與 ggml 模型 | 以 `--whisper-cpp-bin` / `--whisper-cpp-model` 或 `WHISPER_SRT_BIN` / `WHISPER_SRT_MODEL` 指定 |
-| `qwen3_asr` | yes | yes | yes（需對齊器） | Qwen/Qwen3-ASR-0.6B | `pip install lecture2notes[qwen]` | **待實測**（見下） |
+| `qwen3_asr` | yes | yes | yes（需對齊器） | Qwen/Qwen3-ASR-0.6B | `pip install lecture2notes[qwen]` | 已於 Windows 11 + RTX 4060 Laptop 8 GB 實測（2026-09-21，見下） |
 
 ### Qwen3-ASR 的三個實作前提
 
@@ -181,8 +181,9 @@ python -c "print(open('help.txt','rb').read().decode('cp950'))"
 2. **對齊結果是逐 token 的**（中文為逐字），本套件在 `cues_from_alignment()` 依句末
    標點、靜默間隔、字數上限與時長上限重新組成 cue。時間戳單位是**秒**（上游型別標註
    寫 `int`，但回傳前已除以 1000）。
-3. **對齊器文件標示上限約 5 分鐘語音**，所以本引擎宣告 `chunk_sec = 240`，轉錄階段會
-   自動切窗並把每窗的 cue 位移回整片的時間軸；`--chunk-sec` 可覆寫。
+3. **對齊器文件標示上限約 5 分鐘語音**，所以本引擎宣告 `chunk_sec`，轉錄階段會
+   自動切窗並把每窗的 cue 位移回整片的時間軸；`--chunk-sec` 可覆寫。預設值是
+   **120 秒而非貼著文件上限的 240 秒**——實測 240 秒會漏字，見下節。
 
 權重大小：0.6B 約 1.88 GB、1.7B 約 4.7 GB，對齊器另計 1.84 GB。`qwen-asr` 0.0.6 把
 `transformers` 鎖在 `==4.57.6`，且**未宣告 torch**，torch 需自行依本機 CUDA 安裝；官方
@@ -205,9 +206,48 @@ DashScope 的 `qwen3-asr-flash` 是**雲端付費 API**，與上述開源權重�
 [HF Qwen/Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)、
 [HF Qwen/Qwen3-ForcedAligner-0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B)。
 
-**待實測欄位**：實際 torch 版本、0.6B 對 fixture 的 WER 與速度、`language="Japanese"`
-是否為上游接受的字串（文件只逐字出現 Chinese / English / Cantonese）。權重尚未下載，
-因此 `tests/test_engines.py` 的 `@pytest.mark.gpu` 測試目前一律 skip。
+### 實測結果（2026-09-21，Windows 11 + RTX 4060 Laptop 8 GB）
+
+驅動 591.91、Python 3.11.9、`torch 2.9.1+cu126` ＋ `torchaudio 2.9.1+cu126`
+（`--index-url https://download.pytorch.org/whl/cu126`，`torch.cuda.is_available()` 為 True）、
+`qwen-asr 0.0.6`、`transformers 4.57.6`（由 qwen-asr 鎖定）、`huggingface_hub 0.36.2`。
+**未安裝 flash-attn**（Windows 上通常編不起來），transformers 預設的 sdpa 後備即可，
+全程沒有出現 attention 相關錯誤。權重實際大小：ASR 0.6B 為 1,880,620,741 bytes（1.88 GB、21 檔），
+對齊器為 1,840,073,522 bytes（1.84 GB、21 檔）。
+
+| 素材 | 長度 | 窗長 | cue 數 | 轉錄階段耗時 | 實時倍率 | VRAM 峰值 | `check transcribe` |
+|---|---|---|---|---|---|---|---|
+| CC fixture（英文） | 25.0 s | 單窗 | 4 | 16 s | 0.64× | 3797 MiB | 0 errors / 0 warnings |
+| 中文演講擷取 | 360.0 s | 120 s×3 | 61 | 82 s | 0.23× | 7831 MiB | 0 errors / 0 warnings |
+| 同上 | 360.0 s | 240 s×2 | 56 | 48 s | 0.13× | 7217 MiB | 0 errors / 0 warnings |
+
+實時倍率為轉錄階段時間 ÷ 音訊長度，不含約 10 s 的模型載入。SRT 結構三種情況都乾淨：
+序號連續、時間單調、無零長度 cue、分塊接縫無倒退或重疊（119.840 接 120.240、239.920 接 240.000），
+cue 長度中位數約 6 s、32 字，沒有出現逐字一 cue 或超長 cue。
+
+**但 240 秒窗長會漏字**：同一段音訊在 240 秒窗長下，第一窗中間有連續 23.5 秒的語音完全沒有
+輸出（1767 字），120 秒窗長則無（1902 字）；以同片的 Breeze-ASR-25 逐字稿（1883 字）對照，
+確認該 23.5 秒確實有語音。這是把預設窗長定為 120 秒的原因。
+
+**VRAM 很緊**：0.6B ＋ 對齊器在 8 GB 卡上峰值已達 7.2–7.9 GiB。1.7B 未實測，8 GB 卡上
+幾乎確定放不下。
+
+#### Windows 注意事項
+
+- **不要用 Microsoft Store 版的 Python 建 venv。** Store 版帶 UWP 檔案系統虛擬化，行程對
+  `%LOCALAPPDATA%` 的讀寫會被轉向到
+  `%LOCALAPPDATA%\Packages\PythonSoftwareFoundation.Python.3.11_*\LocalCache\Local\`，
+  而且**讀取不會回退**到真實路徑：權重明明下載好了，換一個非 Store 的 Python 就看不到，
+  `--model-dir` 指到真實路徑反而會 `FileNotFoundError`。用 python.org 版或 winget 版。
+- **路徑長度**：torch 的 `_inductor/codegen/cuda/cutlass_lib_extensions/cutlass_mock_imports/`
+  很深，venv 放在深層目錄時 `pip install torch` 會 `OSError: [WinError 206] 檔名或副檔名太長`。
+  把 venv 放淺一點，或開啟 Windows 長路徑支援。
+- **簡轉繁**：Qwen3-ASR 輸出**簡體中文**（Breeze-ASR-25 輸出繁體）。轉錄階段預設會做簡轉繁，
+  但需要 `pip install opencc-python-reimplemented`；沒裝時會印 `[warn]` 並在
+  `<stem>.corrections.json` 記下 `skipped_reason: "opencc missing"`。跑中文素材前請先裝。
+
+**仍未實測**：`language="Japanese"` 是否為上游接受的字串（文件只逐字出現
+Chinese / English / Cantonese）、1.7B 權重、vLLM 後端。
 
 ## Overlay 設定
 
