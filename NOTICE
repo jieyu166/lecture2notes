@@ -1,0 +1,79 @@
+lecture2notes
+Copyright (c) 2026 Jieyu Yang
+
+This project is licensed under the MIT License (see LICENSE).
+
+================================================================================
+Third-party notices
+================================================================================
+
+This project shares its name and general problem domain with
+drpwchen/lecture-to-notes (https://github.com/drpwchen/lecture-to-notes),
+audited at commit 79053a30814330842f3fd195333a4d79b698ef88, licensed under the
+MIT License. Several modules under src/lecture2notes/ are noted in
+ATTRIBUTION.md as "inspired" by specific files in that repository: they
+address the same pipeline stage and, in places, a shared generic technique,
+but were independently implemented with no file found to copy function
+structure, algorithms, or code text from that repository. Its MIT license
+text is reproduced below in full, including its copyright notice, per the
+MIT License's attribution requirement.
+
+--------------------------------------------------------------------------------
+drpwchen/lecture-to-notes -- LICENSE
+--------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2026 drpwchen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+drpwchen/asr-benchmark -- LICENSE
+--------------------------------------------------------------------------------
+
+Two default decoding parameters in engines/faster_whisper.py and
+engines/breeze_ct2.py (VAD off, condition_on_previous_text off) are credited
+in those modules' own docstrings to drpwchen/asr-benchmark
+(https://github.com/drpwchen/asr-benchmark) as their empirically-measured
+source. This is a separate repository from drpwchen/lecture-to-notes above.
+It is also MIT-licensed; no code from it is used, only the two parameter
+values. Its MIT license text is reproduced below in full.
+
+MIT License
+
+Copyright (c) 2026 Po-Wei Chen (陳柏威)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
