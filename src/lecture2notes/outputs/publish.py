@@ -136,9 +136,44 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _nearest_existing(path: Path) -> Path:
+    """*path* if it exists, else the closest ancestor that does.
+
+    A destination folder is routinely created by the publication itself, so the
+    check has to be able to answer "which filesystem would it land on" for a
+    path that is not there yet. The walk stops at the root, which always exists.
+    """
+    current = Path(path).resolve()
+    while not current.exists():
+        parent = current.parent
+        if parent == current:
+            return current
+        current = parent
+    return current
+
+
 def same_filesystem(live_root: Path, stage_root: Path) -> bool:
-    """A rename is only atomic within one filesystem, so this is checked first."""
-    return Path(live_root).anchor.casefold() == Path(stage_root).anchor.casefold()
+    """A rename is only atomic within one filesystem, so this is checked first.
+
+    Both sides are resolved before anything is compared. Comparing the unresolved
+    ``anchor`` made a relative source (anchor ``""``) look like a different
+    filesystem from an absolute destination, so ``publish`` refused with exit 2
+    on the ordinary case of running it from inside the source folder.
+
+    On Windows the filesystem is the drive, so the resolved anchors are compared
+    case-insensitively; ``st_dev`` there is a volume serial number that is not
+    stable enough to reason about. Elsewhere it is ``st_dev``, which is what
+    actually decides whether ``os.replace`` can be a rename, and which sees
+    through bind mounts and separate mounts under one root.
+    """
+    live = _nearest_existing(live_root)
+    stage = _nearest_existing(stage_root)
+    if os.name == "nt":
+        return live.anchor.casefold() == stage.anchor.casefold()
+    try:
+        return os.stat(live).st_dev == os.stat(stage).st_dev
+    except OSError:  # pragma: no cover - an unreadable path is not this rule's call
+        return live.anchor == stage.anchor
 
 
 def build_manifest(

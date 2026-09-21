@@ -221,6 +221,71 @@ def test_a_destination_on_another_filesystem_is_refused(
     assert not dest.exists(), "the refusal must happen before anything is created"
 
 
+def test_a_relative_source_and_an_absolute_destination_are_one_filesystem(
+    synthetic_lecture, tmp_path, monkeypatch
+):
+    """The same-filesystem check must resolve both sides before comparing.
+
+    Comparing the unresolved ``Path.anchor`` made a relative source (anchor
+    ``""``) look like a different filesystem from an absolute destination, so
+    publishing from inside the source folder -- the ordinary way to run it --
+    was refused with exit 2 although both paths sit on one disk.
+    """
+    dest = tmp_path / "course"
+    monkeypatch.chdir(synthetic_lecture.root)
+
+    assert publish_mod.same_filesystem(dest, Path(".")) is True
+
+    outcome = publish_mod.publish_lecture(synthetic_lecture.stem, dest, Path("."))
+
+    assert outcome.ok is True and outcome.code == exit_codes.OK
+    assert (dest / (synthetic_lecture.stem + ".json")).is_file()
+
+
+def test_a_source_on_another_device_is_still_refused(
+    synthetic_lecture, tmp_path, monkeypatch
+):
+    """Resolving the paths must not make the check unable to say no.
+
+    The second device is faked rather than found, because a test cannot rely on
+    one being mounted. Each platform's own primitive is the one faked: the
+    resolved path on Windows, where the drive is the filesystem, and ``st_dev``
+    everywhere else.
+    """
+    dest = tmp_path / "course"
+    dest.mkdir(parents=True, exist_ok=True)
+
+    if os.name == "nt":
+        elsewhere = Path("Z:/elsewhere")
+        real_nearest = publish_mod._nearest_existing
+        monkeypatch.setattr(
+            publish_mod, "_nearest_existing",
+            lambda path: elsewhere if Path(path) == dest else real_nearest(path),
+        )
+    else:
+        real_stat = os.stat
+
+        class _Faked:
+            st_dev = -1
+
+        def stat(path, *args, **kwargs):
+            if Path(path) == dest.resolve():
+                return _Faked()
+            return real_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(publish_mod.os, "stat", stat)
+
+    before = tree_state(dest)
+
+    outcome = publish_mod.publish_lecture(
+        synthetic_lecture.stem, dest, synthetic_lecture.root
+    )
+
+    assert outcome.ok is False and outcome.code == exit_codes.ERROR
+    assert "different filesystems" in outcome.message
+    assert tree_state(dest) == before, "a refusal must not copy anything"
+
+
 def test_publishing_into_the_source_folder_is_refused(synthetic_lecture):
     outcome = publish_mod.publish_lecture(
         synthetic_lecture.stem, synthetic_lecture.root, synthetic_lecture.root
