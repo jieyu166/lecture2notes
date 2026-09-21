@@ -157,3 +157,55 @@ def test_segmentation_reference_states_the_division_of_labour():
     # mechanics. Both halves must be stated.
     assert "語言模型" in text
     assert "l2n check json" in text
+
+
+# --------------------------------------------------------------------------
+# 15.3 -- a JSON example that does not validate is worse than no example
+# --------------------------------------------------------------------------
+def _json_documents(path: Path) -> list:
+    """Every fenced ```json block in *path* that is a whole JSON object."""
+    import json as _json
+
+    blocks = re.findall(r"```json\n(.*?)\n```", path.read_text(encoding="utf-8"), re.S)
+    out = []
+    for block in blocks:
+        body = block.strip()
+        if not body.startswith("{"):
+            # A fragment showing one key in context, not a document.
+            continue
+        out.append(_json.loads(body))
+    return out
+
+
+def test_the_segmentation_example_passes_the_schema_validator():
+    """The document the agent copies must survive `l2n check json`.
+
+    A field run pasted this example, filled it in and was rejected on four
+    separate rules: the segment bullets used the top-level key name, the
+    mandatory `frame` key was absent, and both `takeaways_zh` counts were under
+    the minimum. An example that does not validate costs more than no example,
+    because it is trusted.
+    """
+    from lecture2notes.schema.model import validate_document
+
+    documents = _json_documents(REFERENCES_DIR / "segmentation.md")
+    assert documents, "segmentation.md carries no complete JSON example"
+    for document in documents:
+        errors = [f for f in validate_document(document) if f.severity == "error"]
+        assert not errors, "the documented example is invalid: %s" % [
+            "%s %s" % (f.code, f.message) for f in errors
+        ]
+
+
+def test_the_segmentation_example_states_the_bullet_count_the_checker_enforces():
+    text = (REFERENCES_DIR / "segmentation.md").read_text(encoding="utf-8")
+    from lecture2notes.acceptance.check import MIN_BULLETS
+
+    assert "bullets_zh" in text
+    assert "至少 %d" % MIN_BULLETS in text, (
+        "segmentation.md must state the same bullet minimum the checker uses"
+    )
+    assert "恰好 4 條" not in text, (
+        "the old wording contradicted the checker, which warns below %d"
+        % MIN_BULLETS
+    )

@@ -25,6 +25,8 @@ l2n scaffold <subs.srt>
 
 ## 最小範例
 
+下面這段可以整份貼進 `<stem>.json`，`l2n check json` 會通過（影格檔案要真的存在）。
+
 ```json
 {
   "schema_version": "2.0",
@@ -42,26 +44,52 @@ l2n scaffold <subs.srt>
     }
   },
   "profile": "generic",
-  "overall_summary_zh": "全片在講什麼，兩三句。",
-  "takeaways_zh": ["全片重點 1", "全片重點 2", "全片重點 3", "全片重點 4"],
+  "overall_summary_zh": "這場講座先說明為什麼這個主題值得花時間，再建立聽眾需要的前提知識，接著用兩個實例把主要判準講完，最後收束回開場的問題。講者在後半段明確指出哪些結論他自己也沒有把握，那一段照錄不改寫。全片約三分鐘，分成兩個段落，第二段沿用第一段的投影片。",
+  "takeaways_zh": [
+    "全片重點 1",
+    "全片重點 2",
+    "全片重點 3",
+    "全片重點 4",
+    "全片重點 5",
+    "全片重點 6"
+  ],
   "segments": [
     {
       "index": 1,
       "start_time": "00:00:00",
-      "end_time": "00:01:00",
+      "end_time": "00:01:30",
       "start_sec": 0,
-      "end_sec": 60,
+      "end_sec": 90,
       "title": "這一段在講什麼",
       "summary_zh": "本段摘要，兩三句。",
-      "takeaways_zh": [
+      "bullets_zh": [
         {"text": "重點 1", "t": 5, "kind": "synthesis"},
         {"text": "重點 2", "t": null, "kind": "synthesis"},
-        {"text": "重點 3", "t": 30, "kind": "synthesis"},
+        {"text": "講者原話重點", "t": 30, "kind": "quote"},
         {"text": "重點 4", "t": null, "kind": "synthesis"}
       ],
       "quotes_zh": [{"text": "講者原話", "t": 10}],
+      "frame": "frames/sample-talk-0001.png",
       "frames": ["frames/sample-talk-0001.png"],
       "frame_ocr": [{"frame": "frames/sample-talk-0001.png", "text": "投影片文字"}],
+      "editorial_notes_zh": []
+    },
+    {
+      "index": 2,
+      "start_time": "00:01:30",
+      "end_time": "00:03:00",
+      "start_sec": 90,
+      "end_sec": 180,
+      "title": "這一段沒有換投影片",
+      "summary_zh": "本段摘要，兩三句。",
+      "bullets_zh": [
+        {"text": "重點 1", "t": 100, "kind": "synthesis"},
+        {"text": "重點 2", "t": null, "kind": "synthesis"}
+      ],
+      "quotes_zh": [],
+      "frame": "frames/sample-talk-0001.png",
+      "frames": [],
+      "frame_ocr": [],
       "editorial_notes_zh": []
     }
   ],
@@ -70,9 +98,32 @@ l2n scaffold <subs.srt>
 }
 ```
 
-規則：每段 `takeaways_zh` 恰好 4 條；每段掛 1 至 4 張影格；`start_sec` / `end_sec`
-單調遞增且不重疊；`t` 是該條在影片中的秒數，找不到就寫 `null`，**不要亂填**。
+欄位規則（與 `l2n check json` 一致，不是另一套說法）：
+
+| 欄位 | 規則 |
+| ---- | ---- |
+| `overall_summary_zh` | 100 至 500 字 |
+| `takeaways_zh`（頂層） | 6 至 12 條字串 |
+| `segments[].bullets_zh` | **物件**陣列，每個物件 `text`／`t`／`kind`；`kind` 只能是 `synthesis` 或 `quote`。條數至少 2（少於 2 會報 warning），目標 4 條 |
+| `segments[].frame` | 必填鍵，字串或 `null`；這一段要顯示的那一張 |
+| `segments[].frames` | 字串陣列，可以是空陣列（見下） |
+| `start_sec` / `end_sec` | 單調遞增、前一段的 `end_sec` 等於下一段的 `start_sec`，最後一段的 `end_sec` 等於 `floor(duration_sec)` |
+| `start_time` / `end_time` | `HH:MM:SS`，必須與對應的 `_sec` 相符 |
+| `t` | 該條在影片中的秒數，找不到就寫 `null`，**不要亂填** |
+
 `quotes_zh` 是講者原話（附時間），`kind: "synthesis"` 表示是你整理過的話。
+
+## 影格數不決定段數
+
+**段數由主題轉折決定，不由抓到幾張圖決定。** 一個區間裡沒有換投影片時，
+沿用前一張：`frame` 填上一段那一張，`frames` 留空陣列。這是合法的，
+`l2n check json` 不會報錯（上面的範例第 2 段就是這樣寫的）。
+
+scene 模式抓到的張數少於你預計的段數時，**改用 interval**，不要為了湊圖去改分段：
+
+```bash
+l2n frames <video> --mode interval --every 45
+```
 
 ## 分段怎麼切
 
