@@ -179,3 +179,52 @@ def test_the_document_uses_no_console_unsafe_markers(doc_text):
     """The console rule is about `_out`, but these characters are banned here too."""
     for character in ("→", "≥", "✓", "✗"):
         assert character not in doc_text, repr(character)
+
+
+# --------------------------------------------------------------------------
+# 16.4 -- the contradiction Codex found, and the distinction the review needed
+# --------------------------------------------------------------------------
+def test_the_document_is_at_the_version_that_resolved_the_contradiction(doc_text):
+    assert guideline.GUIDELINE_VERSION == "1.3"
+    assert doc_text.count(guideline.VERSION_LINE) >= 2  # header and appendix B
+
+
+def test_zero_six_no_longer_says_the_marker_stays_in_the_file(doc_text):
+    """Codex read 0.6 and the definition of done and found them contradictory.
+
+    0.6 said the `<!-- ai-draft -->` marker survives in the file; the checklist
+    said the note is finished when `ai_draft_remaining=0`. Whichever one an
+    expansion followed, it was disobeying the other.
+    """
+    section = guideline.section_text(doc_text, "「我應該記住的 3 件事」")
+
+    assert "那個標記會留在檔案裡" not in section
+    assert "連同標記一起刪掉" in section
+    assert "讀者的東西不帶標記" in section
+    assert "ai_draft_remaining=0" in section
+
+
+def test_the_document_separates_a_principle_from_a_data_point(doc_text):
+    """Two independent expansions left Evergreen as one week's number."""
+    section = guideline.section_text(doc_text, "可遷移原則 vs 單一數據點")
+
+    assert section, "the guideline has no 4.1"
+    assert "先寫 Evergreen" in doc_text
+    assert "反例（單一數據點）" in section
+    assert "正例（可遷移原則）" in section
+    # The one machine-checkable claim the section makes about itself.
+    assert "R10 通過不代表 Evergreen 合格" in section
+
+
+def test_the_examples_are_invented_rather_than_quoted(doc_text):
+    """The worked examples must not reproduce anybody's actual note."""
+    section = guideline.section_text(doc_text, "可遷移原則 vs 單一數據點")
+
+    assert "為說明用途自擬" in section
+
+
+def test_every_documented_rule_id_is_one_the_code_reports(doc_text):
+    machine = guideline.section_text(doc_text, guideline.MACHINE_CHECKABLE_HEADING)
+
+    assert "**R11**" in machine
+    assert "**R12**" not in machine, "the table has a rule the code does not have"

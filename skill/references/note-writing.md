@@ -1,10 +1,12 @@
+<!-- Encoding: UTF-8 (no BOM). Windows PowerShell 5.1: Get-Content -Encoding UTF8 <file> -->
+
 # 參考：擴寫筆記
 
 任務是「把骨架筆記擴寫成完整筆記」時，讀這一份。
 
 ## 規範在哪裡
 
-唯一的規範文件是 **[`docs/note-writing-guideline.md`](../../docs/note-writing-guideline.md)**，目前版本 **`guideline_version: 1.2`**。
+唯一的規範文件是 **[`docs/note-writing-guideline.md`](../../docs/note-writing-guideline.md)**，目前版本 **`guideline_version: 1.3`**。
 
 這份參考不重寫規則。規則只有一份，重寫兩份就會分岔。下面只寫流程。
 

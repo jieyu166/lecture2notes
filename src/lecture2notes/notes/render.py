@@ -123,9 +123,12 @@ CORRECTION_COLUMNS = ("heard", "correct", "source")
 #: How an unverified term is marked, in the note and in the check's message.
 UNVERIFIED_MARK = "未寫入本文"
 
-#: Marks the three things the model drafted for the reader to keep, delete or
-#: rewrite. It survives in the file, so a note whose marker is still untouched is
-#: measurably one that nobody has read. Defined in `schema.model` because the
+#: Marks a placeholder a model still has to write: the speaker-outline rows and
+#: the drafted questions. Whoever writes the placeholder deletes the marker with
+#: it, so `ai_draft_remaining` counts what is left to do and zero is reachable.
+#: It is deliberately *not* on the reader's two Summary slots or on the
+#: remember-three candidates -- those are the reader's to keep, delete or
+#: rewrite, and no model finishes them. Defined in `schema.model` because the
 #: scaffold stage writes the same marker into the JSON; re-exported here under
 #: the name every caller in this package already uses.
 AI_DRAFT_MARK = _AI_DRAFT_MARK
@@ -643,12 +646,19 @@ def render_summary_slots() -> str:
 def render_verification(takeaways: Sequence[str]) -> List[str]:
     """"我應該記住的 3 件事" as a draft, then the reader's own checklist.
 
-    The three lines are projected from ``takeaways_zh`` rather than invented, and
-    they are fenced by :data:`AI_DRAFT_MARK` because the reader's only job here
-    is to keep, delete or rewrite them. A note whose marker is still in place is
-    one that nobody has read, and that is worth being able to count.
+    The three lines are projected from ``takeaways_zh`` rather than invented,
+    and they arrive collapsed, because a list that is already open invites
+    agreement while a folded one has to be opened first.
+
+    No :data:`AI_DRAFT_MARK` here, and this is the one thing guideline 1.3
+    changed about the marker. The marker means "a model still has to write
+    this", and whoever writes that placeholder deletes it -- which is what
+    makes `ai_draft_remaining=0` a reachable definition of done. These
+    candidates are not waiting on a model: keeping, deleting or rewriting them
+    is the reader's work, so marking them would have left the count stuck
+    above zero for the one reason that is not a defect.
     """
-    lines = ["### 我應該記住的 3 件事", "", AI_DRAFT_MARK, "", CANDIDATE_CALLOUT]
+    lines = ["### 我應該記住的 3 件事", "", CANDIDATE_CALLOUT]
     drafts = list(takeaways[:REMEMBER_COUNT])
     while len(drafts) < REMEMBER_COUNT:
         drafts.append("（素材不足，讀者自行補上或刪除本行）")

@@ -334,3 +334,57 @@ def test_cli_ocr_on_an_ambiguous_frames_folder_exits_2(
     printed = capsys.readouterr().out
     assert "[error] ocr:" in printed
     assert not list(tmp_path.glob("*.frames_ocr.json"))
+
+
+def test_an_ambiguous_folder_exits_2_even_without_rapidocr(
+    tmp_path: Path, monkeypatch, capsys
+):
+    """Target resolution runs before the dependency check (task 16.1).
+
+    The final acceptance run was on a machine with no rapidocr, so `l2n ocr`
+    on a frames folder beside two documents answered "install rapidocr" and
+    the ambiguity the folder actually had could never be reached. The two
+    failures need different fixes and must not be able to mask each other.
+    """
+    def boom(*args, **kwargs):
+        raise _deps.MissingDependency("rapidocr", _deps.INSTALL_HINTS["rapidocr"])
+
+    build_lecture(tmp_path, frame_count=1)
+    (tmp_path / "other.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(_deps, "require_rapidocr", boom)
+    monkeypatch.setitem(_deps._CHECKS, "rapidocr", boom)
+
+    assert cli_entry(["ocr", str(tmp_path / "frames")]) == 2
+
+    printed = capsys.readouterr().out
+    assert "2 lectures sit beside" in printed
+    assert "missing dependency" not in printed
+
+
+def test_a_folder_naming_no_lecture_exits_2_even_without_rapidocr(
+    tmp_path: Path, monkeypatch, capsys
+):
+    def boom(*args, **kwargs):
+        raise _deps.MissingDependency("rapidocr", _deps.INSTALL_HINTS["rapidocr"])
+
+    build_lecture(tmp_path, frame_count=1)
+    (tmp_path / "talk.json").unlink()
+    monkeypatch.setattr(_deps, "require_rapidocr", boom)
+    monkeypatch.setitem(_deps._CHECKS, "rapidocr", boom)
+
+    assert cli_entry(["ocr", str(tmp_path / "frames")]) == 2
+
+    printed = capsys.readouterr().out
+    assert "which lecture these frames belong to" in printed
+
+
+def test_a_document_target_still_exits_3_without_rapidocr(tmp_path: Path, monkeypatch):
+    """The reordering must not cost the dependency report on the normal path."""
+    def boom(*args, **kwargs):
+        raise _deps.MissingDependency("rapidocr", _deps.INSTALL_HINTS["rapidocr"])
+
+    document = build_lecture(tmp_path, frame_count=1)
+    monkeypatch.setattr(_deps, "require_rapidocr", boom)
+    monkeypatch.setitem(_deps._CHECKS, "rapidocr", boom)
+
+    assert cli_entry(["ocr", str(document)]) == 3

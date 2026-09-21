@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -106,19 +107,41 @@ _CUE_WORDS = (
 )
 
 
-#: One sentence added to each segment section so the fixture is a *finished*
-#: note rather than a skeleton. R10 (task 15.10) reports a section still
-#: identical to the render output, and "a complete output set" has to mean a
-#: note somebody wrote. Shares no run of characters with `_CUE_WORDS`, so R5
-#: still has nothing to find.
-_EXPANSION_LINE = "〈本段已由測試展開：這一句不在逐字稿裡。〉"
+#: What each segment section says once the fixture has "expanded" it, so the
+#: fixture is a *finished* note rather than a skeleton. Shares no run of
+#: characters with `_CUE_WORDS`, so R5 still has nothing to find.
+_EXPANSION_LINE = "〈本段已由測試展開：這一句不在逐字稿裡，也不在骨架裡。〉"
+
+#: The timespan the renderer projects from the document, e.g.
+#: `(00:00:00 - 00:01:00)`.
+_PROJECTED_SPAN = re.compile(r"^\(\s*[\d:]+\s*-\s*[\d:]+\s*\)$")
+
+
+def _is_projected(line: str) -> bool:
+    """Is this line the renderer's, in a way an expansion must not touch?
+
+    Headings, the timespan, the frame embed and the quotations are projected
+    from the document and are meant to survive verbatim. Everything else in a
+    segment section is prose, and prose is what an expansion replaces.
+    """
+    body = line.strip()
+    if not body:
+        return True
+    if body.startswith("#") or body.startswith("![") or body.startswith("> "):
+        return True
+    return bool(_PROJECTED_SPAN.match(body))
 
 
 def expand_note(text: str) -> str:
-    """Append one sentence to every ``## n、title`` section of the Note body.
+    """Replace each section's rendered prose with a sentence nobody rendered.
 
-    The cheapest possible edit that makes each section differ from what
-    `l2n render` produces, which is exactly what R10 measures.
+    Until 16.2 this appended one sentence and left the rendered ones in place,
+    which was enough to defeat an identity test. R10 now measures how much of
+    a section is still, character for character, the render output, and the
+    answer for "append one sentence" is "almost all of it" -- correctly, since
+    that note tells the reader the same thing twice. So the rendered prose has
+    to actually go, and what stays is what an expansion is not allowed to
+    touch.
     """
     out = []
     inside = False
@@ -133,6 +156,10 @@ def expand_note(text: str) -> str:
             inside = False
         if starts_section:
             inside = True
+            out.append(line)
+            continue
+        if inside and not _is_projected(line):
+            continue
         out.append(line)
     if inside:
         out.extend(["", _EXPANSION_LINE])

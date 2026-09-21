@@ -86,6 +86,29 @@ def _replace_question_section(note_path: Path, questions):
     _edit(note_path, transform)
 
 
+def _rewrite_first_section(note_path: Path, replacement):
+    """Replace section 1's prose, keeping its heading, timespan, embed and quotes.
+
+    What an expansion is supposed to do: the machine-projected parts stay, the
+    rendered sentences go, the writer's own sentences take their place.
+    """
+    def transform(lines):
+        at = next(i for i, line in enumerate(lines)
+                  if line.startswith("## 1、"))
+        end = next((i for i in range(at + 1, len(lines))
+                    if lines[i].startswith("#")), len(lines))
+        kept = [
+            line for line in lines[at:end]
+            if not line.strip()
+            or line.startswith("#")
+            or line.startswith("![[")
+            or line.startswith("> ")
+            or check.TIMESPAN_LINE.match(line.strip())
+        ]
+        return lines[:at] + kept + list(replacement) + [""] + lines[end:]
+    _edit(note_path, transform)
+
+
 def _insert_into_first_section(note_path: Path, text: str):
     def transform(lines):
         at = next(i for i, line in enumerate(lines)
@@ -521,17 +544,19 @@ def test_the_guideline_records_the_wider_scope():
     from lecture2notes.notes.guideline import find_guideline_doc
 
     text = find_guideline_doc().read_text(encoding="utf-8")
-    assert "guideline_version: 1.2" in text
+    assert guideline.VERSION_LINE in text
     assert "R5 只看 Note 章節內的行" not in text
 
 
 # --------------------------------------------------------------------------
 # 15.8 -- count the markers nobody removed
 # --------------------------------------------------------------------------
-# The skeleton fences three things with `<!-- ai-draft -->`: the remember-three
-# candidates, the speaker outline rows and the drafted questions. Nothing
-# counted them, so a note that had been read and one that had not looked
-# identical in the report -- and the field run shipped the one that had not.
+# The skeleton marks the two placeholders a model still has to write: the
+# speaker outline rows and the drafted questions. Nothing counted them, so a
+# note that had been read and one that had not looked identical in the report
+# -- and the field run shipped the one that had not. (Until 16.4 the
+# remember-three candidates carried a marker too, which made the count
+# unreachable: those are the reader's, and no model finishes them.)
 
 def test_a_freshly_rendered_skeleton_reports_its_ai_draft_count(lecture):
     json_path, note_path = lecture
@@ -645,8 +670,9 @@ def test_r10_reports_every_segment_of_an_untouched_skeleton(lecture):
     hits = [f for f in report.findings if f.code == "R10"]
     segments = [f for f in hits if f.location.startswith("segment ")]
     assert [f.location for f in segments] == ["segment 1", "segment 2"]
+    # Identity is still the top of the scale, and the message says so.
     assert all(
-        "identical to l2n render output" in f.message for f in hits
+        "100% of the body is render output" in f.message for f in hits
     )
 
 
@@ -660,14 +686,74 @@ def test_r10_reports_an_evergreen_still_holding_the_rendered_line(lecture):
 
 
 def test_r10_is_silent_on_a_section_somebody_rewrote(lecture):
+    """The rendered sentences are gone, replaced by the writer's own."""
     json_path, note_path = lecture
-    _insert_into_first_section(note_path, "本段已經改寫過，這一句不在骨架裡。")
+    _rewrite_first_section(note_path, [
+        "講者先交代為什麼這個判準值得建立，再拿兩個反例把邊界推出來。",
+        "他的理由是：只看結果會把運氣算進能力，所以要先固定條件再比較。",
+    ])
 
     report = check.check_note_stage(json_path, note_path, style="faithful")
 
     locations = [f.location for f in report.findings if f.code == "R10"]
     assert "segment 1" not in locations
     assert "segment 2" in locations
+
+
+# --------------------------------------------------------------------------
+# 16.2 -- residual ratio, because "identical" was one sentence away from free
+# --------------------------------------------------------------------------
+# The blind review of four expansions found a note that had added a real
+# paragraph of its own reasoning to the front of every section and left the
+# rendered sentences sitting underneath it, untouched. Nothing was identical,
+# R10 said nothing, and the reader was told the same thing twice per section.
+
+def test_r10_reports_a_section_that_only_gained_a_sentence(lecture):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, "推理鏈：先說清楚前提")
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+    hits = [f for f in report.findings
+            if f.code == "R10" and f.location == "segment 1"]
+
+    assert hits, "adding a sentence in front of the skeleton is not expansion"
+    assert "% of the body is render output" in hits[0].message
+    assert "100%" not in hits[0].message
+
+
+def test_the_r10_threshold_comes_from_the_profile(lecture, monkeypatch):
+    """`check.r10_ratio` in outputs.toml moves the line, nothing else does."""
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, "推理鏈：先說清楚前提")
+
+    monkeypatch.setattr(check.loader, "r10_ratio", lambda profile=None: 0.95)
+    lenient = check.check_note_stage(json_path, note_path, style="faithful")
+    assert "segment 1" not in [
+        f.location for f in lenient.findings if f.code == "R10"
+    ]
+
+    monkeypatch.setattr(check.loader, "r10_ratio", lambda profile=None: 0.10)
+    strict = check.check_note_stage(json_path, note_path, style="faithful")
+    assert "segment 1" in [
+        f.location for f in strict.findings if f.code == "R10"
+    ]
+
+
+def test_a_kept_quotation_is_not_counted_as_residue(lecture):
+    """2.1 requires the speaker's words be kept verbatim; R10 must not punish it."""
+    json_path, note_path = lecture
+    _rewrite_first_section(note_path, [
+        "講者先交代為什麼這個判準值得建立，再拿兩個反例把邊界推出來。",
+        "他的理由是：只看結果會把運氣算進能力，所以要先固定條件再比較。",
+    ])
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    # The three rendered blockquotes are still in the file untouched.
+    assert note_path.read_text(encoding="utf-8").count("> 「佔位原話一") == 3
+    assert "segment 1" not in [
+        f.location for f in report.findings if f.code == "R10"
+    ]
 
 
 def test_r10_ignores_whitespace_only_edits(lecture):
@@ -804,3 +890,177 @@ def test_the_guideline_documents_the_single_spelling():
 
     assert "`[推論]` 的寫法只有一種" in text
     assert "1. [推論] 若某個案例具備 A 但缺少 B" in text
+
+
+# --------------------------------------------------------------------------
+# 16.3 -- R11: the same sentence in two sections
+# --------------------------------------------------------------------------
+# The blind review found one note carrying the same three sentences in
+# Summary, in the Note body and again under "我應該記住的 3 件事". Every rule
+# before this one reads a single section, so nothing saw it.
+
+#: Long enough to clear DUPLICATE_SENTENCE_CHARS, and it appears nowhere in
+#: the fixture's transcript, so R5 has nothing to say about it either.
+REPEATED = (
+    "廠商自己給的省成本百分比與第三方統計的市場規模，不能放在同一個證據等級上使用"
+)
+
+
+def _append_to_section(note_path: Path, heading: str, text: str):
+    def transform(lines):
+        at = lines.index(heading)
+        return lines[:at + 1] + ["", text, ""] + lines[at + 1:]
+    _edit(note_path, transform)
+
+
+def test_r11_reports_a_sentence_repeated_in_two_sections(lecture):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, REPEATED)
+    _append_to_section(note_path, "## 學習驗證", "> " + REPEATED)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+    hits = [f for f in report.findings if f.code == "R11"]
+
+    assert len(hits) == 1, [f.message for f in report.findings]
+    assert hits[0].severity == "warn"
+    assert "Note (layer 1-3)" in hits[0].location
+    assert "學習驗證" in hits[0].location
+    assert REPEATED[:10] in hits[0].message
+
+
+def test_r11_says_nothing_when_each_sentence_is_written_once(lecture):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, REPEATED)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert "R11" not in _codes(report)
+
+
+def test_r11_counts_a_quotation_repeated_in_another_section(lecture):
+    """Unlike R10, a kept quotation is a sentence like any other here.
+
+    2.1 asks for the speaker's words once. Saying them again three sections
+    later is repetition, not compliance.
+    """
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, "「%s」" % REPEATED)
+    _append_to_section(note_path, "## 題目", "> 「%s」" % REPEATED)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert "R11" in _codes(report)
+
+
+def test_r11_ignores_the_outline_and_the_references(lecture):
+    """The outline is a machine projection; References repeats terms by design."""
+    json_path, note_path = lecture
+    _append_to_section(note_path, "## 講者骨架", REPEATED)
+    _append_to_section(note_path, "### References", REPEATED)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert "R11" not in _codes(report)
+
+
+def test_r11_forgives_the_one_pair_the_guideline_mandates(lecture):
+    """7.1 makes Summary quote takeaways, and render projects Evergreen from them."""
+    json_path, note_path = lecture
+    _append_to_section(note_path, "# Evergreen Note", "**「%s」**" % REPEATED)
+    _append_to_section(note_path, "# Summary", "- " + REPEATED)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+    assert "R11" not in _codes(report)
+
+    # A third section is no longer the renderer's doing.
+    _append_to_section(note_path, "## 學習驗證", "> " + REPEATED)
+    again = check.check_note_stage(json_path, note_path, style="faithful")
+    assert "R11" in _codes(again)
+
+
+def test_r11_leaves_a_short_repeated_line_alone(lecture):
+    """Two identical short lines are a coincidence, not a copied sentence."""
+    json_path, note_path = lecture
+    short = "這一點很重要"
+    _insert_into_first_section(note_path, short)
+    _append_to_section(note_path, "## 學習驗證", "> " + short)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert "R11" not in _codes(report)
+
+
+# --------------------------------------------------------------------------
+# 16.4 -- `ai_draft_remaining=0` has to be reachable by the model alone
+# --------------------------------------------------------------------------
+def test_only_the_two_model_placeholders_carry_a_marker(lecture):
+    """The reader's slots and the remember-three candidates carry none."""
+    json_path, note_path = lecture
+    lines = note_path.read_text(encoding="utf-8").split("\n")
+
+    marked = [
+        position for position, line in enumerate(lines)
+        if render_mod.AI_DRAFT_MARK in line
+    ]
+    assert len(marked) == 2
+
+    def owning_heading(position):
+        return next(lines[i] for i in range(position, -1, -1)
+                    if lines[i].startswith("#"))
+
+    assert {owning_heading(p) for p in marked} == {"## 講者骨架", "## 題目"}
+
+    verification_at = lines.index("## 學習驗證")
+    assert render_mod.AI_DRAFT_MARK not in "\n".join(lines[verification_at:])
+    assert render_mod.CANDIDATE_CALLOUT in "\n".join(lines[verification_at:])
+    for slot in render_mod.SUMMARY_SLOTS:
+        assert slot in "\n".join(lines)
+
+
+def test_writing_the_two_placeholders_drives_the_count_to_zero(lecture):
+    """Without the model touching the reader's slots or the candidates."""
+    json_path, note_path = lecture
+    _edit(note_path, lambda lines: [
+        line for line in lines if render_mod.AI_DRAFT_MARK not in line
+    ])
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert report.metrics["ai_draft_remaining"] == 0
+    text = note_path.read_text(encoding="utf-8")
+    assert render_mod.CANDIDATE_CALLOUT in text
+    assert render_mod.SUMMARY_SLOTS[0] in text
+
+
+def test_r11_sees_through_a_renumbered_copy(lecture):
+    """The blind review's exact shape: `- 某句` in Summary, `> 1. 某句` below.
+
+    The remember-three candidates are rendered as a numbered list inside a
+    collapsed callout, and Summary is a bulleted list. A rule that compared
+    those two strings as written would have missed the one case it was
+    written for.
+    """
+    json_path, note_path = lecture
+    _append_to_section(note_path, "# Summary", "- " + REPEATED)
+    _append_to_section(note_path, "## 學習驗證", "> 1. " + REPEATED)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+    hits = [f for f in report.findings if f.code == "R11"]
+
+    assert len(hits) == 1
+    assert "Summary" in hits[0].location and "學習驗證" in hits[0].location
+
+
+def test_the_r11_excerpt_drops_the_typesetting(lecture):
+    """A bold, quoted copy and a plain one are the same sentence."""
+    json_path, note_path = lecture
+    _append_to_section(note_path, "# Summary", "- " + REPEATED)
+    _append_to_section(note_path, "## 題目", "**「%s」**" % REPEATED)
+
+    finding = next(f for f in check.check_note_stage(
+        json_path, note_path, style="faithful"
+    ).findings if f.code == "R11")
+
+    assert finding.message.startswith("the same sentence is in 2 sections: 「")
+    assert "**" not in finding.message
+    assert REPEATED[:10] in finding.message

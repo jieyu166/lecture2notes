@@ -220,3 +220,62 @@ def test_troubleshooting_records_the_cp950_help_finding_and_how_to_repeat_it():
     # The conclusion, and the measurement it rests on.
     assert "重現不出來" in body
     assert "U+FFFD" in body
+
+
+# --------------------------------------------------------------------------
+# 16.6 -- the release notes, and the one number they are about
+# --------------------------------------------------------------------------
+import re  # noqa: E402
+
+import lecture2notes  # noqa: E402
+from lecture2notes.cli.main import main as cli_entry  # noqa: E402
+
+PYPROJECT = REPO_ROOT / "pyproject.toml"
+
+
+def _declared_version() -> str:
+    text = PYPROJECT.read_text(encoding="utf-8")
+    match = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
+    assert match, "pyproject.toml declares no version"
+    return match.group(1)
+
+
+def test_the_project_is_at_0_2_0():
+    assert _declared_version() == "0.2.0"
+
+
+def test_the_source_fallback_matches_pyproject():
+    """Two numbers that are allowed to disagree eventually do.
+
+    The CLI reads `importlib.metadata` so an installed wheel reports its own
+    version; a source checkout run through PYTHONPATH has no distribution to
+    read, and falls back to this constant. The fallback is only honest if it
+    tracks pyproject.
+    """
+    assert lecture2notes.FALLBACK_VERSION == _declared_version()
+
+
+def test_the_version_flag_prints_the_package_version(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        cli_entry(["--version"])
+
+    assert exit_info.value.code == 0
+    printed = capsys.readouterr().out.strip()
+    assert printed == "lecture2notes %s" % lecture2notes.__version__
+
+
+def test_the_readme_lists_both_releases():
+    text = _readme_text()
+
+    assert "## 版本說明" in text
+    assert text.count("### v0.1.0") == 1
+    assert text.count("### v0.2.0") == 1
+    assert text.index("### v0.1.0") < text.index("### v0.2.0")
+
+
+def test_the_readme_says_what_is_still_untested():
+    """A release note that only lists wins is a release note nobody believes."""
+    text = _readme_text()
+
+    assert "尚未實測" in text
+    assert "Qwen3-ASR" in text[text.index("## 版本說明"):]

@@ -1,3 +1,5 @@
+<!-- Encoding: UTF-8 (no BOM). Windows PowerShell 5.1: Get-Content -Encoding UTF8 <file> -->
+
 # 參考：profile 與 overlay
 
 任務是「換詞庫」「改 frontmatter 模板」「打開或關掉某個輸出」或「使用者說他有自己的
