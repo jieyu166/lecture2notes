@@ -84,6 +84,7 @@ Relation values:
 | `_deps.py` | original | — | Optional-dependency presence checks (`require_rapidocr`, etc.). |
 | `_out.py` | original | — | Shared `Progress`/console-output helper. |
 | `exit_codes.py` | original | — | Exit-code constants for the CLI contract. |
+| `install.py` | original | — | `l2n install-skill` / repo-root `install.py`: copies `skill/` into the three agent skill directories, preserves existing overlay files and reports content drift. No upstream or rad-workflow counterpart (`sync_skills.py` in rad-workflow distributes a different layout and does not hash-check targets). |
 | `acceptance/__init__.py` | original | — | Package marker. |
 | `acceptance/audit.py` | inspired | `scripts/audit_note.py` | Both produce a structured pass/fail audit record; upstream audits frontmatter/wikilinks/citations for a vault note, this audits a canonical lecture JSON's derivatives (viewer/chapter-file/note) against each other. No shared function names. |
 | `acceptance/check.py` | inspired | `scripts/audit_note.py` | Shares only the FAIL/WARN severity-tier philosophy (a generic QA pattern, named explicitly in upstream's own docstring); checks (JSON structure, frame existence, time monotonicity) and function names are unrelated. |
@@ -133,7 +134,7 @@ Relation values:
 | `schema/migrate.py` | original | — | `l2n migrate`: upgrades a 1.x lecture document to canonical schema v2. No upstream analog. |
 | `schema/model.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/lecture_model.py`. No upstream canonical-schema module or time-signature validator exists in `drpwchen/lecture-to-notes`. |
 
-Counts: 7 inspired, 15 ported-from-rad-workflow, 31 original — 53 modules total.
+Counts: 7 inspired, 15 ported-from-rad-workflow, 32 original — 54 modules total.
 
 ## ASR default parameters
 
