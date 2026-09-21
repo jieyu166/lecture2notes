@@ -14,10 +14,12 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
 
+from lecture2notes.engines import corrections as corrections_mod
 from lecture2notes.engines import pipeline
 from lecture2notes.engines.base import Cue, Engine, EngineMeta, parse_srt
 from lecture2notes.engines.corrections import (
@@ -155,6 +157,42 @@ def test_without_always_an_unmatched_table_writes_nothing(sample):
     assert result["changed"] is False
     assert result["sidecar"] is None
     assert not sample.with_name("lecture.corrections.json").exists()
+
+
+def test_missing_opencc_warns_once_per_process_and_marks_the_sidecar(sample, monkeypatch, capsys):
+    """A missing OpenCC must be visible (a warn line, once, not per-file) and
+    distinguishable in the sidecar from the user's own ``--no-s2t``.
+    """
+    monkeypatch.setattr(corrections_mod, "_opencc_missing_warned", False)
+    monkeypatch.setitem(sys.modules, "opencc", None)
+
+    _text1, applied1 = corrections_mod.convert_simplified("佔位文字一")
+    _text2, applied2 = corrections_mod.convert_simplified("佔位文字二")
+    assert applied1 is False
+    assert applied2 is False
+
+    printed = capsys.readouterr().out
+    assert printed.count("opencc not installed") == 1
+    assert "opencc-python-reimplemented" in printed
+
+    correct_file(sample, load_table(TABLE), s2t=True)
+    sidecar = json.loads(
+        sample.with_name("lecture.corrections.json").read_text(encoding="utf-8")
+    )
+    assert sidecar["s2t"]["applied"] is False
+    assert sidecar["s2t"]["skipped_reason"] == "opencc missing"
+
+
+def test_no_s2t_marks_the_sidecar_disabled_not_missing(sample):
+    """``--no-s2t`` and a missing OpenCC both leave ``applied: False`` but must
+    not look identical: this one is a deliberate choice, not a degradation.
+    """
+    correct_file(sample, load_table(TABLE), s2t=False)
+    sidecar = json.loads(
+        sample.with_name("lecture.corrections.json").read_text(encoding="utf-8")
+    )
+    assert sidecar["s2t"]["applied"] is False
+    assert sidecar["s2t"]["skipped_reason"] == "disabled"
 
 
 def test_build_sidecar_is_pure_and_shaped_as_documented():

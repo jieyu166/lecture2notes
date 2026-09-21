@@ -33,6 +33,11 @@ S2T_CONFIG = "s2twp"
 
 Pair = Tuple[str, str, str]  # (heard, correct, source)
 
+#: Set once :func:`convert_simplified` has printed its missing-opencc warning, so
+#: a long batch run (many files, one process) reports the degradation once
+#: instead of once per file.
+_opencc_missing_warned = False
+
 
 def load_table(data: Mapping[str, Any], sections: Sequence[str] = AUTO_SECTIONS) -> List[Pair]:
     """Flatten a corrections document into ``(heard, correct, source)``, longest first.
@@ -77,11 +82,24 @@ def convert_simplified(text: str) -> Tuple[str, bool]:
     """Convert Simplified to Traditional if OpenCC is installed; never fail hard.
 
     Missing OpenCC is a degradation the user can see, not a reason to refuse to
-    write subtitles, so this returns ``(text, False)`` instead of raising.
+    write subtitles, so this returns ``(text, False)`` instead of raising. "See"
+    means two things: a ``[warn]`` line is printed the first time this happens in
+    the process (never repeated, so a batch of many files does not spam it), and
+    ``correct_file`` records the reason in the sidecar's ``s2t`` block as
+    ``skipped_reason: "opencc missing"`` -- distinct from the user's own
+    ``--no-s2t``, which records ``"disabled"``.
     """
+    global _opencc_missing_warned
     try:
         from opencc import OpenCC  # type: ignore
     except ImportError:
+        if not _opencc_missing_warned:
+            _out.say(
+                "warn",
+                "opencc not installed; simplified-to-traditional conversion "
+                "skipped (pip install opencc-python-reimplemented)",
+            )
+            _opencc_missing_warned = True
         return text, False
     return OpenCC(S2T_CONFIG).convert(text), True
 
@@ -104,8 +122,21 @@ def build_sidecar(
     s2t_applied: bool,
     table_path: Optional[str] = None,
     generated_at: Optional[str] = None,
+    s2t_skipped_reason: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Build the audit record. Kept pure so its shape can be asserted directly."""
+    """Build the audit record. Kept pure so its shape can be asserted directly.
+
+    ``s2t_skipped_reason`` distinguishes the two ways conversion can be absent:
+    ``"disabled"`` (the caller passed ``s2t=False``, e.g. ``--no-s2t``) versus
+    ``"opencc missing"`` (conversion was wanted but the dependency is not
+    installed). It is omitted from the payload when conversion was applied.
+    """
+    s2t_block: Dict[str, Any] = {
+        "applied": bool(s2t_applied),
+        "converter": S2T_CONFIG if s2t_applied else None,
+    }
+    if not s2t_applied and s2t_skipped_reason:
+        s2t_block["skipped_reason"] = s2t_skipped_reason
     return {
         "input": input_name,
         "output": output_name,
@@ -113,7 +144,7 @@ def build_sidecar(
         "generated_at": generated_at
         or datetime.now().astimezone().isoformat(timespec="seconds"),
         "corrections_table": table_path,
-        "s2t": {"applied": bool(s2t_applied), "converter": S2T_CONFIG if s2t_applied else None},
+        "s2t": s2t_block,
         "total_kinds": len(hits),
         "total_hits": sum(int(hit.get("count", 0)) for hit in hits),
         # The key matches the document's ``corrections[]`` so a later stage can
@@ -153,6 +184,9 @@ def correct_file(
     text = read_subtitle_text(source).replace("\r", "")
     original = text
     text, s2t_applied = convert_simplified(text) if s2t else (text, False)
+    s2t_skipped_reason: Optional[str] = None
+    if not s2t_applied:
+        s2t_skipped_reason = "disabled" if not s2t else "opencc missing"
     fixed, hits = apply_corrections(text, pairs)
 
     result: Dict[str, Any] = {
@@ -181,6 +215,7 @@ def correct_file(
             hits,
             s2t_applied,
             table_path,
+            s2t_skipped_reason=s2t_skipped_reason,
         )
         result["sidecar"] = str(write_sidecar(destination, payload))
     _out.ok("%d rules applied, %d replacements" % (len(hits), sum(h["count"] for h in hits)))
