@@ -1,3 +1,5 @@
+<!-- Encoding: UTF-8 (no BOM). Windows PowerShell 5.1: Get-Content -Encoding UTF8 <file> -->
+
 # 參考：擴寫筆記
 
 任務是「把骨架筆記擴寫成完整筆記」時，讀這一份。

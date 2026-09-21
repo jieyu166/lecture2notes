@@ -238,3 +238,68 @@ def test_the_guideline_says_the_same_thing_in_section_one():
     assert "<stem>.frames_ocr.json" in body
     assert "frame_ocr" in body
     assert "不可以抄進筆記" in body
+
+
+# --------------------------------------------------------------------------
+# 16.5 -- the file says how to read it, in characters every reader can read
+# --------------------------------------------------------------------------
+# A Codex run on Windows opened SKILL.md and references/note-writing.md and got
+# mojibake: PowerShell 5.1's Get-Content defaults to the system ANSI codepage
+# (cp950 here) and these files are UTF-8 without a BOM. A BOM would fix that
+# reader and break others, so the file says what it is instead. The line has to
+# survive being read wrongly, which is why it is pure ASCII: cp950 and UTF-8
+# agree on every character in it.
+
+ENCODING_HINT = (
+    "<!-- Encoding: UTF-8 (no BOM). "
+    "Windows PowerShell 5.1: Get-Content -Encoding UTF8 <file> -->"
+)
+
+
+def _skill_files():
+    yield SKILL_MD
+    for name in REFERENCE_FILES:
+        yield REFERENCES_DIR / name
+
+
+@pytest.mark.parametrize(
+    "path", list(_skill_files()), ids=lambda p: p.name
+)
+def test_every_skill_file_says_how_to_read_it(path):
+    assert ENCODING_HINT in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "path", list(_skill_files()), ids=lambda p: p.name
+)
+def test_the_hint_is_pure_ascii(path):
+    """It has to be legible in the very situation it describes."""
+    line = next(
+        text for text in path.read_text(encoding="utf-8").split("\n")
+        if ENCODING_HINT in text
+    )
+    line.encode("ascii")  # raises if anything here is not
+    assert line.strip() == ENCODING_HINT
+
+
+@pytest.mark.parametrize(
+    "path", list(_skill_files()), ids=lambda p: p.name
+)
+def test_no_file_gained_a_bom(path):
+    """The fix is a sentence, not a byte-order mark that breaks other readers."""
+    assert not path.read_bytes().startswith(b"\xef\xbb\xbf")
+
+
+def test_the_hint_sits_after_the_frontmatter_in_skill_md():
+    lines = SKILL_MD.read_text(encoding="utf-8").split("\n")
+
+    assert lines[0].strip() == "---"
+    close = next(i for i in range(1, len(lines)) if lines[i].strip() == "---")
+    assert lines[close + 1].strip() == ENCODING_HINT
+
+
+@pytest.mark.parametrize("name", REFERENCE_FILES)
+def test_the_hint_is_the_first_line_of_each_reference(name):
+    text = (REFERENCES_DIR / name).read_text(encoding="utf-8")
+
+    assert text.split("\n")[0].strip() == ENCODING_HINT

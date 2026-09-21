@@ -1,3 +1,5 @@
+<!-- Encoding: UTF-8 (no BOM). Windows PowerShell 5.1: Get-Content -Encoding UTF8 <file> -->
+
 # 參考：輸出、批次與驗收
 
 任務是「產 viewer」「產 PotPlayer 章節檔」「做課程首頁」「整課批次跑」或

@@ -1,3 +1,5 @@
+<!-- Encoding: UTF-8 (no BOM). Windows PowerShell 5.1: Get-Content -Encoding UTF8 <file> -->
+
 # 參考：分段與正規 JSON v2
 
 任務是「把字幕切成導航章節」或「建立／修正正規 JSON」時，讀這一份。

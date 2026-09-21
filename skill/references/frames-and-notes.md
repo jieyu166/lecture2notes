@@ -1,3 +1,5 @@
+<!-- Encoding: UTF-8 (no BOM). Windows PowerShell 5.1: Get-Content -Encoding UTF8 <file> -->
+
 # 參考：影格、OCR 與骨架筆記
 
 任務是「抓投影片」「跑 OCR」或「產出骨架筆記」時，讀這一份。

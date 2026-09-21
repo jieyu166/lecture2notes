@@ -2,6 +2,7 @@
 name: lecture2notes
 description: 把講座影片整理成逐字稿、分段、投影片影格與可追溯的筆記，並產出時間同步 viewer 與課程首頁；transcription、segmentation、frames、notes、viewer、course hub 六類工作共用這一份路由。
 ---
+<!-- Encoding: UTF-8 (no BOM). Windows PowerShell 5.1: Get-Content -Encoding UTF8 <file> -->
 
 # lecture2notes
 

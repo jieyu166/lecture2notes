@@ -1,3 +1,5 @@
+<!-- Encoding: UTF-8 (no BOM). Windows PowerShell 5.1: Get-Content -Encoding UTF8 <file> -->
+
 # 參考：轉錄與字幕校正
 
 任務是「把影片轉成字幕」或「把官方字幕的時間對回影片」時，讀這一份。
