@@ -157,6 +157,32 @@ def test_frame_ocr_is_written_into_every_segment(tmp_path: Path, no_s2t):
     assert data["schema_version"] == "2.0"
 
 
+def test_an_empty_ocr_result_still_leaves_a_valid_v2_document(tmp_path: Path):
+    """Flat-colour slides yield no text; ``frame_ocr`` must stay an empty list."""
+    from lecture2notes.acceptance.check import check_json
+    from lecture2notes.schema.io import write_json_atomic
+
+    fixture = Path(__file__).parent / "fixtures" / "lecture_v2_valid.json"
+    document = json.loads(fixture.read_text(encoding="utf-8"))
+
+    merged = ocr_mod.merge_ocr_into_segments(document, {})
+
+    for segment in merged["segments"]:
+        assert segment["frame_ocr"] == []
+        names = list(segment.get("frames") or [])
+        if segment.get("frame"):
+            names.append(segment["frame"])
+        for name in names:
+            target = tmp_path / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"placeholder frame")
+    path = write_json_atomic(tmp_path / "sample-talk.json", merged)
+
+    report = check_json(path)
+    assert report.errors == []
+    assert merged["ocr_meta"]["segments_with_text"] == 0
+
+
 def test_meeting_toolbar_lines_are_stripped(tmp_path: Path, no_s2t):
     document = build_lecture(tmp_path, frame_count=1)
 

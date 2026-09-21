@@ -217,11 +217,10 @@ def merge_ocr_into_segments(
                 hit = cache.get(str(frame))
                 if hit and hit.get("text"):
                     entries.append({"frame": str(frame), "text": hit["text"]})
+            # Schema v2 requires the key even when no frame carried text.
+            segment["frame_ocr"] = entries
             if entries:
-                segment["frame_ocr"] = entries
                 merged += 1
-            else:
-                segment.pop("frame_ocr", None)
     result["ocr_meta"] = {
         "engine": ENGINE_NAME,
         "generated_at": generated_at
