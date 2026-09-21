@@ -17,6 +17,7 @@ import sys
 from typing import Callable, List, Optional, Sequence
 
 from lecture2notes import __version__, _deps, _out, exit_codes
+from lecture2notes.engines import registry
 
 LANG_CHOICES = ("zh", "en", "ja", "auto")
 LANG_REQUIRED_MESSAGE = "--lang is required (zh|en|ja|auto)"
@@ -95,6 +96,10 @@ def require_lang(args: argparse.Namespace) -> str:
 # stage handlers
 # --------------------------------------------------------------------------
 def cmd_transcribe(args: argparse.Namespace) -> int:
+    if getattr(args, "list_engines", False):
+        for text in registry.engine_lines():
+            _out.line(text)
+        return exit_codes.OK
     require_lang(args)
     _deps.require("ffmpeg")
     not_implemented("transcribe")
@@ -203,6 +208,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model-dir", default=None, help="本機權重目錄")
     p.add_argument(
         "--allow-cloud", action="store_true", help="允許使用非本機引擎（預設拒絕）"
+    )
+    p.add_argument(
+        "--whisper-cpp-bin", default=None, help="whisper.cpp 執行檔路徑"
+    )
+    p.add_argument(
+        "--whisper-cpp-model", default=None, help="whisper.cpp 的 ggml 模型檔路徑"
+    )
+    p.add_argument(
+        "--list-engines",
+        action="store_true",
+        help="列出所有已註冊引擎與其相依狀態後結束",
     )
     p.set_defaults(func=cmd_transcribe)
 

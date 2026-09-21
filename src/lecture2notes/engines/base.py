@@ -66,6 +66,26 @@ class EngineMeta:
         return data
 
 
+@dataclass(frozen=True)
+class DependencyStatus:
+    """Whether an engine could run right now, and what is missing if not.
+
+    ``--list-engines`` must answer this for four engines in well under a second,
+    so a probe never imports a model runtime and never touches a weight file
+    beyond asking the filesystem whether it is there.
+    """
+
+    name: str
+    satisfied: bool
+    detail: str = ""
+
+    def mark(self) -> str:
+        return "ready" if self.satisfied else "missing"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"name": self.name, "satisfied": self.satisfied, "detail": self.detail}
+
+
 class Engine:
     """Base class for every transcription backend.
 
@@ -88,6 +108,21 @@ class Engine:
     def check(self) -> None:
         """Raise MissingDependency if this engine cannot run on this machine."""
         raise NotImplementedError
+
+    def probe(self) -> DependencyStatus:
+        """Report dependency state without importing or loading anything heavy.
+
+        The default runs :meth:`check` and catches the dependency error, which is
+        correct but may import a runtime. An engine whose ``check`` is expensive
+        overrides this with a ``find_spec``/``Path.exists`` version.
+        """
+        from lecture2notes import _deps
+
+        try:
+            self.check()
+        except _deps.MissingDependency as exc:
+            return DependencyStatus(self.meta.name, False, "%s (%s)" % (exc.name, exc.how))
+        return DependencyStatus(self.meta.name, True, "")
 
     def transcribe(self, audio: Path, lang: str) -> List[Cue]:
         raise NotImplementedError
@@ -218,6 +253,7 @@ def hallucination_runs(cues: Sequence[Cue], threshold: int = 30) -> List[Dict[st
 
 __all__ = [
     "Cue",
+    "DependencyStatus",
     "Engine",
     "EngineMeta",
     "MIN_CUE_DURATION",

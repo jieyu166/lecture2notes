@@ -17,11 +17,15 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from lecture2notes import _deps
-from lecture2notes.engines.base import Cue, Engine, EngineMeta, parse_srt
+from lecture2notes.engines.base import Cue, DependencyStatus, Engine, EngineMeta, parse_srt
 
 #: Environment variables that point at a user-supplied binary and model.
 BIN_ENV = "LECTURE2NOTES_WHISPER_CPP_BIN"
 MODEL_ENV = "LECTURE2NOTES_WHISPER_CPP_MODEL"
+#: The names the rad-workflow script used. Still honoured so an existing
+#: environment keeps working after the rename; the package name wins.
+LEGACY_BIN_ENV = "WHISPER_SRT_BIN"
+LEGACY_MODEL_ENV = "WHISPER_SRT_MODEL"
 
 
 class WhisperCppEngine(Engine):
@@ -43,8 +47,13 @@ class WhisperCppEngine(Engine):
         **options: Any,
     ) -> None:
         super().__init__(**options)
-        self.binary = binary or os.environ.get(BIN_ENV) or "whisper-cli"
-        self.model = model or os.environ.get(MODEL_ENV)
+        self.binary = (
+            binary
+            or os.environ.get(BIN_ENV)
+            or os.environ.get(LEGACY_BIN_ENV)
+            or "whisper-cli"
+        )
+        self.model = model or os.environ.get(MODEL_ENV) or os.environ.get(LEGACY_MODEL_ENV)
 
     def check(self) -> None:
         candidate = Path(self.binary)
@@ -59,6 +68,18 @@ class WhisperCppEngine(Engine):
                 "model not found: %s" % self.model,
             )
         return resolved
+
+    def probe(self) -> DependencyStatus:
+        import shutil
+
+        missing = []
+        if not (Path(self.binary).is_file() or shutil.which(self.binary)):
+            missing.append("%s (%s)" % (self.binary, _deps.INSTALL_HINTS["whisper_cpp"]))
+        if not self.model or not Path(self.model).is_file():
+            missing.append("ggml model (pass --whisper-cpp-model or set %s)" % MODEL_ENV)
+        if missing:
+            return DependencyStatus(self.meta.name, False, "; ".join(missing))
+        return DependencyStatus(self.meta.name, True, "binary %s" % self.binary)
 
     def build_command(self, audio: Path, lang: str, out_stem: Path) -> List[str]:
         """The exact argv used, exposed so a test can assert it without running it."""
@@ -82,4 +103,10 @@ class WhisperCppEngine(Engine):
         return parse_srt(produced)
 
 
-__all__ = ["BIN_ENV", "MODEL_ENV", "WhisperCppEngine"]
+__all__ = [
+    "BIN_ENV",
+    "LEGACY_BIN_ENV",
+    "LEGACY_MODEL_ENV",
+    "MODEL_ENV",
+    "WhisperCppEngine",
+]

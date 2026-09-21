@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from lecture2notes import _deps
-from lecture2notes.engines.base import Cue, Engine, EngineMeta
+from lecture2notes.engines.base import Cue, DependencyStatus, Engine, EngineMeta
 
 DEFAULT_MODEL = "Qwen/Qwen3-ASR-0.6B"
 #: The larger checkpoint, selected with --model.
@@ -61,6 +61,13 @@ class Qwen3AsrEngine(Engine):
 
     def check(self) -> None:
         _deps.require_qwen_asr()
+
+    def probe(self) -> DependencyStatus:
+        if _deps.module_available("qwen_asr"):
+            return DependencyStatus(self.meta.name, True, "model %s" % self.model_reference())
+        return DependencyStatus(
+            self.meta.name, False, "qwen_asr (%s)" % _deps.INSTALL_HINTS["qwen_asr"]
+        )
 
     def transcribe(self, audio: Path, lang: str) -> List[Cue]:
         self.check()

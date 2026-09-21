@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from lecture2notes import _deps, _out
-from lecture2notes.engines.base import Cue, Engine, EngineMeta
+from lecture2notes.engines.base import Cue, DependencyStatus, Engine, EngineMeta
 
 DEFAULT_MODEL = "large-v3"
 
@@ -54,6 +54,13 @@ class FasterWhisperEngine(Engine):
     # -- dependency ------------------------------------------------------
     def check(self) -> None:
         _deps.require_module("faster_whisper")
+
+    def probe(self) -> DependencyStatus:
+        if _deps.module_available("faster_whisper"):
+            return DependencyStatus(self.meta.name, True, "model %s" % self.model)
+        return DependencyStatus(
+            self.meta.name, False, "faster_whisper (%s)" % _deps.INSTALL_HINTS["faster_whisper"]
+        )
 
     def _model_reference(self) -> str:
         return self.model

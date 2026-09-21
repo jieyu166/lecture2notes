@@ -11,9 +11,9 @@ asks for that in the same command.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from lecture2notes.engines.base import Engine, EngineMeta
+from lecture2notes.engines.base import DependencyStatus, Engine, EngineMeta
 from lecture2notes.engines.breeze_ct2 import BreezeCT2Engine
 from lecture2notes.engines.faster_whisper import FasterWhisperEngine
 from lecture2notes.engines.qwen3_asr import Qwen3AsrEngine
@@ -22,9 +22,12 @@ from lecture2notes.engines.whisper_cpp import WhisperCppEngine
 #: The engine used when ``--engine`` is not given.
 DEFAULT_ENGINE = "breeze_ct2"
 
+#: Printed verbatim when the gate fires. It names the rule, not just the flag,
+#: because the flag is easy to add without understanding what it turns off.
 CLOUD_GATE_MESSAGE = (
-    "engine '%s' is not local: it would upload the audio to a third party. "
-    "Re-run with --allow-cloud if that is what you want."
+    "engine '%s' is not local: it would upload your audio to a third party. "
+    "Non-local engines require --allow-cloud because of the local-processing "
+    "privacy rule. Re-run with --allow-cloud only if you accept that."
 )
 
 
@@ -81,6 +84,56 @@ def create(name: str, allow_cloud: bool = False, **options: Any) -> Engine:
     return factory(**options)
 
 
+# -- dependency probing ----------------------------------------------------
+
+#: Column layout of ``--list-engines``, ASCII only so a cp950 console can print it.
+LIST_HEADER = "engine          local  gpu    native_ts  dependencies"
+_LIST_ROW = "%-15s %-6s %-6s %-10s %s"
+
+
+def _yes(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def probe(name: str, **options: Any) -> DependencyStatus:
+    """Dependency state of one engine.
+
+    The gate is deliberately not applied here: a user is allowed to see that a
+    cloud plugin exists and whether it is installed without consenting to run it.
+    """
+    factory = _get(name)
+    try:
+        engine = factory(**options)
+    except Exception as exc:  # a plugin whose constructor needs options we lack
+        return DependencyStatus(name, False, "cannot construct: %s" % exc)
+    return engine.probe()
+
+
+def status_table() -> List[Tuple[EngineMeta, DependencyStatus]]:
+    """Metadata plus dependency state for every registered engine."""
+    return [(meta_for(name), probe(name)) for name in names()]
+
+
+def engine_lines() -> List[str]:
+    """The exact lines ``l2n transcribe --list-engines`` prints."""
+    lines = [LIST_HEADER]
+    for meta, status in status_table():
+        detail = status.detail or ("ready" if status.satisfied else "missing")
+        if not status.satisfied:
+            detail = "missing: %s" % detail
+        lines.append(
+            _LIST_ROW
+            % (
+                meta.name,
+                _yes(meta.local),
+                _yes(meta.needs_gpu),
+                _yes(meta.native_timestamps),
+                detail,
+            )
+        )
+    return lines
+
+
 for _factory in (BreezeCT2Engine, FasterWhisperEngine, WhisperCppEngine, Qwen3AsrEngine):
     register(_factory)
 
@@ -89,10 +142,14 @@ __all__ = [
     "CLOUD_GATE_MESSAGE",
     "CloudEngineBlocked",
     "DEFAULT_ENGINE",
+    "LIST_HEADER",
     "create",
+    "engine_lines",
     "list_engines",
     "meta_for",
     "names",
+    "probe",
     "register",
+    "status_table",
     "unregister",
 ]

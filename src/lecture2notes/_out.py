@@ -100,6 +100,16 @@ def skip(msg: str) -> None:
     say("skip", msg)
 
 
+def line(text: str) -> None:
+    """Write one line of *result* output, unaffected by --quiet.
+
+    ``say`` and ``stage`` report on work; this prints the answer the user asked
+    for (``--list-engines``, a report table). Suppressing it under ``--quiet``
+    would leave the command with no output at all.
+    """
+    _write(_message_stream(), text)
+
+
 class Progress:
     """Progress reporter for any stage that can run longer than 10 seconds.
 
@@ -193,6 +203,7 @@ __all__ = [
     "error",
     "is_json_progress",
     "is_quiet",
+    "line",
     "ok",
     "reset",
     "say",
