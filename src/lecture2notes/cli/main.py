@@ -735,10 +735,189 @@ def _run_profile(paths_document: Path) -> str:
     return loader.BUILTIN_PROFILE
 
 
+#: What a stage prints when its output is already there.
+SKIP_EXISTS = "skip (exists)"
+
+#: scaffold is not a mechanical stage. It is the one place a language model has
+#: to write, so `run` states that plainly instead of pretending to do it.
+SCAFFOLD_SKIP = "skip (LLM stage; see skill)"
+
+#: What to do when the model has not written the document yet. Naming the skill
+#: matters: the next step is not something the CLI can perform.
+SCAFFOLD_MISSING = (
+    "%s does not exist; scaffold is the LLM stage -- run the lecture2notes "
+    "skill to write it, then run again"
+)
+
+
+class _StageRunner:
+    """Runs the stages in order and remembers the worst outcome so far.
+
+    `run` has two failure modes that must not be confused. A check error means
+    the artefact is wrong, so nothing downstream may be built from it and the
+    run stops. A check warning means the artefact is usable and somebody should
+    look at it, so the run continues and says so at the end with exit 1. That
+    distinction is the whole point of the acceptance contract, so it lives in
+    one place rather than being re-decided at each call site.
+    """
+
+    def __init__(self) -> None:
+        self.worst = exit_codes.OK
+
+    def failed(self, stage: str, reason: str) -> int:
+        _out.stage(stage, "error: %s" % reason)
+        self.worst = exit_codes.ERROR
+        return exit_codes.ERROR
+
+    def accept(self, stage: str, report) -> bool:
+        """Emit a stage check and say whether the run may continue.
+
+        The findings and the summary are printed in the acceptance contract's
+        own format, but the ``[stage] ok`` line uses the *run* stage's name
+        rather than the check's. They differ twice: scaffold is accepted by
+        `check json` and render by `check note`, and a run that reported
+        ``[json] ok`` in the middle of the scaffold stage would be describing a
+        stage the user never asked for.
+        """
+        for text in report.lines():
+            _out.line(text)
+        _out.line(report.summary_line())
+        code = report.exit_code()
+        if code == exit_codes.ERROR:
+            first = report.errors[0]
+            self.failed(stage, "%s %s: %s" % (first.code, first.location or "-",
+                                              first.message))
+            return False
+        if code == exit_codes.WARN:
+            self.worst = max(self.worst, exit_codes.WARN)
+        _out.stage(stage, "ok")
+        return True
+
+    def done(self, stage: str) -> bool:
+        """A stage that has no acceptance check of its own."""
+        _out.stage(stage, "ok")
+        return True
+
+
+def _run_transcribe(args, paths: RunPaths, lang: str, force: bool) -> Optional[str]:
+    """Do the transcribe stage, or report why it could not. None means fine."""
+    if paths.subtitle.is_file() and not force:
+        _out.stage("transcribe", SKIP_EXISTS)
+        return None
+    engine = resolve_engine(args)
+    pairs, table_path = load_corrections(args)
+    try:
+        pipeline.transcribe_video(
+            paths.video, lang, engine,
+            pairs=pairs, table_path=table_path, force=force,
+            chunk_sec=getattr(args, "chunk_sec", None)
+            or getattr(engine, "chunk_sec", None),
+        )
+    except RuntimeError as exc:
+        return str(exc)
+    return None
+
+
+def _run_frames(args, paths: RunPaths, force: bool) -> Optional[str]:
+    if paths.manifest.is_file() and not force:
+        _out.stage("frames", SKIP_EXISTS)
+        return None
+    try:
+        result = capture_mod.capture(
+            paths.video,
+            mode=getattr(args, "mode", None) or "scene",
+            every=getattr(args, "every", None) or 45.0,
+        )
+    except (capture_mod.DurationUnknown, ValueError, FileNotFoundError) as exc:
+        return str(exc)
+    if not result.kept:
+        return "capture produced no frames"
+    return None
+
+
+def _run_ocr(paths: RunPaths, force: bool) -> Optional[str]:
+    """OCR the captured frames, unless the cache already covers them.
+
+    The dependency is required only when there is work to do. Asking for
+    rapidocr in order to discover there is nothing to recognise would make a
+    resumed run fail on a machine where the first run succeeded.
+    """
+    if paths.ocr_cache.is_file() and not force:
+        _out.stage("ocr", SKIP_EXISTS)
+        return None
+    _deps.require("rapidocr")
+    target = paths.document if paths.document.is_file() else paths.frames_dir
+    if not target.exists():
+        return "no frames to read: %s" % paths.frames_dir
+    try:
+        ocr_mod.run_ocr(target, force=force)
+    except (OSError, RuntimeError) as exc:
+        return str(exc)
+    return None
+
+
+def _run_render(paths: RunPaths, style: Optional[str], force: bool) -> Optional[str]:
+    if paths.note.is_file() and not force:
+        _out.stage("render", SKIP_EXISTS)
+        return None
+    try:
+        data = read_json(paths.document)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return "cannot read %s: %s" % (paths.document.name, exc)
+    profile = paths.profile
+    if not (loader.profile_dir(profile) / loader.NOTE_TEMPLATE).is_file():
+        profile = loader.BUILTIN_PROFILE
+    render.write_skeleton(
+        paths.note, data,
+        style=loader.note_style(profile, style),
+        stem=paths.stem, profile=profile,
+    )
+    return None
+
+
+def _run_viewer(paths: RunPaths, force: bool) -> Optional[str]:
+    if paths.viewer.is_file() and not force:
+        _out.stage("viewer", SKIP_EXISTS)
+        return None
+    try:
+        data = read_json(paths.document)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return "cannot read %s: %s" % (paths.document.name, exc)
+    if not (data.get("segments") or []):
+        return "%s has no segments" % paths.document.name
+    viewer_mod.build(paths.document, data)
+    return None
+
+
+def _run_pbf(paths: RunPaths, force: bool) -> Optional[str]:
+    if paths.pbf.is_file() and not force:
+        _out.stage("pbf", SKIP_EXISTS)
+        return None
+    try:
+        data = read_json(paths.document)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return "cannot read %s: %s" % (paths.document.name, exc)
+    pbf_mod.write_pbf(paths.document, data, out=paths.pbf)
+    return None
+
+
 def cmd_run(args: argparse.Namespace) -> int:
+    """`l2n run <video> --lang xx`: every mechanical stage, with the checks.
+
+    The order is transcribe, frames, ocr, scaffold, render, viewer, and the
+    chapter file when the profile enables it. After each stage that has one, its
+    acceptance check runs: an error stops the run so that nothing downstream is
+    built from a broken artefact, a warning does not.
+
+    Re-running is the normal case, not the exception -- a thirty-minute lecture
+    is transcribed once and then rendered and viewed many times -- so every
+    stage skips when its output is there. ``--force`` is how you say you meant
+    it, and it is per-run rather than per-stage on purpose: a flag that redid
+    only the stage you named would still leave the later ones stale.
+    """
     # The language gate comes before everything, including --preflight: it is
     # the one contract that must fire before any path is even resolved.
-    require_lang(args)
+    lang = require_lang(args)
     video = getattr(args, "video", None)
     if not video:
         _out.error("run needs a video file")
@@ -752,9 +931,58 @@ def cmd_run(args: argparse.Namespace) -> int:
         # No dependency check: listing what a run would write must work on a
         # machine that cannot run it, which is exactly when it is most useful.
         return _emit_plan("run", plan_for(paths.planned()))
+
     _deps.require("ffmpeg")
-    not_implemented("run")
-    return exit_codes.OK
+    force = bool(getattr(args, "force", False))
+    style = getattr(args, "style", None)
+    runner = _StageRunner()
+
+    reason = _run_transcribe(args, paths, lang, force)
+    if reason is not None:
+        return runner.failed("transcribe", reason)
+    if not runner.accept("transcribe", check.check_transcribe_stage(paths.subtitle)):
+        return runner.worst
+
+    reason = _run_frames(args, paths, force)
+    if reason is not None:
+        return runner.failed("frames", reason)
+    if not runner.accept("frames", check.check_frames(paths.manifest)):
+        return runner.worst
+
+    reason = _run_ocr(paths, force)
+    if reason is not None:
+        return runner.failed("ocr", reason)
+    runner.done("ocr")
+
+    _out.stage("scaffold", SCAFFOLD_SKIP)
+    if not paths.document.is_file():
+        return runner.failed("scaffold", SCAFFOLD_MISSING % paths.document.name)
+    if not runner.accept("scaffold", check.check_json(paths.document)):
+        return runner.worst
+
+    reason = _run_render(paths, style, force)
+    if reason is not None:
+        return runner.failed("render", reason)
+    if not runner.accept("render", check.check_note_stage(
+        paths.document, paths.note,
+        transcript=paths.subtitle if paths.subtitle.is_file() else None,
+        style=style, profile=paths.profile,
+    )):
+        return runner.worst
+
+    reason = _run_viewer(paths, force)
+    if reason is not None:
+        return runner.failed("viewer", reason)
+    runner.done("viewer")
+
+    if paths.pbf_enabled():
+        reason = _run_pbf(paths, force)
+        if reason is not None:
+            return runner.failed("pbf", reason)
+        runner.done("pbf")
+
+    _out.ok("run: %s" % ("完成，但有警告" if runner.worst else "完成"))
+    return runner.worst
 
 
 def cmd_convert_model(args: argparse.Namespace) -> int:
@@ -994,6 +1222,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["faithful", "concise"],
         default=None,
         help="骨架筆記與 check note 的風格（預設取 profile）",
+    )
+    p.add_argument(
+        "--mode", choices=["scene", "interval"], default=None,
+        help="抓圖模式（預設 scene）",
+    )
+    p.add_argument(
+        "--every", type=float, default=None, help="interval 模式的取樣秒數"
     )
     p.add_argument(
         "--preflight",
