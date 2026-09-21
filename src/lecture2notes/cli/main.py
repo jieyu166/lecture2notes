@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from lecture2notes import __version__, _deps, _out, exit_codes
+from lecture2notes.engines import convert
 from lecture2notes.engines import corrections as corrections_mod
 from lecture2notes.engines import pipeline, registry
 from lecture2notes.engines.base import Engine
@@ -264,7 +265,16 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_convert_model(args: argparse.Namespace) -> int:
-    not_implemented("convert-model")
+    try:
+        convert.convert(
+            out_dir=Path(args.out) if getattr(args, "out", None) else None,
+            source=getattr(args, "src", None) or convert.SOURCE_MODEL,
+            quantization=getattr(args, "quantization", convert.DEFAULT_QUANTIZATION),
+            force=getattr(args, "force", False),
+        )
+    except convert.ConversionRefused as exc:
+        _out.error(str(exc))
+        return exit_codes.ERROR
     return exit_codes.OK
 
 
@@ -416,9 +426,12 @@ def build_parser() -> argparse.ArgumentParser:
         "convert-model", parents=[common], help="把 Breeze-ASR-25 轉為 CTranslate2 權重"
     )
     p.add_argument("--src", default=None, help="來源模型（HuggingFace id 或本機目錄）")
-    p.add_argument("--out", default=None, help="輸出目錄")
+    p.add_argument("--out", default=None, help="輸出目錄（預設在 whisper-models 下）")
     p.add_argument(
-        "--quantization", default="float16", help="量化方式（預設 float16）"
+        "--quantization",
+        default=convert.DEFAULT_QUANTIZATION,
+        choices=list(convert.QUANTIZATIONS),
+        help="量化方式（預設 float16）",
     )
     p.set_defaults(func=cmd_convert_model)
 
