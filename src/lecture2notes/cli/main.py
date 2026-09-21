@@ -28,6 +28,7 @@ from lecture2notes.engines import convert
 from lecture2notes.engines import corrections as corrections_mod
 from lecture2notes.engines import pipeline, registry
 from lecture2notes.engines.base import Engine
+from lecture2notes.outputs import hub as hub_mod
 from lecture2notes.outputs import pbf as pbf_mod
 from lecture2notes.outputs import viewer as viewer_mod
 from lecture2notes.schema.io import read_json
@@ -342,7 +343,24 @@ def cmd_pbf(args: argparse.Namespace) -> int:
 
 
 def cmd_hub(args: argparse.Namespace) -> int:
-    not_implemented("hub")
+    folder = getattr(args, "folder", None)
+    if not folder:
+        _out.error("hub 需要一個課程資料夾路徑")
+        return exit_codes.ERROR
+    root = Path(folder)
+    if not root.is_dir():
+        _out.error("hub：不是資料夾 %s" % root)
+        return exit_codes.ERROR
+    if getattr(args, "preflight", False):
+        return _emit_plan("hub", hub_mod.preflight(root))
+    result = hub_mod.build(root, title=getattr(args, "title", None))
+    if not result["cards"]:
+        _out.error("hub：資料夾裡沒有可用的正式 JSON")
+        return exit_codes.ERROR
+    _out.ok(
+        "hub: %s (%d lectures, %d index rows)"
+        % (result["path"].name, len(result["cards"]), result["index_rows"])
+    )
     return exit_codes.OK
 
 

@@ -1,0 +1,66 @@
+{
+  "schema_version": "2.0",
+  "stem": "hub-lecture-a",
+  "title": "佔位課程第一場",
+  "duration_sec": 600,
+  "source": {
+    "video": "hub-lecture-a.mp4",
+    "subtitle": {
+      "path": "hub-lecture-a.srt",
+      "origin": "asr",
+      "engine": "breeze_ct2",
+      "lang": "zh",
+      "offset_model": null
+    }
+  },
+  "profile": "generic",
+  "overall_summary_zh": "第一場的佔位全片摘要，內容全為虛構，僅供結構測試。",
+  "takeaways_zh": [
+    "第一場佔位重點甲",
+    "第一場佔位重點乙"
+  ],
+  "segments": [
+    {
+      "index": 1,
+      "start_time": "00:00:00",
+      "end_time": "00:05:00",
+      "start_sec": 0,
+      "end_sec": 300,
+      "title": "第一場 段落一 佔位標題",
+      "summary_zh": "第一場段落一的佔位摘要。",
+      "bullets_zh": [
+        {"text": "第一場佔位條列 1-A", "t": 30, "kind": "synthesis"}
+      ],
+      "quotes_zh": [
+        {"text": "第一場佔位原話一", "t": 45}
+      ],
+      "frame": "frames/hub-lecture-a-0030.png",
+      "frames": ["frames/hub-lecture-a-0030.png"],
+      "frame_ocr": [
+        {"frame": "frames/hub-lecture-a-0030.png", "text": "第一場佔位投影片文字"}
+      ],
+      "editorial_notes_zh": []
+    },
+    {
+      "index": 2,
+      "start_time": "00:05:00",
+      "end_time": "00:10:00",
+      "start_sec": 300,
+      "end_sec": 600,
+      "title": "第一場 段落二 佔位標題",
+      "summary_zh": "第一場段落二的佔位摘要。",
+      "bullets_zh": [
+        {"text": "第一場佔位條列 2-A", "t": null, "kind": "synthesis"}
+      ],
+      "quotes_zh": [],
+      "frame": "frames/hub-lecture-a-0520.png",
+      "frames": ["frames/hub-lecture-a-0520.png"],
+      "frame_ocr": [
+        {"frame": "frames/hub-lecture-a-0520.png", "text": "第一場第二張佔位投影片文字"}
+      ],
+      "editorial_notes_zh": []
+    }
+  ],
+  "corrections": [],
+  "unverified_terms": []
+}
