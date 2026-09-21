@@ -51,5 +51,23 @@ MIT，見 [LICENSE](LICENSE)。
 
 ## 致謝
 
-部分程式碼修改自（Adapted in part from）<https://github.com/drpwchen/lecture-to-notes>（MIT）。
-逐檔的衍生關係與上游 commit 會整理於 `ATTRIBUTION.md`。
+部分設計修改自（Adapted from）<https://github.com/drpwchen/lecture-to-notes>（MIT）。
+經逐檔比對，本專案 `src/lecture2notes/` 下沒有任何檔案直接複製上游程式碼；上述措辭指的是
+部分模組的流程階段設計參考自上游對應腳本（例如投影片抓圖後 OCR、逐字稿轉錄、筆記/JSON
+機器審核、課程首頁），實作（函式名稱、資料流、範圍）皆為獨立撰寫。逐檔的衍生關係、對應
+上游路徑與上游 commit hash 完整列於 [`ATTRIBUTION.md`](ATTRIBUTION.md)，上游 MIT LICENSE
+全文收錄於 [`NOTICE`](NOTICE)。
+
+兩者的主要差異：
+
+- **profile／overlay 分層**：上游是單一整包腳本；本專案把設定拆成套件內建 `generic` 詞庫
+  profile 與可疊加的 `radiology` overlay，兩者互不污染。
+- **schema v2**：本專案的正規 lecture JSON 有版本化 schema（`schema_version`、`source`、
+  `quotes_zh` 等欄位與驗證器），上游沒有對應的正規 schema 模組。
+- **官方字幕偏移校正**：本專案有獨立的字幕/逐字稿時間偏移量測與線性校正流程
+  （`engines/calibrate.py`），上游沒有這個階段。
+- **撰寫規範與機器檢查**：本專案的筆記撰寫規則（`notes/rules.py`）與四階段機器檢查
+  （`acceptance/check.py`、`acceptance/audit.py`）自成一套合約，檢查項目與上游的
+  frontmatter／wikilink／citation 審核完全不同。
+- **三家 skill 安裝器**：本專案可一鍵安裝為 Claude Code、Codex、OpenCode 三家 AI 代理共用的
+  skill（`install-skill` 子命令），上游沒有這個發佈形式。
