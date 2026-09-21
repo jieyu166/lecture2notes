@@ -28,6 +28,7 @@ from lecture2notes.engines import convert
 from lecture2notes.engines import corrections as corrections_mod
 from lecture2notes.engines import pipeline, registry
 from lecture2notes.engines.base import Engine
+from lecture2notes.outputs import pbf as pbf_mod
 from lecture2notes.outputs import viewer as viewer_mod
 from lecture2notes.schema.io import read_json
 from lecture2notes.schema.migrate import migrate_file
@@ -320,7 +321,23 @@ def cmd_viewer(args: argparse.Namespace) -> int:
 
 
 def cmd_pbf(args: argparse.Namespace) -> int:
-    not_implemented("pbf")
+    path, data = _load_document(getattr(args, "json_file", None), "pbf")
+    if path is None:
+        return exit_codes.ERROR
+    segments = data.get("segments") or []
+    if not segments:
+        _out.error("pbf：JSON 沒有 segments，無法產生章節")
+        return exit_codes.ERROR
+    stem, note = pbf_mod.match_video_stem(path)
+    destination = path.parent / (stem + ".pbf")
+    if destination.exists() and not getattr(args, "force", False):
+        _out.skip("pbf: %s 已存在（--force 重做）" % destination.name)
+        return exit_codes.OK
+    written = pbf_mod.write_pbf(path, data, out=destination)
+    _out.ok(
+        "pbf: %s (%d chapters, %s)"
+        % (written.name, pbf_mod.chapter_count(data), note)
+    )
     return exit_codes.OK
 
 
