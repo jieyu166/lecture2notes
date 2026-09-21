@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from urllib.parse import unquote
 
 from lecture2notes import __version__, _deps, _out, exit_codes
-from lecture2notes.acceptance import check
+from lecture2notes.acceptance import audit, check
 from lecture2notes.acceptance.check import check_json
 from lecture2notes.engines import calibrate
 from lecture2notes.engines import convert
@@ -560,7 +560,43 @@ def _check_note(args: argparse.Namespace) -> int:
     return report.exit_code()
 
 
+def _check_all(args: argparse.Namespace) -> int:
+    """`l2n check --all <stem> [--report <path>]`: every applicable stage.
+
+    "Applicable" is what is on disk. A lecture whose note has not been written
+    is not failing the note stage, it has not reached it, and an error for a
+    file the pipeline was never asked to produce would make this useless as a
+    progress check. A stem with nothing at all beside it is a different matter:
+    that is a mistyped path, and it exits 2 rather than reporting a clean run
+    over zero stages.
+    """
+    stem = getattr(args, "what", None) or getattr(args, "target", None)
+    if not stem:
+        _out.error("check --all needs a stem")
+        return exit_codes.ERROR
+    base = check.stem_path(Path(stem))
+    reports = check.check_all(base, style=getattr(args, "style", None))
+    if not reports:
+        _out.error("check --all：找不到任何階段產物 %s" % base.name)
+        return exit_codes.ERROR
+
+    _out.line(guideline.VERSION_LINE)
+    for report in reports:
+        report.emit()
+
+    report_path = getattr(args, "report", None)
+    if report_path:
+        payload = audit.stage_report_payload(
+            reports, stem=base.name, guideline_version=guideline.GUIDELINE_VERSION
+        )
+        written = audit.write_stage_report(Path(report_path), payload)
+        _out.ok("check --all -> %s" % written)
+    return check.worst_exit_code(reports)
+
+
 def cmd_check(args: argparse.Namespace) -> int:
+    if getattr(args, "all_stages", False):
+        return _check_all(args)
     stage = getattr(args, "what", None)
     if not stage:
         _out.error("check needs a stage: %s" % " / ".join(CHECK_STAGES))
@@ -793,9 +829,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("check", parents=[common], help="執行各階段的驗收合約")
     p.add_argument(
-        "what", nargs="?", help="要檢查的階段：transcribe / frames / json / note"
+        "what",
+        nargs="?",
+        help="要檢查的階段：transcribe / frames / json / note；加 --all 時填 <stem>",
     )
     p.add_argument("target", nargs="?", help="檔案或資料夾路徑")
+    p.add_argument(
+        "--all",
+        dest="all_stages",
+        action="store_true",
+        help="對一個 <stem> 執行所有有產物的階段，exit code 取最大值",
+    )
+    p.add_argument(
+        "--report", default=None, help="把 --all 的結果寫成 JSON 稽核報告"
+    )
     p.add_argument(
         "--note", default=None, help="check note 的筆記路徑（預設 <stem>.v4.md）"
     )

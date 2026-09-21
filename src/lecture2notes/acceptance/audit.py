@@ -296,15 +296,81 @@ def write_report(path: Path, report: AuditReport, guideline_version: str = "") -
     return destination
 
 
+# ==========================================================================
+# the structured report behind `l2n check --all --report`
+# ==========================================================================
+# The console output of the stage checks is for a person reading one run. This
+# is the other consumer: a file an agent or a CI step reads back. The two must
+# not drift, so the report is assembled from the very same StageReport objects
+# the console printed -- there is no second pass over the lecture and no second
+# set of rules that could disagree with the first.
+
+#: The four keys the specification names for a finding in the report. ``rule``
+#: rather than ``code`` because that is the word the contract line uses.
+FINDING_KEYS = ("severity", "rule", "location", "message")
+
+#: Both spellings of the warning severity count as warnings. The stage checks
+#: emit ``warn`` and the ported schema validator emits ``warning``; a summary
+#: that counted only one of them would under-report, which is the one failure
+#: mode a summary must not have.
+WARNING_SEVERITIES = ("warn", "warning")
+
+
+def finding_row(finding: Finding, default_location: str) -> Dict[str, Any]:
+    """One finding in report shape: severity, rule, location, message."""
+    return {
+        "severity": finding.severity,
+        "rule": finding.code,
+        "location": finding.location or default_location,
+        "message": finding.message,
+    }
+
+
+def stage_report_payload(
+    reports: Sequence[Any],
+    stem: str = "",
+    guideline_version: str = "",
+) -> Dict[str, Any]:
+    """The `check --all` report: version, per-stage findings, and a summary.
+
+    ``summary.errors`` is counted from the rows that were written, not from the
+    reports' own tallies, so the number in the file always describes the file.
+    """
+    stages: Dict[str, Any] = {}
+    errors = 0
+    warnings = 0
+    for report in reports:
+        rows = [finding_row(f, report.target) for f in report.findings]
+        errors += sum(1 for row in rows if row["severity"] == "error")
+        warnings += sum(1 for row in rows if row["severity"] in WARNING_SEVERITIES)
+        stages[report.stage] = {"target": report.target, "findings": rows}
+    return {
+        "guideline_version": guideline_version,
+        "stem": stem,
+        "stages": stages,
+        "summary": {"errors": errors, "warnings": warnings},
+    }
+
+
+def write_stage_report(path: Path, payload: Mapping[str, Any]) -> Path:
+    """Write the `check --all` report atomically, UTF-8 without a BOM."""
+    return write_json_atomic(path, dict(payload))
+
+
 __all__ = [
     "AuditReport",
+    "FINDING_KEYS",
     "FRAME_TARGET",
     "SNAPSHOT_RE",
+    "WARNING_SEVERITIES",
     "audit_course",
     "audit_lecture",
     "canonical_snapshot",
     "compare_derived",
     "file_sha256",
+    "finding_row",
     "snapshot_from_payload",
+    "stage_report_payload",
     "write_report",
+    "write_stage_report",
 ]

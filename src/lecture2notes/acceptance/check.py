@@ -1153,7 +1153,86 @@ def _rule_placeholder(
                 break
 
 
+# ==========================================================================
+# stage acceptance: check --all
+# ==========================================================================
+# One stem, every stage that has something to check. "Applicable" is decided by
+# what is on disk rather than by a flag: a lecture whose note has not been
+# written yet is not failing the note stage, it simply has not reached it, and
+# reporting an error for a file the pipeline has not produced yet would make
+# `check --all` useless as a progress check.
+
+#: Suffix each stage's target carries, in pipeline order. ``note`` is checked
+#: against the canonical JSON, so it shares ``json``'s target and names the note
+#: separately.
+STAGE_SUFFIXES: Tuple[Tuple[str, str], ...] = (
+    ("transcribe", ".srt"),
+    ("frames", ".frames.json"),
+    ("json", ".json"),
+    ("note", ".v4.md"),
+)
+
+
+def stem_path(target: Path) -> Path:
+    """The stem behind any of a lecture's files, given any one of them.
+
+    Accepts the bare stem (``lectures/2024 talk``) as well as a real file, so a
+    caller can pass whatever it has. The suffix list is ordered longest first:
+    ``.frames.json`` must be stripped whole, not left as ``.frames``.
+    """
+    path = Path(target)
+    for suffix in (".frames.json", ".frames_ocr.json", ".v4.md", ".json", ".srt"):
+        if path.name.endswith(suffix):
+            return path.with_name(path.name[: -len(suffix)])
+    return path
+
+
+def stage_targets(target: Path) -> Dict[str, Path]:
+    """Each stage's target file for one stem, whether or not it exists."""
+    base = stem_path(target)
+    return {
+        stage: base.with_name(base.name + suffix)
+        for stage, suffix in STAGE_SUFFIXES
+    }
+
+
+def check_all(
+    target: Path, style: Optional[str] = None, profile: Optional[str] = None
+) -> List[StageReport]:
+    """Run every stage check whose target exists, in pipeline order."""
+    targets = stage_targets(target)
+    reports: List[StageReport] = []
+    if targets["transcribe"].is_file():
+        reports.append(check_transcribe_stage(targets["transcribe"]))
+    if targets["frames"].is_file():
+        reports.append(check_frames(targets["frames"]))
+    if targets["json"].is_file():
+        reports.append(check_json(targets["json"]))
+        if targets["note"].is_file():
+            reports.append(check_note_stage(
+                targets["json"],
+                targets["note"],
+                transcript=(
+                    targets["transcribe"]
+                    if targets["transcribe"].is_file() else None
+                ),
+                style=style,
+                profile=profile,
+            ))
+    return reports
+
+
+def worst_exit_code(reports: Sequence[StageReport]) -> int:
+    """The maximum of the stage exit codes, which is the contract for --all."""
+    return max([report.exit_code() for report in reports] or [0])
+
+
 __all__ = [
+    "STAGE_SUFFIXES",
+    "check_all",
+    "stage_targets",
+    "stem_path",
+    "worst_exit_code",
     "CLOCK_TOLERANCE_SEC",
     "CORRECTIONS_SUFFIX",
     "CORRECTION_HEADER",
