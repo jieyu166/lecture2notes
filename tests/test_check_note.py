@@ -742,3 +742,65 @@ def test_the_audit_report_carries_the_unexpanded_ratio(lecture, tmp_path):
     payload = audit.stage_report_payload([report], stem="x")
 
     assert payload["stages"]["note"]["unexpanded_segments"] == "2/2"
+
+
+# --------------------------------------------------------------------------
+# 15.12(b) -- [推論] has one spelling, and R9 says which
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "question",
+    [
+        "1. （推論）若某個案例具備 A 但缺少 B，結論還成立嗎？",
+        "1. [推理] 若某個案例具備 A 但缺少 B，結論還成立嗎？",
+        "1. 【推論】若某個案例具備 A 但缺少 B，結論還成立嗎？",
+        "1. 若某個案例具備 A 但缺少 B，結論還成立嗎？[推論]",
+    ],
+    ids=["full-width-parens", "wrong-word", "full-width-brackets", "at-the-end"],
+)
+def test_r9_accepts_only_the_documented_inference_spelling(lecture, question):
+    json_path, note_path = lecture
+    _replace_question_section(note_path, [
+        question,
+        "2. 不看筆記說出第一段的推理鏈。",
+        "3. 不看筆記說出第二段的結論。",
+    ])
+
+    report = check.check_note_stage(json_path, note_path)
+
+    assert "R9" in _codes(report)
+
+
+def test_r9_accepts_the_marker_at_the_start_of_the_question(lecture):
+    json_path, note_path = lecture
+    _replace_question_section(note_path, [
+        "1. [推論] 若某個案例具備 A 但缺少 B，結論還成立嗎？",
+        "2. 不看筆記說出第一段的推理鏈。",
+        "3. 不看筆記說出第二段的結論。",
+    ])
+
+    assert "R9" not in _codes(check.check_note_stage(json_path, note_path))
+
+
+def test_r9_shows_the_format_it_wants(lecture):
+    json_path, note_path = lecture
+    _replace_question_section(note_path, [
+        "1. 甲是什麼？", "2. 乙是什麼？", "3. 丙是什麼？",
+    ])
+
+    finding = next(f for f in check.check_note_stage(json_path, note_path).findings
+                   if f.code == "R9")
+
+    assert guideline.INFERENCE_MARK in finding.message
+    assert "Write it as:" in finding.message
+
+
+def test_question_text_strips_the_number_prefix():
+    for line in ("1. [推論] x", "2) [推論] x", " 10、[推論] x"):
+        assert check.question_text(line).startswith(guideline.INFERENCE_MARK)
+
+
+def test_the_guideline_documents_the_single_spelling():
+    text = guideline.find_guideline_doc().read_text(encoding="utf-8")
+
+    assert "`[推論]` 的寫法只有一種" in text
+    assert "1. [推論] 若某個案例具備 A 但缺少 B" in text

@@ -210,3 +210,31 @@ def test_the_segmentation_example_states_the_bullet_count_the_checker_enforces()
         "the old wording contradicted the checker, which warns below %d"
         % MIN_BULLETS
     )
+
+
+# --------------------------------------------------------------------------
+# 15.12(c) -- the two places OCR text lives, and which one the note reads
+# --------------------------------------------------------------------------
+def test_frames_reference_separates_the_ocr_cache_from_the_document_field():
+    """A field run read the cache and found the document empty, or vice versa.
+
+    `<stem>.frames_ocr.json` is a cache keyed on frame path; the note stage
+    reads `frame_ocr` inside the canonical JSON. The reference used to name
+    only the second and show a command that could produce only the first.
+    """
+    text = (REFERENCES_DIR / "frames-and-notes.md").read_text(encoding="utf-8")
+
+    assert "<stem>.frames_ocr.json" in text
+    assert "frame_ocr" in text
+    assert "快取" in text
+    assert "HARD RULE 3" in text
+
+
+def test_the_guideline_says_the_same_thing_in_section_one():
+    doc = REPO_ROOT / "docs" / "note-writing-guideline.md"
+    text = doc.read_text(encoding="utf-8")
+    body = text.split("### 1. 來源優先序與證據", 1)[1].split("\n### ", 1)[0]
+
+    assert "<stem>.frames_ocr.json" in body
+    assert "frame_ocr" in body
+    assert "不可以抄進筆記" in body

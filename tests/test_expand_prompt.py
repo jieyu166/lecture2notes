@@ -126,3 +126,52 @@ def test_the_style_in_the_header_and_in_the_command_are_the_same_value(lecture, 
         header = [l for l in out.splitlines() if l.startswith("style: ")][0]
         command = [l for l in out.splitlines() if l.startswith("l2n check note")][0]
         assert header.split(": ", 1)[1] == command.rsplit(" ", 1)[1]
+
+
+# --------------------------------------------------------------------------
+# 15.12(a) -- the bundle says which parts of the skeleton are already finished
+# --------------------------------------------------------------------------
+def test_the_bundle_lists_what_render_landed_and_what_is_left(lecture, capsys):
+    """"Expand the skeleton" is not enough of an instruction.
+
+    A field run expanded the Note body, left Evergreen and the answers exactly
+    as the renderer wrote them, and had no way to know it had stopped early:
+    the bundle never said which sections were already finished.
+    """
+    main(["render", "--expand-prompt", str(lecture)])
+    out = capsys.readouterr().out
+
+    assert "## 已由 render 落地／待你擴寫" in out
+    for section, _landed, _todo in guideline.EXPANSION_CHECKLIST:
+        assert "`%s`" % section in out, section
+
+
+def test_the_checklist_tells_the_model_to_leave_the_reader_s_slots_alone(
+    lecture, capsys
+):
+    main(["render", "--expand-prompt", str(lecture)])
+    out = capsys.readouterr().out
+
+    assert "不要代填" in out and "不要刪" in out
+
+
+def test_the_checklist_names_the_two_numbers_that_define_done(lecture, capsys):
+    main(["render", "--expand-prompt", str(lecture)])
+    out = capsys.readouterr().out
+
+    assert "unexpanded_segments=0/N" in out
+    assert "ai_draft_remaining=0" in out
+
+
+def test_the_checklist_spells_out_the_inference_marker(lecture, capsys):
+    main(["render", "--expand-prompt", str(lecture)])
+    out = capsys.readouterr().out
+
+    assert guideline.INFERENCE_MARK in out
+
+
+def test_the_bundle_stays_ascii_in_its_markers(lecture, capsys):
+    main(["render", "--expand-prompt", str(lecture)])
+    out = capsys.readouterr().out
+
+    assert not any(marker in out for marker in "\u2192\u2265\u2713\u2717")

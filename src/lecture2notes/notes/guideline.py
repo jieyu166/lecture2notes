@@ -49,15 +49,85 @@ TRANSCRIPT_RUN_CHARS = 40
 MIN_QUESTIONS = 3
 MAX_QUESTIONS = 5
 
-#: The one question that cannot be answered by scanning the note. R9 looks for
-#: this literal marker, and the skeleton always drafts one.
+#: The one question that cannot be answered by scanning the note. Half-width
+#: square brackets around the two characters, at the very start of the question
+#: text -- R9 accepts that spelling and no other, because a marker that may sit
+#: anywhere is one a reader stops seeing and a writer stops placing.
 INFERENCE_MARK = "[推論]"
+
+#: Printed by R9 when no question carries the marker, so the finding says what
+#: to write rather than only what is missing.
+INFERENCE_PREFIX_HINT = "1. %s 若某個案例具備 A 但缺少 B，這篇的結論還成立嗎？"
 
 #: Answers live behind a collapsed callout, so the reader answers before seeing.
 ANSWER_CALLOUT = "> [!answer]-"
 
 #: How much of the offending run a finding quotes back.
 FINDING_EXCERPT_CHARS = 20
+
+#: What `l2n render` already put in each section, and what is left to write.
+#: A field run expanded the Note body, left Evergreen and the answers as the
+#: renderer wrote them, and had no way to know it had stopped early -- the
+#: bundle told it to "expand the skeleton" without saying which parts of the
+#: skeleton were already finished. Each row is (section, landed, to do).
+EXPANSION_CHECKLIST: Tuple[Tuple[str, str, str], ...] = (
+    (
+        "# Evergreen Note",
+        "takeaways_zh 的第一條，包成一句粗體引文",
+        "待寫：換成一句離開這場講座也成立的觀念，不是講題摘要",
+    ),
+    (
+        "# Summary",
+        "已經逐條引用 takeaways_zh，不必重寫",
+        "兩個句首空槽（開這篇之前我卡在___／這篇沒回答到的是___）是讀者的，"
+        "**不要代填，也不要刪**",
+    ),
+    (
+        "## 講者骨架",
+        "每段一行：時間區間、佔全片比例，第三欄是 ai-draft 佔位",
+        "待改寫：第三欄換成動詞開頭一句，只寫講者做了什麼，不寫他講了什麼",
+    ),
+    (
+        "# Note (layer 1-3)",
+        "每段的標題、時間、影格嵌入、summary_zh、引用與條列",
+        "待擴寫：每一段以推理鏈重述（講者為什麼這樣說），不是把條列擴寫成句子",
+    ),
+    (
+        "### References",
+        "corrections 表、unverified_terms、source 三塊都已填",
+        "通常不動；本文改對的 ASR 錯字要在 corrections 表補一列",
+    ),
+    (
+        "## 題目",
+        "3 到 5 題草稿，每題下面一個收合的答案 callout",
+        "答案待寫（附時間碼）；題目不合用就改寫，至少一題以 %s 開頭",
+    ),
+    (
+        "## 學習驗證",
+        "「我應該記住的 3 件事」候選已由 takeaways 投影，收在摺疊 callout 裡",
+        "候選可以改寫得更好；保留／刪除是讀者的工作，模型不代勞",
+    ),
+)
+
+
+def expansion_checklist(style: str = "concise") -> List[str]:
+    """The bundle's "already landed / still yours" table, as lines."""
+    lines = [
+        "## 已由 render 落地／待你擴寫",
+        "",
+        "| 章節 | render 已經落地 | 待你處理 |",
+        "| ---- | ---- | ---- |",
+    ]
+    for section, landed, todo in EXPANSION_CHECKLIST:
+        if "%s" in todo:
+            todo = todo % INFERENCE_MARK
+        lines.append("| `%s` | %s | %s |" % (section, landed, todo))
+    lines.extend([
+        "",
+        "完成的定義不是「check 沒報錯」，而是這兩個數字都歸零：",
+        "`note: unexpanded_segments=0/N` 與 `note: ai_draft_remaining=0`。",
+    ])
+    return lines
 
 #: Rule identifiers, so a typo in a finding fails a test rather than a reader.
 RULES: Tuple[str, ...] = (
@@ -172,6 +242,7 @@ def expand_prompt(
     rules = must_follow_text(document)
     if rules:
         parts.extend(["", rules.rstrip()])
+    parts.extend(["", *expansion_checklist(style)])
     parts.extend([
         "",
         "## 完成後必做",
@@ -190,6 +261,9 @@ def expand_prompt(
 
 __all__ = [
     "ANSWER_CALLOUT",
+    "EXPANSION_CHECKLIST",
+    "INFERENCE_PREFIX_HINT",
+    "expansion_checklist",
     "FINDING_EXCERPT_CHARS",
     "GUIDELINE_DOC",
     "GUIDELINE_VERSION",

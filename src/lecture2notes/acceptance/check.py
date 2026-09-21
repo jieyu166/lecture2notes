@@ -1330,6 +1330,11 @@ def _rule_placeholder(
                 break
 
 
+def question_text(line: str) -> str:
+    """One numbered question line with its ``1.`` / ``2)`` prefix removed."""
+    return re.sub(r"^\s*\d+[.)\u3001]\s*", "", line).strip()
+
+
 def _rule_questions(
     lines: Sequence[str], note: Path, report: StageReport
 ) -> None:
@@ -1344,15 +1349,19 @@ def _rule_questions(
     if start < 0:
         return
     body = lines[start + 1:section_bounds(lines, start)]
-    count = sum(1 for line in body if QUESTION_LINE.match(line))
+    questions = [line for line in body if QUESTION_LINE.match(line)]
+    count = len(questions)
     if count < guideline.MIN_QUESTIONS:
         report.add("warn", "R9", note.name,
                    "the question section carries %d questions; at least %d are "
                    "needed" % (count, guideline.MIN_QUESTIONS))
-    if not any(guideline.INFERENCE_MARK in line for line in body):
+    if not any(question_text(line).startswith(guideline.INFERENCE_MARK)
+               for line in questions):
         report.add("warn", "R9", note.name,
-                   "no question is marked %s; a definition question is answered "
-                   "by rereading" % guideline.INFERENCE_MARK)
+                   "no question starts with %s; a definition question is "
+                   "answered by rereading. Write it as: %s"
+                   % (guideline.INFERENCE_MARK,
+                      guideline.INFERENCE_PREFIX_HINT % guideline.INFERENCE_MARK))
 
 
 # ==========================================================================
@@ -1442,6 +1451,7 @@ __all__ = [
     "PLACEHOLDER_TEXT",
     "QUESTION_LINE",
     "QUOTED_SPAN",
+    "question_text",
     "comparable_body",
     "count_ai_drafts",
     "R5_EXTRA_REGIONS",
