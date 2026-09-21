@@ -79,4 +79,5 @@ testpaths = ["tests"]
 addopts = "-q"
 markers = [
   "gpu: needs a CUDA device and real model weights; skipped everywhere else",
+  "e2e: runs the real pipeline on the committed clip; needs ffmpeg and faster-whisper, and downloads the tiny model on first use. Excluded from the default CI run with -m \"not gpu and not e2e\".",
 ]

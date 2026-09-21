@@ -8,6 +8,12 @@ VAD and ``condition_on_previous_text`` are off by default. VAD quietly eats the
 quiet speech at the edge of a pause, and conditioning propagates a misheard word
 forward into the cues that follow it. Both defaults come from measurement, not
 from taste.
+
+``device="auto"`` means "whatever works here", and this engine's own metadata
+says ``needs_gpu=False``. So when CTranslate2 picks the GPU and then cannot load
+its CUDA libraries -- the ordinary state of a machine that has an NVIDIA card
+but no cuBLAS, and of most CI runners -- the load is retried on the CPU instead
+of failing the run. An explicitly requested device is never second-guessed.
 """
 
 from __future__ import annotations
@@ -19,6 +25,21 @@ from lecture2notes import _deps, _out
 from lecture2notes.engines.base import Cue, DependencyStatus, Engine, EngineMeta
 
 DEFAULT_MODEL = "large-v3"
+
+#: CTranslate2 picks the device itself under this name.
+AUTO_DEVICE = "auto"
+
+#: Where an unusable GPU falls back to.
+CPU_DEVICE = "cpu"
+
+#: The default compute type, which is a GPU format.
+DEFAULT_COMPUTE_TYPE = "float16"
+
+#: What ``float16`` becomes once the model is on the CPU. CTranslate2 accepts
+#: float16 there, converts the weights and warns on every single run; int8 is
+#: the type a CPU actually wants, so the default is translated rather than
+#: passed through and apologised for.
+CPU_COMPUTE_TYPE = "int8"
 
 
 class FasterWhisperEngine(Engine):
@@ -36,8 +57,8 @@ class FasterWhisperEngine(Engine):
     def __init__(
         self,
         model: str = DEFAULT_MODEL,
-        device: str = "auto",
-        compute_type: str = "float16",
+        device: str = AUTO_DEVICE,
+        compute_type: str = DEFAULT_COMPUTE_TYPE,
         beam_size: int = 5,
         vad: bool = False,
         condition: bool = False,
@@ -65,14 +86,24 @@ class FasterWhisperEngine(Engine):
     def _model_reference(self) -> str:
         return self.model
 
-    # -- inference -------------------------------------------------------
-    def transcribe(self, audio: Path, lang: str) -> List[Cue]:
-        self.check()
-        module = _deps.require_module("faster_whisper")
+    # -- model loading ---------------------------------------------------
+    def compute_type_for(self, device: str) -> str:
+        """The compute type to use on *device*.
+
+        Only the default is translated. A compute type the caller named is
+        theirs, including a slow one: being overruled without being told is
+        worse than being slow.
+        """
+        if device == CPU_DEVICE and self.compute_type == DEFAULT_COMPUTE_TYPE:
+            return CPU_COMPUTE_TYPE
+        return self.compute_type
+
+    def run_on(self, module, device: str, audio: Path, lang: str) -> List[Cue]:
+        """Load the model on *device* and drain a whole transcription from it."""
         whisper_model = module.WhisperModel(
             self._model_reference(),
-            device=self.device,
-            compute_type=self.compute_type,
+            device=device,
+            compute_type=self.compute_type_for(device),
         )
         segments, info = whisper_model.transcribe(
             str(audio),
@@ -90,6 +121,28 @@ class FasterWhisperEngine(Engine):
                 detail += " (p=%.2f)" % probability
             _out.stage(self.meta.name, "%s, %d cues" % (detail, len(cues)))
         return cues
+
+    # -- inference -------------------------------------------------------
+    def transcribe(self, audio: Path, lang: str) -> List[Cue]:
+        """Transcribe, retrying on the CPU when ``auto`` picked an unusable GPU.
+
+        The whole run is retried, not just the model load: CTranslate2 loads the
+        weights without touching cuBLAS and only fails on the first encode, so a
+        fallback that wrapped the constructor alone would catch nothing and the
+        run would still die on a machine this engine claims to support.
+        """
+        self.check()
+        module = _deps.require_module("faster_whisper")
+        try:
+            return self.run_on(module, self.device, audio, lang)
+        except Exception as exc:  # noqa: BLE001 - the runtime raises many types
+            if self.device != AUTO_DEVICE:
+                raise
+            _out.warn(
+                "faster_whisper: device %s could not be used (%s); "
+                "retrying on the CPU" % (AUTO_DEVICE, exc)
+            )
+        return self.run_on(module, CPU_DEVICE, audio, lang)
 
 
 def _collect(segments, stage_name: str) -> List[Cue]:
@@ -109,4 +162,11 @@ def _collect(segments, stage_name: str) -> List[Cue]:
     return cues
 
 
-__all__ = ["DEFAULT_MODEL", "FasterWhisperEngine"]
+__all__ = [
+    "AUTO_DEVICE",
+    "CPU_DEVICE",
+    "CPU_COMPUTE_TYPE",
+    "DEFAULT_COMPUTE_TYPE",
+    "DEFAULT_MODEL",
+    "FasterWhisperEngine",
+]
