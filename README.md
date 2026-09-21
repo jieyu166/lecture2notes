@@ -322,6 +322,42 @@ l2n install-skill --check --all          # 比對內容 hash，有 drift 時 exi
 `source_sha256`、`installed_at`、`target`）；`--check` 會從目標的實際檔案重算 hash 比對，
 不是讀這份紀錄，所以手改過的目標一定抓得到。
 
+## 版本說明
+
+版本號定義在 `pyproject.toml`，`l2n --version` 印的就是它。
+
+### v0.1.0
+
+第一條可用的管線，從影片做到可追溯的筆記：
+
+- **轉錄**（`transcribe`）：Breeze-ASR-25、faster-whisper、whisper.cpp、Qwen3-ASR 四個引擎，
+  錯字對照表、幻覺行偵測，以及官方字幕的時間偏移量測與校正（`calibrate-subs`）。
+- **影格**（`frames`）：interval 與 scene 兩種抓圖模式、去重與策展；`ocr` 以 RapidOCR
+  取文字並併回正規 JSON。
+- **正規 JSON v2**：版本化 schema、驗證器、`migrate` 從舊格式升版。
+- **筆記**（`render`）：確定性的骨架筆記，配一份撰寫規範與 `check note` 的機器檢查。
+- **輸出**：時間同步 viewer、`pbf`、課程首頁 `hub`、`check --all` 四階段驗收。
+- **上游標示**：`ATTRIBUTION.md` 與 `NOTICE`，逐檔列出衍生關係。
+
+### v0.2.0（本版）
+
+把 v0.1.0 的各個階段收成一個可以交付的東西：
+
+- **`run`**：transcribe、frames、render、viewer 一次跑完。
+- **`publish`**：交易式發佈，中途失敗不留半套產物。
+- **profile／overlay 分層設定**：`profile show` 看得到每個值來自哪一層。
+- **`install-skill`**：一鍵安裝成 Claude Code、Codex、OpenCode 三家共用的 agent skill；
+  `--check` 從目標的實際檔案重算 hash。
+- **CI**：ubuntu 與 windows，另有一個在 cp950 主控台下跑的 job。
+- **端到端測試**：用 repo 內的短片 fixture 跑真實管線（`-m e2e`）。
+- **檢查規則 R9 到 R11**：題目與 `[推論]`（R9）、骨架殘留比例（R10）、
+  同一句跨章節重複（R11），外加 `unexpanded_segments` 與 `ai_draft_remaining` 兩個數字。
+- **`condense`／`scaffold`**：逐字稿壓成一分鐘一行；產出待填的 JSON 骨架。
+- **撰寫規範升到 1.3**。
+
+**尚未實測**：Qwen3-ASR 真機。它的程式路徑與相依檢查有單元測試，但沒有在裝好
+`qwen-asr` 的機器上跑過一次真實轉錄，所以相容表把它標成「待實測」。
+
 ## 開發與測試
 
 ```bash
