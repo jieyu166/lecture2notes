@@ -367,6 +367,26 @@ def _check_json(target: Optional[str]) -> int:
     return report.exit_code()
 
 
+def _check_note(args: argparse.Namespace) -> int:
+    """`l2n check note <doc> --note <note>`: rules R1 to R8 of the guideline.
+
+    The version line comes first so a saved report always says which edition of
+    the rules produced it; a report that does not is not evidence of anything.
+    """
+    path = _existing_path(getattr(args, "target", None), "check note")
+    if path is None:
+        return exit_codes.ERROR
+    note = Path(args.note) if getattr(args, "note", None) else path.with_name(
+        path.stem + ".v4.md"
+    )
+    report = check.check_note_stage(
+        path, note, style=getattr(args, "style", None)
+    )
+    _out.line(guideline.VERSION_LINE)
+    report.emit()
+    return report.exit_code()
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     stage = getattr(args, "what", None)
     if not stage:
@@ -381,7 +401,9 @@ def cmd_check(args: argparse.Namespace) -> int:
         return _check_transcribe(target)
     if stage == "json":
         return _check_json(target)
-    # frames and note belong to the groups that own those outputs.
+    if stage == "note":
+        return _check_note(args)
+    # frames belongs to the group that owns that output.
     not_implemented("check %s" % stage)
     return exit_codes.OK
 
@@ -571,6 +593,15 @@ def build_parser() -> argparse.ArgumentParser:
         "what", nargs="?", help="要檢查的階段：transcribe / frames / json / note"
     )
     p.add_argument("target", nargs="?", help="檔案或資料夾路徑")
+    p.add_argument(
+        "--note", default=None, help="check note 的筆記路徑（預設 <stem>.v4.md）"
+    )
+    p.add_argument(
+        "--style",
+        choices=["faithful", "concise"],
+        default=None,
+        help="check note 的風格；faithful 才檢查 R6（預設取 profile）",
+    )
     p.set_defaults(func=cmd_check)
 
     p = sub.add_parser("migrate", parents=[common], help="把舊版 JSON 原地升級為 schema v2")

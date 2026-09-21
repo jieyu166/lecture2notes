@@ -1,18 +1,21 @@
 # Patterns a rendered note must not contain (rule R7 of the writing guideline).
 #
-# These are Python regular expressions, matched against each line of the note.
+# These are Python regular expressions, written as TOML literal strings so a
+# backslash means a backslash and nothing has to be double-escaped.
+#
 # The generic profile ships only patterns that are identifiers by construction,
 # never name lists: a public default that guesses at personal names produces
 # false positives on ordinary words, and a profile or overlay is the right place
-# for the names of a specific course's attendees.
+# for the names of one course's attendees. Names are handled by the part of the
+# guideline a person follows, not by this file.
 
 patterns = [
-  # Taiwan national identification number: one letter then nine digits.
-  "\b[A-Za-z][12]\d{8}\b",
+  # Taiwan national identification number: a letter, 1 or 2, then eight digits.
+  '\b[A-Za-z][12]\d{8}\b',
   # A medical record or chart number written out with its label.
-  "(病歷號|病歷號碼|chart no\.?|chart number)\s*[:：]?\s*\w{6,}",
+  '(病歷號|病歷號碼|[Cc]hart [Nn]o\.?|[Cc]hart number)\s*[:：]?\s*\w{6,}',
   # A phone number written out with its label.
-  "(電話|手機|聯絡電話)\s*[:：]?\s*[\d\-() ]{8,}",
+  '(電話|手機|聯絡電話)\s*[:：]?\s*[\d\-() ]{8,}',
   # An e-mail address.
-  "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+  '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}',
 ]
