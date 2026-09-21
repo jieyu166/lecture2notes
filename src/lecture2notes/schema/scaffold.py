@@ -22,12 +22,14 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from lecture2notes.engines.base import parse_srt_text, read_subtitle_text
 from lecture2notes.schema import condense
 from lecture2notes.schema.builder import build_document, frame_pairs
-from lecture2notes.schema.model import AI_DRAFT_MARK, DRAFT_KEY
+# `is_draft` is re-exported: a caller holding a scaffold naturally asks this
+# module whether a document is still one, and the answer must be the validator's.
+from lecture2notes.schema.model import AI_DRAFT_MARK, DRAFT_KEY, is_draft
 
 #: What `l2n condense` writes beside a subtitle, and what a scaffolded segment
 #: points its reader at.
@@ -224,13 +226,6 @@ def scaffold_file(
         duration_sec=float(int(math.ceil(duration))),
         frames=len(frames),
     )
-
-
-def is_draft(data: Mapping[str, Any]) -> bool:
-    """Deprecated alias; the rule lives with the validator that applies it."""
-    from lecture2notes.schema.model import is_draft as _is_draft
-
-    return _is_draft(data)
 
 
 __all__ = [
