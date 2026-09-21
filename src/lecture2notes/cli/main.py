@@ -42,6 +42,8 @@ from lecture2notes.outputs import publish as publish_mod
 from lecture2notes.outputs import viewer as viewer_mod
 from lecture2notes.outputs.plan import plan_for
 from lecture2notes.profiles import loader
+from lecture2notes.schema import condense as condense_mod
+from lecture2notes.schema import scaffold as scaffold_mod
 from lecture2notes.schema.io import read_json, write_json_atomic
 from lecture2notes.schema.migrate import migrate_file
 
@@ -55,6 +57,7 @@ SUBCOMMANDS: List[str] = [
     "calibrate-subs",
     "frames",
     "ocr",
+    "condense",
     "scaffold",
     "render",
     "viewer",
@@ -375,8 +378,91 @@ def cmd_ocr(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+#: What `l2n scaffold` prints after writing, because the file it just wrote is
+#: not the deliverable. Every semantic field in it is a placeholder.
+SCAFFOLD_NEXT = (
+    "every field marked %s is yours to write:段落邊界、標題、摘要、條列。"
+    "寫完後刪掉頂層的 \"draft\"，再跑 l2n check json"
+) % scaffold_mod.AI_DRAFT_MARK
+
+
+def cmd_condense(args: argparse.Namespace) -> int:
+    """`l2n condense <srt>`: one line per minute, for reading in one pass.
+
+    Deciding where a three-hour lecture's segments begin means reading the
+    whole transcript, and ninety percent of an SRT is timecode. This has been
+    in the package since the port; it had no way to be run.
+    """
+    target = getattr(args, "subtitle", None)
+    if not target:
+        _out.error("condense needs a subtitle file")
+        return exit_codes.ERROR
+    path = Path(target)
+    if not path.is_file():
+        _out.error("no such file: %s" % path)
+        return exit_codes.ERROR
+    window = int(getattr(args, "window", condense_mod.DEFAULT_BUCKET_SEC) or 0)
+    if window <= 0:
+        _out.error("--window must be a positive number of seconds")
+        return exit_codes.ERROR
+
+    out = getattr(args, "out", None)
+    destination = Path(out) if out else path.with_name(
+        path.stem + scaffold_mod.CONDENSED_SUFFIX
+    )
+    written = condense_mod.condense_file(path, destination, window)
+    counts = condense_mod.stats(
+        condense_mod.read_subtitle_text(path), window
+    )
+    _out.ok("condense -> %s (%d lines, %d chars)" % (
+        written, counts["buckets"], counts["chars"]
+    ))
+    return exit_codes.OK
+
+
 def cmd_scaffold(args: argparse.Namespace) -> int:
-    not_implemented("scaffold")
+    """`l2n scaffold <srt>`: the v2 shape, with every meaning left blank.
+
+    The shape is mechanical: equal-time segments, real timecodes, the captured
+    frames merged in, `"draft": true` on top. The meaning is not, and this
+    command does not pretend otherwise -- it writes `<!-- ai-draft -->` into
+    every semantic field and says so on the way out.
+    """
+    target = getattr(args, "target", None)
+    if not target:
+        _out.error("scaffold needs a subtitle file")
+        return exit_codes.ERROR
+    path = Path(target)
+    if not path.is_file():
+        _out.error("no such file: %s" % path)
+        return exit_codes.ERROR
+    segments = int(getattr(args, "segments", scaffold_mod.DEFAULT_SEGMENTS) or 0)
+    if segments < 1:
+        _out.error("--segments must be at least 1")
+        return exit_codes.ERROR
+    window = int(getattr(args, "window", condense_mod.DEFAULT_BUCKET_SEC) or 0)
+    if window <= 0:
+        _out.error("--window must be a positive number of seconds")
+        return exit_codes.ERROR
+
+    document = path.with_name(path.stem + ".json")
+    if document.exists() and not getattr(args, "force", False):
+        # Overwriting a document a model has already written is the one
+        # unrecoverable mistake this stage can make.
+        _out.stage("scaffold", "skip (%s exists; use --force)" % document.name)
+        return exit_codes.OK
+    try:
+        result = scaffold_mod.scaffold_file(
+            path, segments=segments, bucket_sec=window
+        )
+    except ValueError as exc:
+        _out.error("scaffold: %s" % exc)
+        return exit_codes.ERROR
+    _out.ok("scaffold -> %s (%d segments, %d frames)" % (
+        result.document_path, result.segments, result.frames
+    ))
+    _out.stage("scaffold", "condensed -> %s" % result.condensed_path.name)
+    _out.stage("scaffold", SCAFFOLD_NEXT)
     return exit_codes.OK
 
 
@@ -770,8 +856,8 @@ SCAFFOLD_SKIP = "skip (LLM stage; see skill)"
 #: What to do when the model has not written the document yet. Naming the skill
 #: matters: the next step is not something the CLI can perform.
 SCAFFOLD_MISSING = (
-    "%s does not exist; scaffold is the LLM stage -- run the lecture2notes "
-    "skill to write it, then run again"
+    "%s does not exist; run `l2n scaffold <stem>.srt` for the shape, then the "
+    "lecture2notes skill to write the semantics, then run again"
 )
 
 
@@ -1221,8 +1307,46 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-s2t", action="store_true", help="不做簡轉繁（預設會轉）")
     p.set_defaults(func=cmd_ocr)
 
-    p = sub.add_parser("scaffold", parents=[common], help="從字幕建立分段 JSON 骨架")
-    p.add_argument("target", nargs="?", help="字幕或影片路徑")
+    p = sub.add_parser(
+        "condense", parents=[common], help="把字幕壓成每分鐘一行，供分段時一次讀完"
+    )
+    p.add_argument("subtitle", nargs="?", help="字幕路徑（.srt / .vtt）")
+    p.add_argument(
+        "--window",
+        type=int,
+        default=condense_mod.DEFAULT_BUCKET_SEC,
+        help="每一行涵蓋幾秒（預設 %d）" % condense_mod.DEFAULT_BUCKET_SEC,
+    )
+    p.add_argument(
+        "-o", "--out", default=None, help="輸出路徑（預設 <stem>.condensed.txt）"
+    )
+    p.set_defaults(func=cmd_condense)
+
+    p = sub.add_parser(
+        "scaffold",
+        parents=[common],
+        help="從字幕建立分段 JSON 骨架（形狀而已，段落語意由 LLM 填寫）",
+        description=(
+            "從字幕產出形狀合法的 schema v2 骨架：等時間切段、時間欄位算好、"
+            "已抓到的影格併入、頂層標成 \"draft\": true。"
+            "**段落邊界、標題、摘要、條列這些語意內容由 LLM 填寫**，"
+            "本子命令只會在每一個語意欄位寫上 %s 佔位字串。"
+            "填完後刪掉 \"draft\" 再跑 l2n check json。"
+        ) % scaffold_mod.AI_DRAFT_MARK,
+    )
+    p.add_argument("target", nargs="?", help="字幕路徑（.srt / .vtt）")
+    p.add_argument(
+        "--segments",
+        type=int,
+        default=scaffold_mod.DEFAULT_SEGMENTS,
+        help="切成幾段（等時間起始格線；界線之後由 LLM 依主題轉折移動）",
+    )
+    p.add_argument(
+        "--window",
+        type=int,
+        default=condense_mod.DEFAULT_BUCKET_SEC,
+        help="壓縮逐字稿每行涵蓋幾秒（預設 %d）" % condense_mod.DEFAULT_BUCKET_SEC,
+    )
     p.set_defaults(func=cmd_scaffold)
 
     p = sub.add_parser("render", parents=[common], help="從正式 JSON 產出骨架筆記")

@@ -450,6 +450,29 @@ SUBTITLE_ORIGINS = ("asr", "official")
 #: Slack allowed when comparing two segment boundaries, to absorb float noise.
 BOUNDARY_EPSILON = 1e-6
 
+#: Marks a field a model drafted and nobody has confirmed. Defined here rather
+#: than in the renderer because three layers now count it: the scaffold writes
+#: it, the skeleton note carries it, and `check note` reports how many are left.
+AI_DRAFT_MARK = "<!-- ai-draft -->"
+
+#: The optional top-level flag that says "this document is a skeleton".
+DRAFT_KEY = "draft"
+
+#: What `check json` says about a draft. Removing the flag is the act of
+#: claiming the document is finished, so the message names the flag.
+DRAFT_MESSAGE = 'draft document: fill every ai-draft field, then remove "draft"'
+
+#: Rules a draft is allowed to fail. Every one of them is about how *much* has
+#: been written, and a draft by definition has not been written yet; failing it
+#: for that buries the structural findings that actually need fixing. Every
+#: other rule still applies at full severity.
+DRAFT_RELAXED_CODES = ("summary_length", "takeaway_count", "bullets_count")
+
+
+def is_draft(data: Any) -> bool:
+    """Does this document declare itself a draft?"""
+    return isinstance(data, Mapping) and data.get(DRAFT_KEY) is True
+
 
 def format_clock(seconds: float) -> str:
     """``HH:MM:SS`` for a number of seconds; the fractional part is dropped."""
@@ -872,6 +895,14 @@ def _validate_top_level(data: Mapping[str, Any], findings: List[Finding]) -> Non
     if "ocr_meta" in data and not isinstance(data.get("ocr_meta"), Mapping):
         findings.append(_error("ocr_meta", "ocr_meta", "ocr_meta must be an object"))
 
+    # `draft` is optional, and the only value that means anything is `true`.
+    # A string "true", or a flag left behind as `false`, is a document whose
+    # author thought they had said something they had not.
+    if DRAFT_KEY in data and not isinstance(data.get(DRAFT_KEY), bool):
+        findings.append(_error(
+            DRAFT_KEY, DRAFT_KEY, "%s must be true or absent" % DRAFT_KEY
+        ))
+
     _validate_questions(data, findings)
 
 
@@ -1174,7 +1205,34 @@ def validate_document(data: Mapping[str, Any]) -> List[Finding]:
                 len(segments),
             ))
 
-    return findings
+    return relax_for_draft(data, findings)
+
+
+def relax_for_draft(
+    data: Mapping[str, Any], findings: List[Finding]
+) -> List[Finding]:
+    """Demote the length rules and announce the flag, for a draft document.
+
+    A skeleton cannot honestly satisfy "the summary is at least 100 characters"
+    -- there is no summary yet. Reporting that as an error hides the findings a
+    draft *can* fail meaningfully (a broken segment boundary, a frame path that
+    escapes the folder) under noise the writer is expected to produce.
+    """
+    if not is_draft(data):
+        return findings
+    # "warn", not "warning": the stage report counts the former, and a finding
+    # nobody counts is a finding nobody acts on.
+    relaxed: List[Finding] = [
+        Finding(
+            "warn", finding.code, finding.message,
+            finding.segment_index, finding.path, finding.location,
+        )
+        if finding.severity == "error" and finding.code in DRAFT_RELAXED_CODES
+        else finding
+        for finding in findings
+    ]
+    relaxed.append(Finding("warn", DRAFT_KEY, DRAFT_MESSAGE))
+    return relaxed
 
 
 def load_document(path: Path) -> Dict[str, Any]:
@@ -1183,7 +1241,13 @@ def load_document(path: Path) -> Dict[str, Any]:
 
 
 __all__ = [
+    "AI_DRAFT_MARK",
     "BOUNDARY_EPSILON",
+    "DRAFT_KEY",
+    "DRAFT_MESSAGE",
+    "DRAFT_RELAXED_CODES",
+    "is_draft",
+    "relax_for_draft",
     "BULLET_KINDS",
     "Bullet",
     "DEFAULT_FRAME_TOLERANCE",

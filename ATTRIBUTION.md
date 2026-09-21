@@ -134,9 +134,10 @@ Relation values:
 | `schema/condense.py` | original | — | Session-written per-minute transcript condensing (`condense_agent.py` in `rad-workflow`, never itself a port of an upstream file). No upstream analog. |
 | `schema/io.py` | original | — | The single atomic, BOM-free, LF-only canonical JSON writer/reader. No upstream analog. |
 | `schema/migrate.py` | original | — | `l2n migrate`: upgrades a 1.x lecture document to canonical schema v2. No upstream analog. |
+| `schema/scaffold.py` | original | — | Written for this package: `l2n scaffold` projects a structurally valid, entirely placeholder schema v2 document from a subtitle file. No rad-workflow or upstream counterpart. |
 | `schema/model.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/lecture_model.py`. No upstream canonical-schema module or time-signature validator exists in `drpwchen/lecture-to-notes`. |
 
-Counts: 7 inspired, 15 ported-from-rad-workflow, 34 original — 56 modules total.
+Counts: 7 inspired, 15 ported-from-rad-workflow, 35 original — 57 modules total.
 
 ## ASR default parameters
 

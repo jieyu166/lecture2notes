@@ -36,6 +36,7 @@ CLI_STAGES = (
     "calibrate-subs",
     "frames",
     "ocr",
+    "condense",
     "scaffold",
     "render",
     "viewer",

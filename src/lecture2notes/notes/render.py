@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from lecture2notes.notes import guideline
 from lecture2notes.profiles import loader
+from lecture2notes.schema.model import AI_DRAFT_MARK as _AI_DRAFT_MARK
 from lecture2notes.schema.model import segment_end, segment_start
 
 
@@ -124,8 +125,10 @@ UNVERIFIED_MARK = "未寫入本文"
 
 #: Marks the three things the model drafted for the reader to keep, delete or
 #: rewrite. It survives in the file, so a note whose marker is still untouched is
-#: measurably one that nobody has read.
-AI_DRAFT_MARK = "<!-- ai-draft -->"
+#: measurably one that nobody has read. Defined in `schema.model` because the
+#: scaffold stage writes the same marker into the JSON; re-exported here under
+#: the name every caller in this package already uses.
+AI_DRAFT_MARK = _AI_DRAFT_MARK
 
 #: How many candidates the model drafts under "我應該記住的 3 件事".
 REMEMBER_COUNT = 3

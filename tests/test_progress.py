@@ -57,8 +57,9 @@ def test_root_help_lists_every_subcommand():
     for command in SUBCOMMANDS:
         assert command in proc.stdout, command
     # 15 in the CLI specification's scenario, plus `publish`, which the
-    # stage-acceptance specification requires as `l2n publish <stem> --dest`.
-    assert len(SUBCOMMANDS) == 16
+    # stage-acceptance specification requires as `l2n publish <stem> --dest`,
+    # plus `condense`, which existed as a module with no way to run it.
+    assert len(SUBCOMMANDS) == 17
 
 
 def test_fake_progress_loop_survives_cp950():

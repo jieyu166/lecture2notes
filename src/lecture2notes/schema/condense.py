@@ -71,6 +71,7 @@ def stats(text: str, bucket_sec: int = DEFAULT_BUCKET_SEC) -> Dict[str, int]:
 
 __all__ = [
     "DEFAULT_BUCKET_SEC",
+    "read_subtitle_text",
     "bucket_cues",
     "condense_file",
     "condense_text",

@@ -13,14 +13,31 @@
 段落的語意內容只有語言模型做得出來，所以它由你產生，**寫成正規 JSON v2**；
 其餘每一個機械階段都呼叫對應的 `l2n` 子命令，不要在對話裡用散文重做一次。
 
-## 產骨架
+## 流程
 
 ```bash
-l2n scaffold <subs.srt>
+l2n condense <stem>.srt                    # 1. 壓成每分鐘一行，一次讀完
+l2n scaffold <stem>.srt --segments 6       # 2. 產形狀合法的 draft 骨架
+#    3. 你（語言模型）填語意：段落邊界、標題、摘要、條列，並刪掉頂層 "draft"
+l2n check json <stem>.json                 # 4. 驗收
 ```
 
-此子命令目前仍是 stub（會印 `[scaffold] not implemented yet` 並以 exit code 4 結束）。
-在它補上之前，**依下面的 schema 手寫 JSON**，再用 `l2n check json` 驗。
+1. **`l2n condense`**：把 SRT 壓成 `<stem>.condensed.txt`，每 `--window` 秒一行
+   （預設 60）。三小時的逐字稿有九成是時間碼，壓完才讀得動。
+2. **`l2n scaffold`**：產出 `<stem>.json`，等時間切 `--segments` 段、時間欄位算好、
+   已抓到的影格併入、頂層寫上 `"draft": true`，每一個語意欄位填 `<!-- ai-draft -->`
+   佔位字串，每段附一行 `transcript_condensed` 指到壓縮逐字稿的行號區間。
+   **它只做形狀，不做語意。**
+3. **你來填**：依主題轉折移動段界（等時間只是起始格線）、寫標題／摘要／條列，
+   把每一個 `<!-- ai-draft -->` 換掉，最後**刪除頂層的 `"draft"`**。
+4. **驗收**：`l2n check json`。
+
+`"draft": true` 還在時，`check json` 會印一行
+`warn draft ...: draft document: fill every ai-draft field, then remove "draft"`，
+並把「內容長度類」規則（`overall_summary_zh` 字數、`takeaways_zh` 條數）降為 warning ——
+骨架本來就還沒寫完，為此報 error 只會把真正該修的結構問題蓋掉。
+刪掉 `draft` 之後這些規則恢復為 error。
+
 舊版（1.x）文件用 `l2n migrate <stem>.json` 原地升級到 v2，不要手動改 `schema_version`。
 
 ## 最小範例
