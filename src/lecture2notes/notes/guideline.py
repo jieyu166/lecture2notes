@@ -43,6 +43,12 @@ MANDATORY_SECTIONS: Tuple[Tuple[str, str], ...] = (
 #: appears in the transcript, and is not marked as a quotation, is R5.
 TRANSCRIPT_RUN_CHARS = 40
 
+#: A sentence at least this long (same normalisation) that appears in two
+#: different sections of the note is R11. Shorter than R5's run because this
+#: is not about pasting a transcript: twenty-five identical characters in two
+#: places is a sentence somebody copied, not a coincidence.
+DUPLICATE_SENTENCE_CHARS = 25
+
 #: How many questions the 題目 section must carry (rule R9), and how many the
 #: skeleton drafts at most. Recall is answering, not rereading, so a note whose
 #: question section is empty has skipped the only step that makes it stick.
@@ -131,7 +137,7 @@ def expansion_checklist(style: str = "concise") -> List[str]:
 
 #: Rule identifiers, so a typo in a finding fails a test rather than a reader.
 RULES: Tuple[str, ...] = (
-    "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10",
+    "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11",
 )
 
 _HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$")
@@ -261,6 +267,7 @@ def expand_prompt(
 
 __all__ = [
     "ANSWER_CALLOUT",
+    "DUPLICATE_SENTENCE_CHARS",
     "EXPANSION_CHECKLIST",
     "INFERENCE_PREFIX_HINT",
     "expansion_checklist",

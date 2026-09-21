@@ -888,3 +888,101 @@ def test_the_guideline_documents_the_single_spelling():
 
     assert "`[推論]` 的寫法只有一種" in text
     assert "1. [推論] 若某個案例具備 A 但缺少 B" in text
+
+
+# --------------------------------------------------------------------------
+# 16.3 -- R11: the same sentence in two sections
+# --------------------------------------------------------------------------
+# The blind review found one note carrying the same three sentences in
+# Summary, in the Note body and again under "我應該記住的 3 件事". Every rule
+# before this one reads a single section, so nothing saw it.
+
+#: Long enough to clear DUPLICATE_SENTENCE_CHARS, and it appears nowhere in
+#: the fixture's transcript, so R5 has nothing to say about it either.
+REPEATED = (
+    "廠商自己給的省成本百分比與第三方統計的市場規模，不能放在同一個證據等級上使用"
+)
+
+
+def _append_to_section(note_path: Path, heading: str, text: str):
+    def transform(lines):
+        at = lines.index(heading)
+        return lines[:at + 1] + ["", text, ""] + lines[at + 1:]
+    _edit(note_path, transform)
+
+
+def test_r11_reports_a_sentence_repeated_in_two_sections(lecture):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, REPEATED)
+    _append_to_section(note_path, "## 學習驗證", "> " + REPEATED)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+    hits = [f for f in report.findings if f.code == "R11"]
+
+    assert len(hits) == 1, [f.message for f in report.findings]
+    assert hits[0].severity == "warn"
+    assert "Note (layer 1-3)" in hits[0].location
+    assert "學習驗證" in hits[0].location
+    assert REPEATED[:10] in hits[0].message
+
+
+def test_r11_says_nothing_when_each_sentence_is_written_once(lecture):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, REPEATED)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert "R11" not in _codes(report)
+
+
+def test_r11_counts_a_quotation_repeated_in_another_section(lecture):
+    """Unlike R10, a kept quotation is a sentence like any other here.
+
+    2.1 asks for the speaker's words once. Saying them again three sections
+    later is repetition, not compliance.
+    """
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, "「%s」" % REPEATED)
+    _append_to_section(note_path, "## 題目", "> 「%s」" % REPEATED)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert "R11" in _codes(report)
+
+
+def test_r11_ignores_the_outline_and_the_references(lecture):
+    """The outline is a machine projection; References repeats terms by design."""
+    json_path, note_path = lecture
+    _append_to_section(note_path, "## 講者骨架", REPEATED)
+    _append_to_section(note_path, "### References", REPEATED)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert "R11" not in _codes(report)
+
+
+def test_r11_forgives_the_one_pair_the_guideline_mandates(lecture):
+    """7.1 makes Summary quote takeaways, and render projects Evergreen from them."""
+    json_path, note_path = lecture
+    _append_to_section(note_path, "# Evergreen Note", "**「%s」**" % REPEATED)
+    _append_to_section(note_path, "# Summary", "- " + REPEATED)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+    assert "R11" not in _codes(report)
+
+    # A third section is no longer the renderer's doing.
+    _append_to_section(note_path, "## 學習驗證", "> " + REPEATED)
+    again = check.check_note_stage(json_path, note_path, style="faithful")
+    assert "R11" in _codes(again)
+
+
+def test_r11_leaves_a_short_repeated_line_alone(lecture):
+    """Two identical short lines are a coincidence, not a copied sentence."""
+    json_path, note_path = lecture
+    short = "這一點很重要"
+    _insert_into_first_section(note_path, short)
+    _append_to_section(note_path, "## 學習驗證", "> " + short)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert "R11" not in _codes(report)

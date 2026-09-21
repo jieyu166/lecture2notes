@@ -1057,6 +1057,7 @@ def check_note_stage(
         data, lines, regions, json_path, note_path,
         effective_style, effective_profile, report,
     )
+    _rule_duplicate_sentences(lines, note_path, report)
     report.measure("ai_draft_remaining", count_ai_drafts(lines))
     return report
 
@@ -1271,6 +1272,113 @@ def unexpanded_message(ratio: float) -> str:
     return "unexpanded skeleton (%d%% of the body is render output)" % round(
         ratio * 100
     )
+
+
+# --------------------------------------------------------------------------
+# R11: the same sentence in two sections
+# --------------------------------------------------------------------------
+# The blind review's flattest observation: one note carried the same three
+# sentences in Summary, in the Note body and again under "我應該記住的 3 件事",
+# word for word. Nothing checked for it, because every rule up to here looks at
+# one section at a time. A reader hits the third copy and stops trusting that
+# anything in the file was chosen.
+
+#: Where R11 looks, as ``(name, heading, heading that ends it or None)``.
+#: 講者骨架 and References are deliberately out: the outline is one line per
+#: segment projected from the document, and References is the appendix whose
+#: whole job is to repeat terms that appear elsewhere. Frontmatter is out
+#: because it is before the first heading and is the profile's, not the
+#: writer's.
+R11_REGIONS: Tuple[Tuple[str, str, Optional[str]], ...] = (
+    ("Evergreen Note", "# Evergreen Note", "# Summary"),
+    ("Summary", "# Summary", "## 講者骨架"),
+    ("Note (layer 1-3)", "# Note (layer 1-3)", "### References"),
+    ("題目", "## 題目", "## 學習驗證"),
+    ("學習驗證", "## 學習驗證", None),
+)
+
+#: The one pair of sections allowed to hold the same sentence. Guideline 7.1
+#: requires Summary to quote ``takeaways_zh`` verbatim, and `l2n render`
+#: projects Evergreen from the first of those takeaways -- so a note that has
+#: not yet rewritten Evergreen would report R11 for doing exactly what the
+#: renderer did. R10 already reports that note, and says something more useful.
+R11_ALLOWED_PAIR = frozenset(("Evergreen Note", "Summary"))
+
+#: Where one sentence ends and the next begins, full-width or half.
+SENTENCE_BREAK = re.compile(r"[。！？；!?;]+")
+
+
+def r11_regions(lines: Sequence[str]) -> Dict[str, Tuple[int, int]]:
+    """The sections R11 compares, in reading order, skipping absent ones."""
+    found: Dict[str, Tuple[int, int]] = {}
+    for name, heading, stop_heading in R11_REGIONS:
+        start = heading_index(lines, heading)
+        if start < 0:
+            continue
+        end = section_bounds(lines, start)
+        if stop_heading:
+            stop = heading_index(lines, stop_heading)
+            if 0 <= stop < end:
+                end = stop
+        found[name] = (start + 1, end)
+    return found
+
+
+def region_sentences(lines: Sequence[str]) -> List[Tuple[str, str]]:
+    """``(normalised, as written)`` for every sentence in a region's lines.
+
+    A quotation is a sentence like any other here, unlike R10. Keeping the
+    speaker's words is required once; saying them again three sections later
+    is the repetition this rule is about.
+    """
+    out: List[Tuple[str, str]] = []
+    for line in lines:
+        body = line.strip()
+        if not body or body.startswith("#") or body.startswith("|"):
+            continue
+        if body.startswith("<!--"):
+            continue
+        while body.startswith(">"):
+            body = body[1:].lstrip()
+        for marker in ("- ", "* ", "+ "):
+            if body.startswith(marker):
+                body = body[len(marker):].lstrip()
+                break
+        if body.startswith("!["):
+            continue
+        for piece in SENTENCE_BREAK.split(body):
+            written = piece.strip()
+            if not written:
+                continue
+            normalised = rules.comparison_text(written)
+            if len(normalised) >= guideline.DUPLICATE_SENTENCE_CHARS:
+                out.append((normalised, written))
+    return out
+
+
+def _rule_duplicate_sentences(
+    lines: Sequence[str], note: Path, report: StageReport
+) -> None:
+    """R11: one sentence, word for word, in two or more sections.
+
+    Warning rather than error, and reported once per sentence rather than once
+    per copy, so a note that repeats one line does not bury the rest of the
+    report.
+    """
+    seen: Dict[str, Tuple[str, List[str]]] = {}
+    for name, bounds in r11_regions(lines).items():
+        for normalised, written in region_sentences(lines[slice(*bounds)]):
+            entry = seen.setdefault(normalised, (written, []))
+            if name not in entry[1]:
+                entry[1].append(name)
+    for written, names in seen.values():
+        if len(names) < 2 or set(names) == R11_ALLOWED_PAIR:
+            continue
+        excerpt = written[: guideline.FINDING_EXCERPT_CHARS]
+        report.add(
+            "warn", "R11", " + ".join(names),
+            "the same sentence is in %d sections: 「%s...」" % (len(names), excerpt),
+        )
 
 
 def count_ai_drafts(lines: Sequence[str]) -> int:
