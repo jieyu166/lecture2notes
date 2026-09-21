@@ -57,10 +57,15 @@ from lecture2notes.profiles.layers import (
 DEFAULT_NOTE_STYLE = "concise"
 #: R5 is a warning unless a profile promotes it.
 DEFAULT_TRANSCRIPT_PASTE = "warning"
-#: R10 (a section still identical to the render output) is a warning by
+#: R10 (a section still mostly the render output) is a warning by
 #: default: a skeleton is a legitimate intermediate state. A profile whose
 #: notes get published can set `guideline.unexpanded = "error"`.
 DEFAULT_UNEXPANDED = "warning"
+
+#: How much of a section's body may still be the renderer's own sentences
+#: before R10 calls it unexpanded. A profile moves the line with
+#: ``check.r10_ratio`` in ``outputs.toml``; see :func:`r10_ratio`.
+DEFAULT_R10_RATIO = 0.60
 
 #: The ``outputs.toml`` key that names the profile, and so is reported as the
 #: ``profile`` setting rather than as an output setting of its own.
@@ -362,6 +367,25 @@ def unexpanded_severity(profile: str = BUILTIN_PROFILE) -> str:
     return DEFAULT_UNEXPANDED
 
 
+def r10_ratio(profile: str = BUILTIN_PROFILE) -> float:
+    """The R10 residual-ratio threshold: ``check.r10_ratio``, else 0.60.
+
+    Lives under ``[check]`` rather than beside ``guideline.unexpanded``
+    because it is a number the check computes, not a statement about how
+    severe the guideline considers the finding. Values outside ``(0, 1]`` are
+    ignored rather than clamped: a profile that writes ``r10_ratio = 60``
+    means percent, and silently reading that as "report everything" would be
+    worse than using the default.
+    """
+    table = outputs(profile).get("check")
+    if isinstance(table, Mapping):
+        value = table.get("r10_ratio")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if 0.0 < float(value) <= 1.0:
+                return float(value)
+    return DEFAULT_R10_RATIO
+
+
 def privacy_patterns(profile: str = BUILTIN_PROFILE) -> List[str]:
     """Regular expressions a note line must not match (R7)."""
     raw = privacy(profile).get("patterns")
@@ -384,7 +408,9 @@ __all__ = [
     "CORRECTIONS_PREFIX",
     "DEFAULT_NOTE_STYLE",
     "DEFAULT_TRANSCRIPT_PASTE",
+    "DEFAULT_R10_RATIO",
     "DEFAULT_UNEXPANDED",
+    "r10_ratio",
     "unexpanded_severity",
     "FRONTMATTER_TEMPLATE",
     "LAYER_NAMES",

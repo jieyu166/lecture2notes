@@ -86,6 +86,29 @@ def _replace_question_section(note_path: Path, questions):
     _edit(note_path, transform)
 
 
+def _rewrite_first_section(note_path: Path, replacement):
+    """Replace section 1's prose, keeping its heading, timespan, embed and quotes.
+
+    What an expansion is supposed to do: the machine-projected parts stay, the
+    rendered sentences go, the writer's own sentences take their place.
+    """
+    def transform(lines):
+        at = next(i for i, line in enumerate(lines)
+                  if line.startswith("## 1、"))
+        end = next((i for i in range(at + 1, len(lines))
+                    if lines[i].startswith("#")), len(lines))
+        kept = [
+            line for line in lines[at:end]
+            if not line.strip()
+            or line.startswith("#")
+            or line.startswith("![[")
+            or line.startswith("> ")
+            or check.TIMESPAN_LINE.match(line.strip())
+        ]
+        return lines[:at] + kept + list(replacement) + [""] + lines[end:]
+    _edit(note_path, transform)
+
+
 def _insert_into_first_section(note_path: Path, text: str):
     def transform(lines):
         at = next(i for i, line in enumerate(lines)
@@ -645,8 +668,9 @@ def test_r10_reports_every_segment_of_an_untouched_skeleton(lecture):
     hits = [f for f in report.findings if f.code == "R10"]
     segments = [f for f in hits if f.location.startswith("segment ")]
     assert [f.location for f in segments] == ["segment 1", "segment 2"]
+    # Identity is still the top of the scale, and the message says so.
     assert all(
-        "identical to l2n render output" in f.message for f in hits
+        "100% of the body is render output" in f.message for f in hits
     )
 
 
@@ -660,14 +684,74 @@ def test_r10_reports_an_evergreen_still_holding_the_rendered_line(lecture):
 
 
 def test_r10_is_silent_on_a_section_somebody_rewrote(lecture):
+    """The rendered sentences are gone, replaced by the writer's own."""
     json_path, note_path = lecture
-    _insert_into_first_section(note_path, "本段已經改寫過，這一句不在骨架裡。")
+    _rewrite_first_section(note_path, [
+        "講者先交代為什麼這個判準值得建立，再拿兩個反例把邊界推出來。",
+        "他的理由是：只看結果會把運氣算進能力，所以要先固定條件再比較。",
+    ])
 
     report = check.check_note_stage(json_path, note_path, style="faithful")
 
     locations = [f.location for f in report.findings if f.code == "R10"]
     assert "segment 1" not in locations
     assert "segment 2" in locations
+
+
+# --------------------------------------------------------------------------
+# 16.2 -- residual ratio, because "identical" was one sentence away from free
+# --------------------------------------------------------------------------
+# The blind review of four expansions found a note that had added a real
+# paragraph of its own reasoning to the front of every section and left the
+# rendered sentences sitting underneath it, untouched. Nothing was identical,
+# R10 said nothing, and the reader was told the same thing twice per section.
+
+def test_r10_reports_a_section_that_only_gained_a_sentence(lecture):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, "推理鏈：先說清楚前提")
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+    hits = [f for f in report.findings
+            if f.code == "R10" and f.location == "segment 1"]
+
+    assert hits, "adding a sentence in front of the skeleton is not expansion"
+    assert "% of the body is render output" in hits[0].message
+    assert "100%" not in hits[0].message
+
+
+def test_the_r10_threshold_comes_from_the_profile(lecture, monkeypatch):
+    """`check.r10_ratio` in outputs.toml moves the line, nothing else does."""
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, "推理鏈：先說清楚前提")
+
+    monkeypatch.setattr(check.loader, "r10_ratio", lambda profile=None: 0.95)
+    lenient = check.check_note_stage(json_path, note_path, style="faithful")
+    assert "segment 1" not in [
+        f.location for f in lenient.findings if f.code == "R10"
+    ]
+
+    monkeypatch.setattr(check.loader, "r10_ratio", lambda profile=None: 0.10)
+    strict = check.check_note_stage(json_path, note_path, style="faithful")
+    assert "segment 1" in [
+        f.location for f in strict.findings if f.code == "R10"
+    ]
+
+
+def test_a_kept_quotation_is_not_counted_as_residue(lecture):
+    """2.1 requires the speaker's words be kept verbatim; R10 must not punish it."""
+    json_path, note_path = lecture
+    _rewrite_first_section(note_path, [
+        "講者先交代為什麼這個判準值得建立，再拿兩個反例把邊界推出來。",
+        "他的理由是：只看結果會把運氣算進能力，所以要先固定條件再比較。",
+    ])
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    # The three rendered blockquotes are still in the file untouched.
+    assert note_path.read_text(encoding="utf-8").count("> 「佔位原話一") == 3
+    assert "segment 1" not in [
+        f.location for f in report.findings if f.code == "R10"
+    ]
 
 
 def test_r10_ignores_whitespace_only_edits(lecture):

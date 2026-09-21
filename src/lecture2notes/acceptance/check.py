@@ -1064,11 +1064,121 @@ def check_note_stage(
 def comparable_body(lines: Sequence[str]) -> str:
     """A section's text with every space removed, for an identity comparison.
 
-    Whitespace only, deliberately. R10 asks one question -- has anybody typed
-    anything into this section -- and a rule that also forgave a changed word
-    would start guessing at how much change counts.
+    Kept for the callers that want the strictest possible reading of "nobody
+    touched this". R10 itself no longer uses it; see :func:`residual_ratio`.
     """
     return "".join("".join(line.split()) for line in lines)
+
+
+#: A rendered sentence shorter than this (normalised) is not evidence of
+#: anything: short strings match by coincidence. Four rather than something
+#: safer because :func:`_covered_chars` counts positions -- a coincidental
+#: four-character match moves the ratio by four characters, not by a sentence.
+R10_MIN_PIECE_CHARS = 4
+
+#: The ``(00:01:02)`` the renderer appends to a quotation. R10 drops it with
+#: the quotation it belongs to: a bullet that is nothing but the speaker's own
+#: words and the time they said them is on neither side of the ratio.
+QUOTE_TIMESTAMP = re.compile(r"\(\s*\d{1,2}:\d{2}(?::\d{2})?\s*\)")
+
+
+def r10_text(line: str) -> str:
+    """One line as R10 compares it: no quotations, no timecodes, normalised."""
+    return rules.comparison_text(
+        QUOTE_TIMESTAMP.sub("", QUOTED_SPAN.sub("", line))
+    )
+
+
+#: The timespan line the renderer projects from the document, e.g.
+#: ``(00:04:10 - 00:09:55)``. It is data, not prose, and it is supposed to
+#: survive the expansion unchanged, so R10 must not count it either way.
+TIMESPAN_LINE = re.compile(r"^\(\s*[\d:]+\s*-\s*[\d:]+\s*\)$")
+
+
+def prose_lines(lines: Sequence[str]) -> List[str]:
+    """The lines of a section that are the writer's own prose.
+
+    Dropped: headings, blank lines, image embeds, the projected timespan, and
+    blockquotes. The last one matters most -- a blockquote is the speaker's
+    own words, which 2.1 requires be kept verbatim, so leaving it in place is
+    compliance rather than laziness and R10 must not read it as residue.
+
+    Bullet markers are stripped so ``- foo`` and ``foo`` compare the same: an
+    expansion that turns a bullet into a sentence has not rewritten anything.
+    """
+    out: List[str] = []
+    for line in lines:
+        body = line.strip()
+        if not body or body.startswith("#"):
+            continue
+        for marker in ("- ", "* ", "+ "):
+            if body.startswith(marker):
+                body = body[len(marker):].lstrip()
+                break
+        if body.startswith(">") or body.startswith("!["):
+            continue
+        if TIMESPAN_LINE.match(body):
+            continue
+        out.append(body)
+    return out
+
+
+def _covered_chars(body: str, pieces: Sequence[str]) -> int:
+    """How many characters of *body* are covered by any of *pieces*.
+
+    Positions rather than a sum of lengths, so a rendered sentence that
+    happens to contain a shorter rendered bullet cannot be counted twice.
+    Every occurrence is marked, not only the first: a note that pastes the
+    same rendered sentence into two paragraphs has two paragraphs of residue.
+    """
+    if not body:
+        return 0
+    covered = bytearray(len(body))
+    for piece in pieces:
+        start = body.find(piece)
+        while start >= 0:
+            for index in range(start, start + len(piece)):
+                covered[index] = 1
+            start = body.find(piece, start + 1)
+    return sum(covered)
+
+
+def residual_ratio(
+    body_lines: Sequence[str],
+    skeleton_lines: Sequence[str],
+    keep_quotes: bool = False,
+) -> float:
+    """How much of a section's body is still, character for character, render output.
+
+    The skeleton section is split into the sentences `l2n render` writes -- the
+    ``summary_zh`` line and each bullet -- and each one is searched for inside
+    the note's own body. The ratio is covered characters over body characters,
+    both normalised the way every other copy check in this file normalises
+    (case-folded, width-folded, punctuation and whitespace dropped).
+
+    Identity still scores 1.0, which is why this can replace the identity test
+    outright. What it also catches is the shape the blind review found: every
+    rendered sentence still there, with one new sentence written in front of
+    it. That note reads as expanded to an identity test and reads as the same
+    lecture told twice to a person.
+
+    ``keep_quotes`` is False everywhere except Evergreen. In a segment body a
+    「」 span is a quotation the guideline asked for, so it belongs in neither
+    the numerator nor the denominator; Evergreen's 「」 is the renderer's own
+    typography around the takeaway, and stripping it would leave nothing to
+    measure.
+    """
+    normalise = rules.comparison_text if keep_quotes else r10_text
+    body = "".join(normalise(line) for line in prose_lines(body_lines))
+    if not body:
+        return 0.0
+    pieces = [
+        piece for piece in (normalise(line) for line in prose_lines(skeleton_lines))
+        if len(piece) >= R10_MIN_PIECE_CHARS
+    ]
+    if not pieces:
+        return 0.0
+    return min(_covered_chars(body, pieces) / float(len(body)), 1.0)
 
 
 def _rule_unexpanded(
@@ -1081,13 +1191,22 @@ def _rule_unexpanded(
     profile: str,
     report: StageReport,
 ) -> None:
-    """R10: a section still byte-identical to what `l2n render` produced.
+    """R10: a section whose body is still mostly what `l2n render` produced.
 
     Every other rule can be satisfied by a note nobody wrote. A test with a
     fresh context was handed the skill, filled in the speaker outline and the
     question answers, and `check note` returned 0 errors 0 warnings on a
     document whose every segment was still the renderer's output. Passing the
     check has to mean more than that.
+
+    1.2 asked for identity, and the blind review of four expansions showed how
+    thin a defence that is: one note kept every rendered sentence and wrote a
+    new one in front of it. Nothing was identical any more, R10 went quiet, and
+    the reader got the same lecture twice in a row. So the question is no
+    longer "is this byte for byte the skeleton" but "how much of this paragraph
+    is still the skeleton" -- residue at or above
+    :func:`loader.r10_ratio` (60% by default) is reported, and an untouched
+    section still scores 100%.
 
     The comparison is against a re-render of the same document at the same
     style, so it cannot drift from what `render` actually writes.
@@ -1101,6 +1220,7 @@ def _rule_unexpanded(
     except (ValueError, OSError):  # no template for this profile
         return
     severity = "error" if loader.unexpanded_severity(profile) == "error" else "warn"
+    threshold = loader.r10_ratio(profile)
     skeleton_lines = note_lines(skeleton)
     skeleton_regions = note_regions(skeleton_lines)
 
@@ -1114,28 +1234,43 @@ def _rule_unexpanded(
         if position >= len(theirs):
             break
         _, other_start, other_end = theirs[position]
-        if comparable_body(lines[start:end]) == comparable_body(
-            skeleton_lines[other_start:other_end]
-        ):
+        ratio = residual_ratio(
+            lines[start:end], skeleton_lines[other_start:other_end]
+        )
+        if ratio >= threshold:
             unexpanded += 1
             report.add(
                 severity, "R10", "segment %d" % (position + 1),
-                "unexpanded skeleton (body identical to l2n render output)",
+                unexpanded_message(ratio),
                 position + 1,
             )
     report.measure("unexpanded_segments", "%d/%d" % (unexpanded, len(mine)))
 
     # Evergreen is one line projected from the first takeaway. Left as it was
-    # rendered, the note's single most prominent claim is a placeholder.
+    # rendered, the note's single most prominent claim is a placeholder. Its
+    # 「」 is the renderer's typography rather than a quotation the guideline
+    # asked for, so unlike a segment body it is measured with the quotes in.
     name = "Evergreen Note"
     if name in regions and name in skeleton_regions:
-        if comparable_body(lines[slice(*regions[name])]) == comparable_body(
-            skeleton_lines[slice(*skeleton_regions[name])]
-        ):
-            report.add(
-                severity, "R10", name,
-                "unexpanded skeleton (body identical to l2n render output)",
-            )
+        ratio = residual_ratio(
+            lines[slice(*regions[name])],
+            skeleton_lines[slice(*skeleton_regions[name])],
+            keep_quotes=True,
+        )
+        if ratio >= threshold:
+            report.add(severity, "R10", name, unexpanded_message(ratio))
+
+
+def unexpanded_message(ratio: float) -> str:
+    """What R10 says, with the number that made it say it.
+
+    The percentage is the finding's whole diagnostic value: "identical" told a
+    writer to start over, "82%" tells them a fifth of the paragraph is theirs
+    and the rest is not.
+    """
+    return "unexpanded skeleton (%d%% of the body is render output)" % round(
+        ratio * 100
+    )
 
 
 def count_ai_drafts(lines: Sequence[str]) -> int:

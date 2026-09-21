@@ -38,11 +38,16 @@ def test_ocr_without_rapidocr_exits_3(monkeypatch, tmp_path):
     monkeypatch.setattr(_deps, "require_rapidocr", boom)
     monkeypatch.setitem(_deps._CHECKS, "rapidocr", boom)
     monkeypatch.chdir(tmp_path)
+    # A target that exists, because 16.1 moved the dependency check behind
+    # target resolution: a path that is not there is exit 2 and rapidocr is
+    # never asked for, which is the whole point of the reordering.
+    (tmp_path / "talk.json").write_text("{}", encoding="utf-8")
+    before = listdir_set(tmp_path)
 
-    code = cli_entry(["ocr", "frames"])
+    code = cli_entry(["ocr", "talk.json"])
 
     assert code == 3
-    assert listdir_set(tmp_path) == set()
+    assert listdir_set(tmp_path) == before
 
 
 def test_missing_ct2_model_directory_is_reported():
