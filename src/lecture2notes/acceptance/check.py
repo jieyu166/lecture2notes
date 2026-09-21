@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from urllib.parse import unquote
 
 from lecture2notes import _out
+from lecture2notes.engines.base import SRT_TIME
 
 MIN_SUMMARY_CHARS = 100
 MAX_SUMMARY_CHARS = 500
@@ -38,6 +39,8 @@ MIN_BULLETS = 2
 MAX_SEGMENT_GAP_SEC = 60
 #: Tolerance between a ``HH:MM:SS`` string and its seconds field.
 CLOCK_TOLERANCE_SEC = 1
+#: Subtitle cues may touch; a millisecond of rounding is not an overlap.
+CUE_OVERLAP_TOLERANCE_SEC = 0.002
 
 SKIP_JSON = re.compile(
     r"\.frames\.json$|\.frames_ocr\.json$|\.corrections\.json$|\.audit\.json$|^_"
@@ -209,6 +212,98 @@ def check_segments(segments: Sequence[Any], base: Path, report: Report) -> None:
                 report.err("%s frame does not exist: %s" % (tag, name))
 
 
+# -- the transcribe stage --------------------------------------------------
+#: Suffixes the transcribe stage leaves next to `<stem>.srt`.
+RAW_SUFFIX = ".raw.srt"
+CORRECTIONS_SUFFIX = ".corrections.json"
+#: A cue this short is almost always a timing artefact rather than speech.
+MIN_CUE_SEC = 0.05
+
+
+def check_transcribe(path: Path, report: Report) -> List[Any]:
+    """Verify one SRT and the audit trail the transcribe stage leaves with it.
+
+    Two different kinds of finding live here. SRT structure is an *error*: a file
+    with overlapping or inverted cues breaks every stage downstream. A
+    hallucination loop is a *warning*: the transcript is still usable up to the
+    loop, and only the user can decide whether to re-run or trim the tail.
+
+    The raw copy and the correction sidecar are reported as info, not warnings.
+    A transcript produced without a correction table legitimately has neither,
+    and a warning that fires on a correct run teaches people to ignore warnings.
+    Having exactly one of the pair, though, is an error: the stage writes both or
+    neither, so a lone sidecar means something deleted the evidence.
+    """
+    from lecture2notes.engines import hallucination
+    from lecture2notes.engines.base import parse_srt_text
+
+    path = Path(path)
+    raw_bytes = path.read_bytes()
+    if raw_bytes[:3] == b"\xef\xbb\xbf":
+        report.err("SRT has a UTF-8 BOM; players and parsers mis-read the first cue")
+    text = raw_bytes.decode("utf-8", "replace").replace("\r", "")
+
+    cues = parse_srt_text(text)
+    if not cues:
+        report.err("no cues could be parsed from %s" % path.name)
+        return []
+
+    previous_end: Optional[float] = None
+    for number, cue in enumerate(cues, 1):
+        if cue.end <= cue.start:
+            report.err("cue %d ends at or before it starts (%.3f to %.3f)"
+                       % (number, cue.start, cue.end))
+        elif cue.duration() < MIN_CUE_SEC:
+            report.warn("cue %d lasts only %.3f seconds" % (number, cue.duration()))
+        if previous_end is not None and cue.start < previous_end - CUE_OVERLAP_TOLERANCE_SEC:
+            report.err("cue %d starts at %.3f, before the previous cue ended (%.3f)"
+                       % (number, cue.start, previous_end))
+        previous_end = max(previous_end or 0.0, cue.end)
+        if not cue.text.strip():
+            report.err("cue %d has no text" % number)
+
+    numbers = cue_index_numbers(text)
+    if numbers and numbers != list(range(1, len(numbers) + 1)):
+        report.err("cue numbering is not 1..%d in order" % len(numbers))
+
+    loops = hallucination.find_loops(cues)
+    for loop in loops:
+        report.warn(loop.message())
+
+    raw = path.with_name(path.stem + RAW_SUFFIX)
+    sidecar = path.with_name(path.stem + CORRECTIONS_SUFFIX)
+    if raw.exists() and sidecar.exists():
+        report.info("correction table applied; raw transcript kept as %s" % raw.name)
+    elif raw.exists() or sidecar.exists():
+        report.err(
+            "the transcribe stage writes %s and %s together; only one is present"
+            % (raw.name, sidecar.name)
+        )
+    else:
+        report.info("no correction table was applied to %s" % path.name)
+
+    report.info("%d cues, %.1f to %.1f minutes"
+                % (len(cues), cues[0].start / 60.0, cues[-1].end / 60.0))
+    return loops
+
+
+def cue_index_numbers(text: str) -> List[int]:
+    """The cue index lines: a bare number immediately before a timecode line.
+
+    Recognised by what follows rather than by position, because a bare number can
+    also be a line of subtitle text.
+    """
+    lines = text.split("\n")
+    found: List[int] = []
+    for position, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.isdigit() and any(
+            SRT_TIME.search(nxt) for nxt in lines[position + 1:position + 2]
+        ):
+            found.append(int(stripped))
+    return found
+
+
 def note_image_refs(markdown: str) -> List[str]:
     """Image references in a note, both embed spellings, external links excluded."""
     refs: List[str] = []
@@ -289,6 +384,10 @@ def check_path(target: Path, note: Optional[Path] = None) -> List[Report]:
 
 __all__ = [
     "CLOCK_TOLERANCE_SEC",
+    "CORRECTIONS_SUFFIX",
+    "CUE_OVERLAP_TOLERANCE_SEC",
+    "MIN_CUE_SEC",
+    "RAW_SUFFIX",
     "MAX_SEGMENT_GAP_SEC",
     "MAX_SUMMARY_CHARS",
     "MAX_TAKEAWAYS",
@@ -300,6 +399,8 @@ __all__ = [
     "check_note",
     "check_path",
     "check_segments",
+    "check_transcribe",
+    "cue_index_numbers",
     "collect_targets",
     "exit_code",
     "note_image_refs",

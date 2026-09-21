@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from lecture2notes import __version__, _deps, _out, exit_codes
+from lecture2notes.acceptance import check
 from lecture2notes.engines import convert
 from lecture2notes.engines import corrections as corrections_mod
 from lecture2notes.engines import pipeline, registry
@@ -247,9 +248,36 @@ def cmd_hub(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+#: Stages `l2n check` knows about. Only the ones with a handler are wired up;
+#: the rest still report "not implemented yet" rather than silently passing.
+CHECK_STAGES = ("transcribe", "frames", "json", "note")
+
+
 def cmd_check(args: argparse.Namespace) -> int:
-    not_implemented("check")
-    return exit_codes.OK
+    stage = getattr(args, "what", None)
+    if not stage:
+        _out.error("check needs a stage: %s" % " / ".join(CHECK_STAGES))
+        return exit_codes.ERROR
+    if stage not in CHECK_STAGES:
+        _out.error("unknown check stage: %s (known: %s)"
+                   % (stage, ", ".join(CHECK_STAGES)))
+        return exit_codes.ERROR
+    if stage != "transcribe":
+        not_implemented("check %s" % stage)
+    target = getattr(args, "target", None)
+    if not target:
+        _out.error("check transcribe needs a subtitle file")
+        return exit_codes.ERROR
+    path = Path(target)
+    if not path.is_file():
+        _out.error("no such file: %s" % path)
+        return exit_codes.ERROR
+
+    report = check.Report(path.name)
+    check.check_transcribe(path, report)
+    report.emit()
+    _out.line(report.summary(stage))
+    return check.exit_code([report])
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
