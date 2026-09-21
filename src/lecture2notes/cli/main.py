@@ -515,11 +515,9 @@ def _check_transcribe(target: Optional[str]) -> int:
         _out.error("no such file: %s" % path)
         return exit_codes.ERROR
 
-    report = check.Report(path.name)
-    check.check_transcribe(path, report)
+    report = check.check_transcribe_stage(path)
     report.emit()
-    _out.line(report.summary("transcribe"))
-    return check.exit_code([report])
+    return report.exit_code()
 
 
 def _check_json(target: Optional[str]) -> int:

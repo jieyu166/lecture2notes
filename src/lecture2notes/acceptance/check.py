@@ -297,6 +297,99 @@ def check_transcribe(path: Path, report: Report) -> List[Any]:
     return loops
 
 
+#: Location prefix for a per-cue finding, so every line carries a location that
+#: points at one cue rather than at the whole file.
+def _cue_location(name: str, number: int) -> str:
+    return "%s:cue %d" % (name, number)
+
+
+def check_transcribe_stage(path: Path) -> StageReport:
+    """The ``transcribe`` stage check over one ``<stem>.srt``.
+
+    The same rules :func:`check_transcribe` applies, reported through
+    :class:`StageReport` so that the four stages share one output contract and
+    one finding shape. The older ``Report`` form stays for callers that want the
+    grouped per-document printout.
+
+    Severity split, unchanged from the ported version: structure is an error
+    because every later stage reads these times; a hallucination loop is a
+    warning because the transcript is still usable up to the loop and only a
+    person can decide whether to re-run or trim; a missing correction sidecar is
+    only an error when its twin is present, since a run with no correction table
+    legitimately has neither.
+    """
+    from lecture2notes.engines import hallucination
+    from lecture2notes.engines.base import parse_srt_text
+
+    target = Path(path)
+    report = StageReport("transcribe", target.name)
+    name = target.name
+
+    try:
+        raw_bytes = target.read_bytes()
+    except OSError as exc:
+        report.add("error", "parse", name, "subtitle is unreadable: %s" % exc)
+        return report
+    if raw_bytes[:3] == b"\xef\xbb\xbf":
+        report.add(
+            "error", "bom", name,
+            "SRT has a UTF-8 BOM; players and parsers mis-read the first cue",
+        )
+    text = raw_bytes.decode("utf-8", "replace").replace("\r", "")
+
+    cues = parse_srt_text(text)
+    if not cues:
+        report.add("error", "parse", name, "no cues could be parsed")
+        return report
+
+    previous_end: Optional[float] = None
+    for number, cue in enumerate(cues, 1):
+        location = _cue_location(name, number)
+        if cue.end <= cue.start:
+            report.add(
+                "error", "cue_time", location,
+                "cue ends at or before it starts (%.3f to %.3f)"
+                % (cue.start, cue.end),
+            )
+        elif cue.duration() < MIN_CUE_SEC:
+            report.add(
+                "warn", "cue_time", location,
+                "cue lasts only %.3f seconds" % cue.duration(),
+            )
+        if (
+            previous_end is not None
+            and cue.start < previous_end - CUE_OVERLAP_TOLERANCE_SEC
+        ):
+            report.add(
+                "error", "cue_order", location,
+                "cue starts at %.3f, before the previous cue ended (%.3f)"
+                % (cue.start, previous_end),
+            )
+        previous_end = max(previous_end or 0.0, cue.end)
+        if not cue.text.strip():
+            report.add("error", "cue_text", location, "cue has no text")
+
+    numbers = cue_index_numbers(text)
+    if numbers and numbers != list(range(1, len(numbers) + 1)):
+        report.add(
+            "error", "numbering", name,
+            "cue numbering is not 1..%d in order" % len(numbers),
+        )
+
+    for loop in hallucination.find_loops(cues):
+        report.add("warn", "loop", name, loop.message())
+
+    raw = target.with_name(target.stem + RAW_SUFFIX)
+    sidecar = target.with_name(target.stem + CORRECTIONS_SUFFIX)
+    if raw.exists() != sidecar.exists():
+        report.add(
+            "error", "corrections", name,
+            "the transcribe stage writes %s and %s together; only one is present"
+            % (raw.name, sidecar.name),
+        )
+    return report
+
+
 def cue_index_numbers(text: str) -> List[int]:
     """The cue index lines: a bare number immediately before a timecode line.
 
@@ -1100,6 +1193,7 @@ __all__ = [
     "check_path",
     "check_segments",
     "check_transcribe",
+    "check_transcribe_stage",
     "cue_index_numbers",
     "collect_targets",
     "exit_code",
