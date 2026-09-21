@@ -1030,3 +1030,37 @@ def test_writing_the_two_placeholders_drives_the_count_to_zero(lecture):
     text = note_path.read_text(encoding="utf-8")
     assert render_mod.CANDIDATE_CALLOUT in text
     assert render_mod.SUMMARY_SLOTS[0] in text
+
+
+def test_r11_sees_through_a_renumbered_copy(lecture):
+    """The blind review's exact shape: `- 某句` in Summary, `> 1. 某句` below.
+
+    The remember-three candidates are rendered as a numbered list inside a
+    collapsed callout, and Summary is a bulleted list. A rule that compared
+    those two strings as written would have missed the one case it was
+    written for.
+    """
+    json_path, note_path = lecture
+    _append_to_section(note_path, "# Summary", "- " + REPEATED)
+    _append_to_section(note_path, "## 學習驗證", "> 1. " + REPEATED)
+
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+    hits = [f for f in report.findings if f.code == "R11"]
+
+    assert len(hits) == 1
+    assert "Summary" in hits[0].location and "學習驗證" in hits[0].location
+
+
+def test_the_r11_excerpt_drops_the_typesetting(lecture):
+    """A bold, quoted copy and a plain one are the same sentence."""
+    json_path, note_path = lecture
+    _append_to_section(note_path, "# Summary", "- " + REPEATED)
+    _append_to_section(note_path, "## 題目", "**「%s」**" % REPEATED)
+
+    finding = next(f for f in check.check_note_stage(
+        json_path, note_path, style="faithful"
+    ).findings if f.code == "R11")
+
+    assert finding.message.startswith("the same sentence is in 2 sections: 「")
+    assert "**" not in finding.message
+    assert REPEATED[:10] in finding.message

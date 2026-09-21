@@ -1307,6 +1307,10 @@ R11_ALLOWED_PAIR = frozenset(("Evergreen Note", "Summary"))
 #: Where one sentence ends and the next begins, full-width or half.
 SENTENCE_BREAK = re.compile(r"[。！？；!?;]+")
 
+#: An ordered-list marker: ``1. ``, ``2) ``, ``3、``. Stripped so a Summary
+#: bullet and a numbered copy of it under the learning check compare equal.
+ORDERED_MARKER = re.compile(r"^\d+[.)、]\s*")
+
 
 def r11_regions(lines: Sequence[str]) -> Dict[str, Tuple[int, int]]:
     """The sections R11 compares, in reading order, skipping absent ones."""
@@ -1330,6 +1334,11 @@ def region_sentences(lines: Sequence[str]) -> List[Tuple[str, str]]:
     A quotation is a sentence like any other here, unlike R10. Keeping the
     speaker's words is required once; saying them again three sections later
     is the repetition this rule is about.
+
+    List markers come off, bulleted and numbered alike. The blind review's
+    exact case was a Summary written as ``- 某句`` and reproduced under the
+    learning check as ``> 1. 某句``; a rule that compared those as different
+    strings would have missed the one thing it was built for.
     """
     out: List[Tuple[str, str]] = []
     for line in lines:
@@ -1344,6 +1353,10 @@ def region_sentences(lines: Sequence[str]) -> List[Tuple[str, str]]:
             if body.startswith(marker):
                 body = body[len(marker):].lstrip()
                 break
+        else:
+            numbered = ORDERED_MARKER.match(body)
+            if numbered:
+                body = body[numbered.end():].lstrip()
         if body.startswith("!["):
             continue
         for piece in SENTENCE_BREAK.split(body):
@@ -1374,7 +1387,10 @@ def _rule_duplicate_sentences(
     for written, names in seen.values():
         if len(names) < 2 or set(names) == R11_ALLOWED_PAIR:
             continue
-        excerpt = written[: guideline.FINDING_EXCERPT_CHARS]
+        # Emphasis and the quotation marks around it are how one copy happened
+        # to be typeset, not part of the sentence; they only make the excerpt
+        # harder to match against the file by eye.
+        excerpt = written.strip("*「」 ")[: guideline.FINDING_EXCERPT_CHARS]
         report.add(
             "warn", "R11", " + ".join(names),
             "the same sentence is in %d sections: 「%s...」" % (len(names), excerpt),
