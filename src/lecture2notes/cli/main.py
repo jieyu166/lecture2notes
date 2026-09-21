@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from urllib.parse import unquote
 
 from lecture2notes import __version__, _deps, _out, exit_codes
+from lecture2notes import install as install_mod
 from lecture2notes.acceptance import check
 from lecture2notes.acceptance.check import check_json
 from lecture2notes.engines import calibrate
@@ -627,7 +628,29 @@ def cmd_profile(args: argparse.Namespace) -> int:
 
 
 def cmd_install_skill(args: argparse.Namespace) -> int:
-    not_implemented("install-skill")
+    try:
+        if args.check:
+            lines, all_ok = install_mod.check(
+                target=args.target, all_targets=args.all, dest=args.dest
+            )
+            for text in lines:
+                _out.line(text)
+            return exit_codes.OK if all_ok else exit_codes.ERROR
+
+        results = install_mod.install(
+            target=args.target, all_targets=args.all, dest=args.dest
+        )
+    except install_mod.InstallError as exc:
+        _out.error(str(exc))
+        return exit_codes.ERROR
+
+    for _label, path, skipped in results:
+        _out.line(str(path))
+        for name in skipped:
+            _out.stage("install-skill", "kept existing overlay file: %s" % name)
+    _out.ok(
+        "installed skill %r to %d target(s)" % (install_mod.SKILL_NAME, len(results))
+    )
     return exit_codes.OK
 
 
