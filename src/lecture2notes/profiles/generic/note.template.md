@@ -1,13 +1,19 @@
 {{frontmatter}}
+{{declaration}}
+
 # Evergreen Note
 
 {{evergreen}}
 
 # Summary
 
-我為什麼開這篇：（讀前自己填一句；填不出來就選「丟棄」）
+{{summary_slots}}
 
 {{summary}}
+
+## 講者骨架
+
+{{speaker_outline}}
 
 # Note (layer 1-3)
 

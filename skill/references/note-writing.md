@@ -4,7 +4,7 @@
 
 ## 規範在哪裡
 
-唯一的規範文件是 **[`docs/note-writing-guideline.md`](../../docs/note-writing-guideline.md)**，目前版本 **`guideline_version: 1.0`**。
+唯一的規範文件是 **[`docs/note-writing-guideline.md`](../../docs/note-writing-guideline.md)**，目前版本 **`guideline_version: 1.1`**。
 
 這份參考不重寫規則。規則只有一份，重寫兩份就會分岔。下面只寫流程。
 
@@ -50,4 +50,4 @@
 
 - 骨架章節怎麼來的 -> `l2n render`，見規範開頭。
 - 影格怎麼抓、JSON 怎麼長 -> 各自的階段參考。
-- 讀者自己該做的消化步驟（保留／刪除／改寫「我應該記住的 3 件事」）-> 規範 §0.5，模型不代勞。
+- 讀者自己該做的消化步驟（保留／刪除／改寫「我應該記住的 3 件事」）-> 規範 §0.6，模型不代勞。

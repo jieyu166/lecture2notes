@@ -15,7 +15,7 @@ from typing import List, Optional, Tuple
 
 #: Bump this whenever a rule changes meaning. `l2n check note` prints it, so a
 #: report always says which edition of the rules produced it.
-GUIDELINE_VERSION = "1.0"
+GUIDELINE_VERSION = "1.1"
 
 #: The exact line the document carries and the check prints.
 VERSION_LINE = "guideline_version: %s" % GUIDELINE_VERSION
@@ -32,6 +32,7 @@ MACHINE_CHECKABLE_HEADING = "機器可檢查"
 MANDATORY_SECTIONS: Tuple[Tuple[str, str], ...] = (
     ("# Evergreen Note", "Evergreen Note"),
     ("# Summary", "Summary"),
+    ("## 講者骨架", "講者骨架"),
     ("# Note (layer 1-3)", "Note (layer 1-3)"),
     ("### References", "References"),
     ("## 題目", "題目"),
@@ -42,11 +43,26 @@ MANDATORY_SECTIONS: Tuple[Tuple[str, str], ...] = (
 #: appears in the transcript, and is not marked as a quotation, is R5.
 TRANSCRIPT_RUN_CHARS = 40
 
+#: How many questions the 題目 section must carry (rule R9), and how many the
+#: skeleton drafts at most. Recall is answering, not rereading, so a note whose
+#: question section is empty has skipped the only step that makes it stick.
+MIN_QUESTIONS = 3
+MAX_QUESTIONS = 5
+
+#: The one question that cannot be answered by scanning the note. R9 looks for
+#: this literal marker, and the skeleton always drafts one.
+INFERENCE_MARK = "[推論]"
+
+#: Answers live behind a collapsed callout, so the reader answers before seeing.
+ANSWER_CALLOUT = "> [!answer]-"
+
 #: How much of the offending run a finding quotes back.
 FINDING_EXCERPT_CHARS = 20
 
 #: Rule identifiers, so a typo in a finding fails a test rather than a reader.
-RULES: Tuple[str, ...] = ("R1", "R2", "R3", "R4", "R5", "R6", "R7")
+RULES: Tuple[str, ...] = (
+    "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9",
+)
 
 _HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$")
 
@@ -163,11 +179,15 @@ def expand_prompt(
 
 
 __all__ = [
+    "ANSWER_CALLOUT",
     "FINDING_EXCERPT_CHARS",
     "GUIDELINE_DOC",
     "GUIDELINE_VERSION",
+    "INFERENCE_MARK",
     "MACHINE_CHECKABLE_HEADING",
     "MANDATORY_SECTIONS",
+    "MAX_QUESTIONS",
+    "MIN_QUESTIONS",
     "MUST_FOLLOW_HEADING",
     "RULES",
     "TRANSCRIPT_RUN_CHARS",

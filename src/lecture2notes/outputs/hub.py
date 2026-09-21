@@ -31,6 +31,17 @@ from lecture2notes.outputs.plan import PlannedFile, plan_for
 
 #: Overrides file name, sitting in the course folder.
 TITLES_FILE = "_titles.json"
+#: Optional course summary, sitting beside it.
+COURSE_FILE = "_course.json"
+
+#: What the two summary rows are called on the page.
+COURSE_QUESTION_LABEL = "本系列在回答的問題"
+COURSE_START_LABEL = "最該先看的一場"
+
+#: What a series says when its talks share no through-line. Saying it is the
+#: answer; leaving the summary empty leaves the reader to find that out by
+#: opening every card.
+NO_COMMON_THREAD = "本系列各場主題獨立，無共同主線"
 DERIVED_SUFFIXES = (".frames.json", ".frames_ocr.json", ".corrections.json")
 #: Where an unnumbered lecture sorts: after every numbered one.
 UNNUMBERED_SORT_KEY = "zz"
@@ -78,6 +89,59 @@ def load_titles(folder: Path) -> Dict[str, Dict[str, str]]:
     except (json.JSONDecodeError, UnicodeDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def load_course(folder: Path) -> Dict[str, Any]:
+    """Read the optional ``_course.json`` summary.
+
+    Shape: ``{"question": "...", "start_with": "...", "no_common_thread": false}``.
+    Absent, unparseable or not an object all mean "no summary", never a failure:
+    a hub that refuses to build because a hand-written sidecar has a stray comma
+    is worse than a hub without the sidecar.
+    """
+    path = Path(folder) / COURSE_FILE
+    if not path.exists():
+        return {}
+    try:
+        data = load_json(path)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def course_lines(course: Mapping[str, Any]) -> List[tuple]:
+    """The summary rows as ``(label, text)``, in the order the page shows them.
+
+    A course of lectures with no stated question is a folder, not a course, so
+    the summary is never allowed to be silently empty: a series whose talks
+    genuinely share nothing says so, in as many words, rather than leaving the
+    reader to work it out one card at a time.
+    """
+    if not isinstance(course, Mapping):
+        return []
+    rows: List[tuple] = []
+    question = str(course.get("question") or "").strip()
+    if course.get("no_common_thread") is True:
+        rows.append((COURSE_QUESTION_LABEL, NO_COMMON_THREAD))
+    elif question:
+        rows.append((COURSE_QUESTION_LABEL, question))
+    start_with = str(course.get("start_with") or "").strip()
+    if start_with:
+        rows.append((COURSE_START_LABEL, start_with))
+    return rows
+
+
+def render_course(course: Mapping[str, Any]) -> str:
+    """The summary block that sits above the cards, or an empty string."""
+    rows = course_lines(course)
+    if not rows:
+        return ""
+    body = "".join(
+        "<div class=\"row\"><dt>%s</dt><dd>%s</dd></div>"
+        % (html.escape(label), html.escape(text))
+        for label, text in rows
+    )
+    return '<section class="course"><dl>%s</dl></section>\n' % body
 
 
 def apply_titles(stem: str, titles: Mapping[str, Any]) -> Dict[str, str]:
@@ -252,6 +316,11 @@ h1{margin:0 0 .2rem;font-size:1.5rem}
 .sr .k{color:var(--dim);font-size:.75rem}
 .sr .ts{color:var(--accent);font-size:.78rem;text-align:right}
 .count{padding:.4rem .7rem;color:var(--dim);font-size:.78rem}
+.course{margin:1.3rem 1.6rem 0;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:.9rem 1.1rem}
+.course dl{margin:0}
+.course .row{display:grid;grid-template-columns:9rem 1fr;gap:.6rem;padding:.35rem 0}
+.course dt{color:var(--dim);font-size:.82rem}
+.course dd{margin:0;font-size:.92rem;line-height:1.7}
 main{display:grid;grid-template-columns:repeat(auto-fill,minmax(21rem,1fr));gap:1rem;padding:1.3rem 1.6rem 3rem}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;text-decoration:none;color:inherit;display:flex;flex-direction:column;transition:border-color .12s}
 .card:hover{border-color:var(--accent)}
@@ -323,7 +392,10 @@ def card_hrefs(card: Mapping[str, Any]) -> List[str]:
 
 
 def render(
-    cards: Sequence[Mapping[str, Any]], index: Sequence[Mapping[str, Any]], title: str
+    cards: Sequence[Mapping[str, Any]],
+    index: Sequence[Mapping[str, Any]],
+    title: str,
+    course: Optional[Mapping[str, Any]] = None,
 ) -> str:
     """The whole hub page as one string. Pure."""
     total_minutes = sum(int(card.get("minutes") or 0) for card in cards)
@@ -370,7 +442,8 @@ def render(
         '    <div id="results"></div>\n'
         "  </div>\n"
         "</header>\n"
-        "<main>" + "".join(card_html) + "</main>\n"
+        + render_course(course or {})
+        + "<main>" + "".join(card_html) + "</main>\n"
         "<footer>" + html.escape(FOOTER_NOTE) + "</footer>\n"
         + _json_block("hub-index", list(index)) + "\n"
         "<script>" + JS + "</script></body></html>\n"
@@ -397,7 +470,7 @@ def build(
     cards = collect(folder, require_viewer=False)
     index = build_index(cards)
     destination = Path(out) if out else hub_path(folder)
-    page = render(cards, index, title or folder.name)
+    page = render(cards, index, title or folder.name, load_course(folder))
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(page, encoding="utf-8", newline="\n")
     hrefs: List[str] = []
@@ -414,9 +487,13 @@ def build(
 
 __all__ = [
     "CSS",
+    "COURSE_FILE",
+    "COURSE_QUESTION_LABEL",
+    "COURSE_START_LABEL",
     "DERIVED_SUFFIXES",
     "HUB_FILENAME",
     "JS",
+    "NO_COMMON_THREAD",
     "TITLES_FILE",
     "UNNUMBERED_SORT_KEY",
     "apply_titles",
@@ -428,10 +505,13 @@ __all__ = [
     "collect",
     "hub_path",
     "is_lecture_json",
+    "course_lines",
+    "load_course",
     "load_json",
     "load_titles",
     "missing_links",
     "parse_name",
     "preflight",
     "render",
+    "render_course",
 ]

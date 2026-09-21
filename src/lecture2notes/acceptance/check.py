@@ -745,7 +745,7 @@ def check_json(path: Path, require_frames: bool = True) -> StageReport:
 # ==========================================================================
 # stage acceptance: check note
 # ==========================================================================
-# R1 to R8 of the note-writing guideline. Everything here is decided from the
+# R1 to R9 of the note-writing guideline. Everything here is decided from the
 # note's text, the document it came from and the transcript beside it; nothing
 # judges whether the writing is any good, because that is what the other half of
 # the guideline -- the half a person has to follow -- is for.
@@ -773,6 +773,9 @@ CORRECTION_HEADER = ("heard", "correct")
 
 #: What R5 compares against when the profile does not promote it.
 R5_DEFAULT_SEVERITY = "warn"
+
+#: A numbered question line inside the 題目 section. R9 counts these.
+QUESTION_LINE = re.compile(r"^\s*\d+[.)、]\s*\S")
 
 
 def _heading_depth(line: str) -> int:
@@ -939,7 +942,7 @@ def check_note_stage(
     style: Optional[str] = None,
     profile: Optional[str] = None,
 ) -> StageReport:
-    """`l2n check note`: rules R1 to R8 of the note-writing guideline."""
+    """`l2n check note`: rules R1 to R9 of the note-writing guideline."""
     json_path = Path(json_path)
     note_path = Path(note_path)
     report = StageReport("note", note_path.name)
@@ -978,6 +981,7 @@ def check_note_stage(
     _rule_faithful_quotes(lines, regions, effective_style, note_path, report)
     _rule_privacy(lines, effective_profile, note_path, report)
     _rule_placeholder(lines, regions, note_path, report)
+    _rule_questions(lines, note_path, report)
     return report
 
 
@@ -1153,6 +1157,31 @@ def _rule_placeholder(
                 break
 
 
+def _rule_questions(
+    lines: Sequence[str], note: Path, report: StageReport
+) -> None:
+    """R9: the question section is neither short nor purely definitional.
+
+    A warning rather than an error, because the count is a proxy: three
+    questions with one inference question among them is the smallest shape that
+    still forces retrieval instead of rereading. A missing section is R1's
+    business, so this rule stays silent about it.
+    """
+    start = heading_index(lines, "## 題目")
+    if start < 0:
+        return
+    body = lines[start + 1:section_bounds(lines, start)]
+    count = sum(1 for line in body if QUESTION_LINE.match(line))
+    if count < guideline.MIN_QUESTIONS:
+        report.add("warn", "R9", note.name,
+                   "the question section carries %d questions; at least %d are "
+                   "needed" % (count, guideline.MIN_QUESTIONS))
+    if not any(guideline.INFERENCE_MARK in line for line in body):
+        report.add("warn", "R9", note.name,
+                   "no question is marked %s; a definition question is answered "
+                   "by rereading" % guideline.INFERENCE_MARK)
+
+
 # ==========================================================================
 # stage acceptance: check --all
 # ==========================================================================
@@ -1238,6 +1267,7 @@ __all__ = [
     "CORRECTION_HEADER",
     "NOTE_EMBED",
     "PLACEHOLDER_TEXT",
+    "QUESTION_LINE",
     "QUOTED_SPAN",
     "check_note_stage",
     "correction_rows",

@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from lecture2notes.notes import guideline
 from lecture2notes.profiles import loader
 from lecture2notes.schema.model import segment_end, segment_start
 
@@ -128,6 +129,22 @@ AI_DRAFT_MARK = "<!-- ai-draft -->"
 
 #: How many candidates the model drafts under "我應該記住的 3 件事".
 REMEMBER_COUNT = 3
+
+#: The skeleton's first body line. A list an agent filled in reads exactly like
+#: one a person wrote, and a reader three months later cannot tell them apart,
+#: so the file says which it is before anything else on the page.
+DRAFT_DECLARATION = "> 本筆記為模型產出的初稿，未經本人確認。"
+
+#: The reader's two slots in Summary. They carry a sentence opening rather than
+#: a question: an empty box gets skipped, a half-written sentence gets finished.
+SUMMARY_SLOTS = ("開這篇之前我卡在___", "這篇沒回答到的是___")
+
+#: What the slots say about the option nobody remembers they have.
+SUMMARY_SLOT_NOTE = "（兩格都填不出來就選「丟棄」。模型不要代填，也不要刪。）"
+
+#: The model's three candidates live behind this, collapsed. A list that arrives
+#: already full invites agreement; one that arrives folded has to be opened.
+CANDIDATE_CALLOUT = "> [!note]- 模型候選（未經本人確認）"
 
 #: The learning-verification checklist. Fixed text, so two renders agree.
 VERIFICATION_ITEMS = (
@@ -379,20 +396,202 @@ def render_references(data: Mapping[str, Any]) -> List[str]:
     return lines
 
 
-def render_questions(segments: Sequence[Any]) -> List[str]:
-    """One placeholder question per segment, for the expansion to rewrite."""
-    lines: List[str] = []
-    for position, segment in enumerate(segments, 1):
-        if not isinstance(segment, Mapping):
-            continue
-        title = text_of(segment.get("title"))
-        lines.append(
-            "%d. 關於「%s」，講者的理由是什麼？結論在什麼情況下不成立？"
-            % (position, title)
+#: What an unanswered draft question carries until the expansion fills it in.
+ANSWER_PLACEHOLDER = "（擴寫時填入答案，並標出對應時間碼）"
+
+#: Indent that keeps a callout inside its numbered list item.
+ANSWER_INDENT = "   "
+
+#: Used when the document has too few segments to pair two of them.
+QUESTION_FILLER = "（素材不足，擴寫時自行補一題問理由或邊界的題目）"
+
+#: The line that says what this section is for, so nobody treats it as decoration.
+QUESTION_NOTE = "回看是答題，不是重讀：先自己答完，再展開下面的答案。"
+
+
+def segment_titles(data: Mapping[str, Any]) -> List[str]:
+    """Every segment title that is a non-empty string, in document order."""
+    segments = data.get("segments") if isinstance(data.get("segments"), list) else []
+    titles: List[str] = []
+    for segment in segments:
+        if isinstance(segment, Mapping) and text_of(segment.get("title")):
+            titles.append(text_of(segment.get("title")))
+    return titles
+
+
+def _inference_draft(titles: Sequence[str]) -> str:
+    """The one question that cannot be answered by scanning the note.
+
+    Its shape is "if a case has A but not B, does the conclusion still hold" --
+    a question about the boundary of the claim, not about what a term means. A
+    definition question is answerable by rereading, which is exactly the habit
+    this section exists to break.
+    """
+    if len(titles) >= 2:
+        return "%s 若某個案例具備「%s」但缺少「%s」，這篇的結論還成立嗎？" % (
+            guideline.INFERENCE_MARK, titles[0], titles[-1]
         )
-    if not lines:
-        lines.append("1. （尚無段落，擴寫時請補上題目）")
+    if titles:
+        return "%s 若把「%s」的前提拿掉一個，這篇的結論還成立嗎？" % (
+            guideline.INFERENCE_MARK, titles[0]
+        )
+    return "%s 若把本講座的前提拿掉一個，結論還成立嗎？" % guideline.INFERENCE_MARK
+
+
+def explicit_questions(data: Mapping[str, Any]) -> List[str]:
+    """The questions the segmentation step already wrote, if it wrote any.
+
+    ``questions_zh`` is optional, so this is allowed to come back empty and the
+    skeleton falls back to drafting its own from the segment titles.
+    """
+    raw = data.get("questions_zh")
+    if not isinstance(raw, list):
+        return []
+    out: List[str] = []
+    for item in raw:
+        if isinstance(item, Mapping) and text_of(item.get("text")).strip():
+            out.append(text_of(item["text"]).strip())
+    return out
+
+
+def question_drafts(data: Mapping[str, Any]) -> List[str]:
+    """Three to five draft questions, the last one inferential.
+
+    The section is never allowed to be empty, because answering is what makes a
+    lecture stick and rereading is not: retrieval practice is the high-utility
+    study technique and rereading is the low-utility one (Karpicke & Blunt 2011;
+    Dunlosky 2013). Questions are drafted across segments rather than one per
+    segment, so answering one cannot be done by looking at a single section.
+
+    ``questions_zh`` wins when the segmentation step already wrote a usable set;
+    a set that is short or has no inference question is kept and topped up
+    rather than discarded.
+    """
+    titles = segment_titles(data)
+    written = explicit_questions(data)[:guideline.MAX_QUESTIONS]
+    if len(written) >= guideline.MIN_QUESTIONS and any(
+        guideline.INFERENCE_MARK in question for question in written
+    ):
+        return written
+    drafts: List[str] = written[:guideline.MAX_QUESTIONS - 1]
+    for position, title in enumerate(titles[:guideline.MAX_QUESTIONS - 1]):
+        if len(drafts) >= guideline.MAX_QUESTIONS - 1:
+            break
+        other = titles[(position + 1) % len(titles)]
+        if other == title:
+            drafts.append("不看筆記說出「%s」這一段的推理鏈，講者的理由是什麼？" % title)
+        elif position % 2 == 0:
+            drafts.append(
+                "不看筆記說出「%s」與「%s」的關聯，講者為什麼把兩者放在一起？"
+                % (title, other)
+            )
+        else:
+            drafts.append(
+                "不看筆記說出「%s」的結論，在「%s」的情境下會怎麼變？講者的理由是什麼？"
+                % (title, other)
+            )
+    while len(drafts) < guideline.MIN_QUESTIONS - 1:
+        drafts.append(QUESTION_FILLER)
+    drafts.append(_inference_draft(titles))
+    return drafts
+
+
+def render_questions(data: Mapping[str, Any]) -> List[str]:
+    """The 題目 section: drafted questions, each with a collapsed answer."""
+    lines: List[str] = [QUESTION_NOTE, "", AI_DRAFT_MARK, ""]
+    for number, question in enumerate(question_drafts(data), 1):
+        if number > 1:
+            lines.append("")
+        lines.append("%d. %s" % (number, question))
+        lines.append("%s%s 答案" % (ANSWER_INDENT, guideline.ANSWER_CALLOUT))
+        lines.append("%s> %s" % (ANSWER_INDENT, ANSWER_PLACEHOLDER))
     return lines
+
+
+#: Columns of one speaker-outline row, separated so a reader scans down one.
+OUTLINE_SEPARATOR = " ｜ "
+
+#: What the section is for. "Did", not "said": "opens with a misdiagnosis case,
+#: 6% of the running time" transfers to the next lecture; "covered disc grading"
+#: is only the table of contents again.
+OUTLINE_NOTE = "每段一行，動詞開頭，只寫講者做了什麼，不寫他講了什麼。"
+
+#: Said once above the rows, because it is a reading instruction, not data. The
+#: ramp is the opening 5 to 8%, where the speaker says why this is worth doing
+#: and where everyone before got stuck; it is the raw material for Evergreen.
+OUTLINE_RAMP_NOTE = (
+    "開頭 5 至 8% 是坡道（為什麼值得講、前人卡在哪），Evergreen 的原料在那裡；"
+    "首段與末段呼應不起來，多半是坡道被併進了第 2 段，回頭檢查分段。"
+)
+
+#: Each row's third column until the expansion rewrites it.
+OUTLINE_DRAFT = "（改寫成動詞開頭一句：講者在「%s」這一段做了什麼）"
+
+
+def _span_seconds(segment: Mapping[str, Any]) -> float:
+    """One segment's running time, or 0.0 when the times are unusable."""
+    try:
+        return max(segment_end(segment) - segment_start(segment), 0.0)
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+
+
+def segment_shares(segments: Sequence[Any]) -> List[int]:
+    """Each segment's share of the running time, as whole percents summing to 100.
+
+    Largest remainder rather than independent rounding: a column that adds up to
+    99 sends the reader to check the arithmetic instead of reading the outline.
+    """
+    spans = [_span_seconds(segment) for segment in segments]
+    if not spans:
+        return []
+    total = sum(spans)
+    if total <= 0:
+        base = 100 // len(spans)
+        shares = [base] * len(spans)
+        shares[0] += 100 - base * len(spans)
+        return shares
+    exact = [span * 100.0 / total for span in spans]
+    shares = [int(value) for value in exact]
+    order = sorted(
+        range(len(exact)), key=lambda index: (int(exact[index]) - exact[index], index)
+    )
+    for position in order[:100 - sum(shares)]:
+        shares[position] += 1
+    return shares
+
+
+def render_speaker_outline(data: Mapping[str, Any]) -> List[str]:
+    """The reverse outline: one row per segment, projected from the times.
+
+    Mechanical on purpose. The timecodes and the shares come from the document,
+    so the only thing the expansion supplies is the verb, and the only thing it
+    can get wrong is the verb.
+    """
+    segments = [
+        segment for segment in (data.get("segments") or [])
+        if isinstance(segment, Mapping)
+    ]
+    lines = [OUTLINE_NOTE, "", OUTLINE_RAMP_NOTE, "", AI_DRAFT_MARK, ""]
+    if not segments:
+        lines.append("（尚無段落）")
+        return lines
+    for segment, share in zip(segments, segment_shares(segments)):
+        try:
+            span = "%s - %s" % (
+                clock(segment_start(segment)), clock(segment_end(segment))
+            )
+        except (KeyError, TypeError, ValueError):
+            span = "-"
+        lines.append(OUTLINE_SEPARATOR.join([
+            span, "%d%%" % share, OUTLINE_DRAFT % text_of(segment.get("title")),
+        ]))
+    return lines
+
+
+def render_summary_slots() -> str:
+    """The reader's two slots, each an unfinished sentence rather than a box."""
+    return "\n\n".join([*SUMMARY_SLOTS, SUMMARY_SLOT_NOTE])
 
 
 def render_verification(takeaways: Sequence[str]) -> List[str]:
@@ -403,11 +602,11 @@ def render_verification(takeaways: Sequence[str]) -> List[str]:
     is to keep, delete or rewrite them. A note whose marker is still in place is
     one that nobody has read, and that is worth being able to count.
     """
-    lines = ["### 我應該記住的 3 件事", "", AI_DRAFT_MARK, ""]
+    lines = ["### 我應該記住的 3 件事", "", AI_DRAFT_MARK, "", CANDIDATE_CALLOUT]
     drafts = list(takeaways[:REMEMBER_COUNT])
     while len(drafts) < REMEMBER_COUNT:
         drafts.append("（素材不足，讀者自行補上或刪除本行）")
-    lines.extend("%d. %s" % (number, text) for number, text in enumerate(drafts, 1))
+    lines.extend("> %d. %s" % (number, text) for number, text in enumerate(drafts, 1))
     lines.extend([
         "",
         "保留／刪除／改寫上面三條是讀者的工作；一個字都沒改，這份筆記就等於沒有人碰過。",
@@ -458,11 +657,14 @@ def render_skeleton(
 
     context = {
         "frontmatter": render_frontmatter(data, frontmatter, stem, profile),
+        "declaration": DRAFT_DECLARATION,
+        "summary_slots": render_summary_slots(),
+        "speaker_outline": "\n".join(render_speaker_outline(data)),
         "evergreen": evergreen,
         "summary": summary,
         "segments": "\n".join(section_lines) or "（尚無段落）",
         "references": "\n".join(render_references(data)),
-        "questions": "\n".join(render_questions(segments)),
+        "questions": "\n".join(render_questions(data)),
         "verification": "\n".join(render_verification(takeaways)),
         "title": text_of(data.get("title")),
     }
@@ -482,8 +684,20 @@ def write_skeleton(path: Path, data: Mapping[str, Any], **kwargs: Any) -> Path:
 
 __all__ = [
     "AI_DRAFT_MARK",
+    "CANDIDATE_CALLOUT",
+    "DRAFT_DECLARATION",
+    "SUMMARY_SLOTS",
+    "SUMMARY_SLOT_NOTE",
+    "ANSWER_INDENT",
+    "ANSWER_PLACEHOLDER",
     "CORRECTION_COLUMNS",
     "PLACEHOLDER",
+    "OUTLINE_DRAFT",
+    "OUTLINE_NOTE",
+    "OUTLINE_RAMP_NOTE",
+    "OUTLINE_SEPARATOR",
+    "QUESTION_FILLER",
+    "QUESTION_NOTE",
     "REMEMBER_COUNT",
     "STYLES",
     "UNVERIFIED_MARK",
@@ -491,10 +705,12 @@ __all__ = [
     "bullet_items",
     "bullet_texts",
     "clock",
+    "explicit_questions",
     "fill",
     "frontmatter_block",
     "frontmatter_context",
     "frontmatter_keys",
+    "question_drafts",
     "quote_items",
     "render_frontmatter",
     "render_note",
@@ -502,7 +718,11 @@ __all__ = [
     "render_references",
     "render_segment",
     "render_skeleton",
+    "render_speaker_outline",
+    "render_summary_slots",
     "render_verification",
+    "segment_shares",
+    "segment_titles",
     "strings_of",
     "text_of",
     "write_note",
