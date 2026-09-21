@@ -353,3 +353,32 @@ def test_render_reports_the_document_profile_when_nothing_overrides_it(
     assert main(["render", str(path)]) == exit_codes.OK
 
     assert "profile generic" in capsys.readouterr().out
+
+
+def test_render_uses_the_template_of_the_profile_named_on_the_command_line(
+    tmp_path, document, capsys, monkeypatch
+):
+    """The flag has to change the note, not only the line about the note.
+
+    radiology ships a note template with 閱片 reading callouts that generic does
+    not have. Rendering the same `profile: generic` document twice, once with
+    the flag, is the only assertion that distinguishes "the resolver was
+    consulted" from "the message was patched".
+    """
+    from lecture2notes import exit_codes
+    from lecture2notes.cli.main import main
+
+    document["profile"] = "generic"
+    path = _render_document(tmp_path, document, monkeypatch)
+    note = path.with_name(path.stem + ".v4.md")
+
+    assert main(["render", str(path)]) == exit_codes.OK
+    plain = note.read_text(encoding="utf-8")
+    assert main(["render", str(path), "--profile", "radiology", "--force"]) == exit_codes.OK
+    radiology = note.read_text(encoding="utf-8")
+
+    assert "[!reading-case]" not in plain
+    assert "[!reading-case]" in radiology, (
+        "--profile radiology did not reach the template that defines the note"
+    )
+    assert "profile radiology" in capsys.readouterr().out
