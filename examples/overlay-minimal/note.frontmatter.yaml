@@ -1,0 +1,28 @@
+# Frontmatter template -- your fields, not the package's.
+#
+# This file replaces the lower layer whole: what you write here is the entire
+# frontmatter block, so the four generic fields only survive because they are
+# restated below.
+#
+# Flat `key: value` lines only. `{{placeholder}}` is substituted from the
+# document; an unknown placeholder renders as the empty string, so a template is
+# never a crash.
+#
+# Available placeholders: title, date, stem, profile, source_video,
+# source_subtitle, source_origin, source_engine, source_lang, duration_min,
+# segment_count, tags.
+---
+title: "{{title}}"
+date: {{date}}
+source: "{{source_video}}"
+tags: [{{tags}}]
+# A field with a fixed starting value rather than a placeholder: the note is
+# born at level 1 and you raise it by hand as you actually digest it.
+# 0 = 只有骨架，還沒讀過
+# 1 = 讀過一次，看得懂
+# 2 = 不看筆記能自己重講一遍
+# 3 = 教過別人，而且答得出對方的追問
+消化層級: 1
+時長分鐘: {{duration_min}}
+轉錄引擎: "{{source_engine}}"
+---

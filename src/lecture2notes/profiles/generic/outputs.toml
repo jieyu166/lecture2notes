@@ -7,6 +7,15 @@
 # answer rather than leaving it to the absent-key default.
 pbf = false
 
+# Course home page and cross-lecture search index. On here: a hub only ever
+# writes inside the course folder the user pointed the command at, and a folder
+# of notes with no index is the thing this product exists to stop happening.
+hub = true
+
+# Three-pane time-synced player page. On for the same reason as the hub: it is
+# written beside the lecture it describes and replaces nothing the user wrote.
+viewer = true
+
 [note]
 # faithful keeps every quote; concise keeps at most one per section.
 style = "concise"

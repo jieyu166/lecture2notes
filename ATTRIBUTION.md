@@ -126,6 +126,7 @@ Relation values:
 | `outputs/publish.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/publish_transaction.py`. Upstream's `finalize_to_vault.py` is a plain copy-with-refresh-check; this module is a full transactional publish system (manifest, atomic replace-with-rollback, recovery) with no shared design. |
 | `outputs/viewer.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/lecture-to-notes/scripts/build_lecture_viewer.py`. Benchmarked in its own upstream (rad-workflow) docstring against a different in-workspace tool, not against `drpwchen/lecture-to-notes`'s `export_web.py` / `build_single_talk_web.py`; no shared function names with either. |
 | `profiles/__init__.py` | original | — | Package marker; ships the `generic`/`radiology` corrections-table profiles (written from scratch for this project; not derived from any third-party correction table). |
+| `profiles/layers.py` | original | — | This package's own five-layer configuration resolver (cli / project / user / profile / builtin), its merge rules and its overlay parse errors; no prior script. |
 | `profiles/loader.py` | original | — | This package's own reader for the built-in profile's template and settings files; no prior script. |
 | `schema/__init__.py` | original | — | Package marker. |
 | `schema/builder.py` | original | — | Session-written lecture-document builder (`mkseg3.py` in `rad-workflow`, never itself a port of an upstream file). No upstream analog. |
@@ -134,7 +135,7 @@ Relation values:
 | `schema/migrate.py` | original | — | `l2n migrate`: upgrades a 1.x lecture document to canonical schema v2. No upstream analog. |
 | `schema/model.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/lecture_model.py`. No upstream canonical-schema module or time-signature validator exists in `drpwchen/lecture-to-notes`. |
 
-Counts: 7 inspired, 15 ported-from-rad-workflow, 32 original — 54 modules total.
+Counts: 7 inspired, 15 ported-from-rad-workflow, 33 original — 55 modules total.
 
 ## ASR default parameters
 

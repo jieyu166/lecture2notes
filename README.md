@@ -184,17 +184,48 @@ DashScope 的 `qwen3-asr-flash` 是**雲端付費 API**，與上述開源權重�
 CLI 參數 > 專案內 .lecture2notes/ > 家目錄 ~/.lecture2notes/ > profiles/<name>/ > 套件內建
 ```
 
-可覆寫的檔名固定五個，某一層沒有那個檔就跳過該層：
+可覆寫的檔名固定五個，某一層沒有那個檔就跳過該層（不會把值重設回預設）：
 
 | 檔名 | 管什麼 | 疊加方式 |
 |---|---|---|
 | `note.frontmatter.yaml` | 筆記 frontmatter 的欄位與順序 | 整檔覆寫 |
 | `note.template.md` | 骨架筆記的章節模板 | 整檔覆寫 |
-| `corrections.json` | ASR 錯字對照表 | 合併，高層蓋掉同一筆 `heard` |
-| `outputs.toml` | pbf／hub／viewer 開關與 `note.style` 預設 | 整檔覆寫 |
-| `privacy.toml` | 個資比對樣式 | 整檔覆寫 |
+| `corrections.json` | ASR 錯字對照表 | 逐鍵合併，高層勝 |
+| `outputs.toml` | pbf／hub／viewer 開關與 `note.style` 預設 | 逐鍵合併，高層勝 |
+| `privacy.toml` | 個資比對樣式 | 逐鍵合併，高層勝 |
 
-最小範例——把筆記預設風格改成 `faithful` 並打開 PotPlayer 章節檔輸出：
+內建 profile 有兩個：`generic`（預設）與 `radiology`（閱片 callout 模板、放射術語表、
+病患識別模式，不預設啟用；用 `--profile radiology`，或在 overlay 的 `outputs.toml` 寫
+`profile = "radiology"` 才會生效）。
+
+把自己的設定變成 overlay，最快的方式是複製範例到家目錄：
+
+```bash
+# macOS / Linux
+mkdir -p ~/.lecture2notes
+cp examples/overlay-minimal/*.yaml examples/overlay-minimal/*.md \
+   examples/overlay-minimal/*.json examples/overlay-minimal/*.toml ~/.lecture2notes/
+```
+
+```powershell
+# Windows PowerShell
+New-Item -ItemType Directory -Force $HOME\.lecture2notes | Out-Null
+Copy-Item examples\overlay-minimal\note.frontmatter.yaml, examples\overlay-minimal\note.template.md, examples\overlay-minimal\outputs.toml, examples\overlay-minimal\privacy.toml, examples\overlay-minimal\corrections.json $HOME\.lecture2notes\
+```
+
+`examples/overlay-minimal/` 是五個檔案各一份的合法佔位範例（含 `消化層級` 這種自訂
+frontmatter 欄位，註解說明 0–3 各代表什麼）。複製完後跑：
+
+```bash
+l2n profile show          # 每個生效的鍵，值與來源層
+l2n profile show --json   # 同樣內容，每鍵含 value 與 source
+```
+
+範例裡定義的每一個鍵，來源層都會顯示 `user`。只想套用在某一門課，就把同樣的檔案放進課程
+資料夾的 `./.lecture2notes/`，那一層比家目錄更高。
+
+也可以不複製範例、自己手寫最小 overlay——例如把筆記預設風格改成 `faithful` 並打開
+PotPlayer 章節檔輸出：
 
 ```bash
 mkdir .lecture2notes
@@ -218,7 +249,8 @@ enabled = true
 ]
 ```
 
-改完一定要確認有生效——檔名拼錯不會報錯，只會安靜地不作用：
+設定檔壞掉時不會默默用預設值：會印出檔案路徑與 `line N`、以 exit code 2 結束，而且那個
+檔案一個鍵都不套用。改完一定要確認有生效——檔名拼錯不會報錯，只會安靜地不作用：
 
 ```bash
 l2n profile show

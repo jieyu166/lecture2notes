@@ -1,0 +1,35 @@
+# Patterns a rendered note must not contain (rule R7 of the writing guideline).
+#
+# Python regular expressions, written as TOML literal strings so a backslash
+# means a backslash.
+#
+# This list restates the generic profile's patterns rather than adding to them.
+# That is not duplication by accident: `patterns` is one key, and the layers
+# merge key by key, so a profile that listed only its own additions would
+# *replace* the generic list and quietly switch off the e-mail and phone
+# patterns. Restating is the only way to end up with both.
+#
+# The three radiology-specific patterns are the identifiers that reach a
+# radiology note by accident -- a chart number read aloud off a worklist, a
+# national ID on a requisition, a patient's name typed into a case heading.
+# They are deliberately broader than the generic ones: this profile is used on
+# recordings of clinical teaching, where a false positive costs one edit and a
+# false negative publishes an identifier.
+
+patterns = [
+  # Taiwan national identification number: a letter, 1 or 2, then eight digits.
+  '\b[A-Za-z][12]\d{8}\b',
+  # A medical record or chart number written out with its label.
+  '(病歷號|病歷號碼|[Cc]hart [Nn]o\.?|[Cc]hart number)\s*[:：]?\s*\w{6,}',
+  # A bare eight-digit chart number, the local format, with no label at all.
+  # Broad on purpose: it also matches a bare yyyymmdd date, so a note that
+  # needs to state a date writes it as 2026-09-21 rather than 20260921.
+  '(?<!\d)\d{8}(?!\d)',
+  # A patient named after the word for patient.
+  '病患\s*[:：]\s*\S+',
+  '病人\s*[:：]\s*\S+',
+  # A phone number written out with its label.
+  '(電話|手機|聯絡電話)\s*[:：]?\s*[\d\-() ]{8,}',
+  # An e-mail address.
+  '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}',
+]

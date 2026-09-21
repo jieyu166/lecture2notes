@@ -1,0 +1,57 @@
+{
+  "_about": "ASR correction table for the radiology profile. Radiology terminology only: every pair is a word a radiology lecture actually uses, and the wrong form on the left is one the local engines produce for it. Deliberately excluded: anything naming a person, a hospital or a department workflow, and anything from a private vault's own general-vocabulary table. Longer keys win, so a specific phrase is replaced before a shorter key can eat part of it.",
+  "_sections": {
+    "radiology": "Applied automatically. Only put a pair here when the wrong form is never a legitimate word in a radiology lecture.",
+    "context_sensitive": "Never applied automatically. Listed so a human or an LLM can judge each occurrence."
+  },
+  "_sources": {
+    "radiology": "lecture2notes-radiology",
+    "context_sensitive": "lecture2notes-radiology"
+  },
+  "radiology": {
+    "Lunnerate": "Lung-RADS",
+    "Lung rats": "Lung-RADS",
+    "Lung Reds": "Lung-RADS",
+    "Lun-RED": "Lung-RADS",
+    "by rads": "BI-RADS",
+    "Bydirads": "BI-RADS",
+    "Buy rads": "BI-RADS",
+    "Birates": "BI-RADS",
+    "Barates": "BI-RADS",
+    "Barreds": "BI-RADS",
+    "Tyrads": "TI-RADS",
+    "Infisima": "emphysema",
+    "Evicea": "emphysema",
+    "Banketaxis": "bronchiectasis",
+    "Arteryal Calculification": "Arterial Calcification",
+    "high dro nephrosis": "hydronephrosis",
+    "hydro nephrosis": "hydronephrosis",
+    "force negative": "false negative",
+    "archidule distortion": "architectural distortion",
+    "archited distortion": "architectural distortion",
+    "architectic distortion": "architectural distortion",
+    "Spegulation": "spiculation",
+    "specule": "spicule",
+    "tomal synthesis": "tomosynthesis",
+    "homosynthesis": "tomosynthesis",
+    "subultimate technique": "suboptimal technique",
+    "chorus heterogeneous": "coarse heterogeneous",
+    "mucent concinoma": "mucinous carcinoma",
+    "ACRIN-66666": "ACRIN6666",
+    "acrine66666": "ACRIN6666",
+    "Modify-S": "Modifier S",
+    "空中馬來西亞": "chondromalacia",
+    "方測科": "放射科",
+    "放測科": "放射科",
+    "電腦段層": "電腦斷層",
+    "和振造影": "核磁造影",
+    "篩劑": "顯影劑",
+    "現影劑": "顯影劑",
+    "概畫": "鈣化",
+    "蓋畫": "鈣化"
+  },
+  "context_sensitive": {
+    "結節": "腫塊",
+    "浸潤": "實質化"
+  }
+}
