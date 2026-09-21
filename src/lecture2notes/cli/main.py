@@ -13,10 +13,14 @@ Exit codes (see ``lecture2notes.exit_codes``):
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
 from lecture2notes import __version__, _deps, _out, exit_codes
+from lecture2notes.acceptance.check import check_json
+from lecture2notes.schema.migrate import migrate_file
 
 LANG_CHOICES = ("zh", "en", "ja", "auto")
 LANG_REQUIRED_MESSAGE = "--lang is required (zh|en|ja|auto)"
@@ -145,13 +149,52 @@ def cmd_hub(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+CHECK_STAGES = ("transcribe", "frames", "json", "note")
+
+
+def _existing_path(value: Optional[str], what: str) -> Optional[Path]:
+    """Resolve a required path argument, reporting the usage error itself."""
+    if not value:
+        _out.error("%s：缺少路徑參數" % what)
+        return None
+    path = Path(value)
+    if not path.exists():
+        _out.error("%s：找不到檔案 %s" % (what, path))
+        return None
+    return path
+
+
 def cmd_check(args: argparse.Namespace) -> int:
-    not_implemented("check")
-    return exit_codes.OK
+    stage = args.what
+    if stage not in CHECK_STAGES:
+        _out.error("check 需要階段名稱：%s" % " / ".join(CHECK_STAGES))
+        return exit_codes.ERROR
+    if stage != "json":
+        # The other three stages belong to the groups that own their outputs.
+        not_implemented("check %s" % stage)
+        return exit_codes.OK
+
+    path = _existing_path(args.target, "check json")
+    if path is None:
+        return exit_codes.ERROR
+    report = check_json(path)
+    report.emit()
+    return report.exit_code()
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
-    not_implemented("migrate")
+    path = _existing_path(args.json_file, "migrate")
+    if path is None:
+        return exit_codes.ERROR
+    try:
+        result = migrate_file(path)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        _out.error("migrate：JSON 無法解析 %s（%s）" % (path.name, exc))
+        return exit_codes.ERROR
+    if result.changed:
+        _out.ok(result.summary)
+    else:
+        _out.skip(result.summary)
     return exit_codes.OK
 
 

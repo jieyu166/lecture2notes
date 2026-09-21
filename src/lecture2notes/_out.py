@@ -84,6 +84,17 @@ def stage(name: str, msg: str) -> None:
     _write(_message_stream(), "[%s] %s" % (name, msg))
 
 
+def line(msg: str) -> None:
+    """Print one raw line, with no level marker.
+
+    Used by the acceptance checks, whose output format is part of the contract
+    (``<severity> <rule-or-field> <location>: <message>``) and therefore must
+    not be prefixed. Still goes through the encoding-safe writer, and still
+    moves to stderr under ``--json-progress``.
+    """
+    _write(_message_stream(), msg)
+
+
 def error(msg: str) -> None:
     say("error", msg)
 
@@ -193,6 +204,7 @@ __all__ = [
     "error",
     "is_json_progress",
     "is_quiet",
+    "line",
     "ok",
     "reset",
     "say",

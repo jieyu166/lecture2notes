@@ -1,0 +1,154 @@
+{
+  "schema_version": "2.0",
+  "stem": "sample-talk",
+  "title": "佔位講座標題",
+  "duration_sec": 180,
+  "source": {
+    "video": "sample-talk.mp4",
+    "subtitle": {
+      "path": "sample-talk.srt",
+      "origin": "asr",
+      "engine": "breeze_ct2",
+      "lang": "zh",
+      "offset_model": null
+    }
+  },
+  "profile": "generic",
+  "overall_summary_zh": "這是一份僅供測試使用的佔位摘要，內容全為虛構，與任何真實講座或課程無關。這是一份僅供測試使用的佔位摘要，內容全為虛構，與任何真實講座或課程無關。這是一份僅供測試使用的佔位摘要，內容全為虛構，與任何真實講座或課程無關。",
+  "takeaways_zh": [
+    "佔位重點第 1 條，僅供結構測試",
+    "佔位重點第 2 條，僅供結構測試",
+    "佔位重點第 3 條，僅供結構測試",
+    "佔位重點第 4 條，僅供結構測試",
+    "佔位重點第 5 條，僅供結構測試",
+    "佔位重點第 6 條，僅供結構測試",
+    "佔位重點第 7 條，僅供結構測試",
+    "佔位重點第 8 條，僅供結構測試"
+  ],
+  "segments": [
+    {
+      "index": 1,
+      "start_time": "00:00:00",
+      "end_time": "00:01:00",
+      "start_sec": 0,
+      "end_sec": 60,
+      "title": "段落 01 佔位標題",
+      "summary_zh": "佔位段落摘要 01，僅用於驗證結構。",
+      "bullets_zh": [
+        {
+          "text": "佔位條列 01-A",
+          "t": 5,
+          "kind": "synthesis"
+        },
+        {
+          "text": "佔位條列 01-B",
+          "t": null,
+          "kind": "synthesis"
+        }
+      ],
+      "quotes_zh": [
+        {
+          "text": "佔位引述 01",
+          "t": 10
+        }
+      ],
+      "frame": "frames/sample-talk-0001.png",
+      "frames": [
+        "frames/sample-talk-0001.png"
+      ],
+      "frame_ocr": [
+        {
+          "frame": "frames/sample-talk-0001.png",
+          "text": "佔位投影片文字 01"
+        }
+      ],
+      "editorial_notes_zh": []
+    },
+    {
+      "index": 2,
+      "start_time": "00:01:00",
+      "end_time": "00:02:00",
+      "start_sec": 60,
+      "end_sec": 120,
+      "title": "段落 02 佔位標題",
+      "summary_zh": "佔位段落摘要 02，僅用於驗證結構。",
+      "bullets_zh": [
+        {
+          "text": "佔位條列 02-A",
+          "t": 65,
+          "kind": "synthesis"
+        },
+        {
+          "text": "佔位條列 02-B",
+          "t": null,
+          "kind": "synthesis"
+        }
+      ],
+      "quotes_zh": [
+        {
+          "text": "佔位引述 02",
+          "t": 70
+        }
+      ],
+      "frame": "frames/sample-talk-0002.png",
+      "frames": [
+        "frames/sample-talk-0002.png"
+      ],
+      "frame_ocr": [
+        {
+          "frame": "frames/sample-talk-0002.png",
+          "text": "佔位投影片文字 02"
+        }
+      ],
+      "editorial_notes_zh": []
+    },
+    {
+      "index": 3,
+      "start_time": "00:02:00",
+      "end_time": "00:03:00",
+      "start_sec": 120,
+      "end_sec": 180,
+      "title": "段落 03 佔位標題",
+      "summary_zh": "佔位段落摘要 03，僅用於驗證結構。",
+      "bullets_zh": [
+        {
+          "text": "佔位條列 03-A",
+          "t": 125,
+          "kind": "synthesis"
+        },
+        {
+          "text": "佔位條列 03-B",
+          "t": null,
+          "kind": "synthesis"
+        }
+      ],
+      "quotes_zh": [
+        {
+          "text": "佔位引述 03",
+          "t": 130
+        }
+      ],
+      "frame": "frames/sample-talk-0003.png",
+      "frames": [
+        "frames/sample-talk-0003.png"
+      ],
+      "frame_ocr": [
+        {
+          "frame": "frames/sample-talk-0003.png",
+          "text": "佔位投影片文字 03"
+        }
+      ],
+      "editorial_notes_zh": []
+    }
+  ],
+  "corrections": [
+    {
+      "heard": "佔位聽錯詞",
+      "correct": "佔位正確詞",
+      "source": "deterministic"
+    }
+  ],
+  "unverified_terms": [
+    "佔位待查術語"
+  ]
+}

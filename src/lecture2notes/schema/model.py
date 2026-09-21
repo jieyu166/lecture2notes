@@ -21,11 +21,12 @@ from __future__ import annotations
 
 import json
 import math
-import os
-import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+from lecture2notes.schema.io import read_json
+from lecture2notes.schema.io import write_json_atomic as _write_json_atomic
 
 #: How many frames a segment is expected to carry.
 MIN_FRAMES_PER_SEGMENT = 1
@@ -38,13 +39,20 @@ DEFAULT_FRAME_TOLERANCE = 0.25
 
 @dataclass(frozen=True)
 class Finding:
-    """One machine-checkable problem, at a known severity and location."""
+    """One machine-checkable problem, at a known severity and location.
+
+    ``location`` is the JSON path inside the document (``segments[3].index``)
+    when there is one; the stage report falls back to the target's name when it
+    is absent, so every printed line has the three fields the acceptance
+    contract requires.
+    """
 
     severity: str
     code: str
     message: str
     segment_index: Optional[int] = None
     path: Optional[str] = None
+    location: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -53,7 +61,14 @@ class Finding:
             "message": self.message,
             "segment_index": self.segment_index,
             "path": self.path,
+            "location": self.location,
         }
+
+    def line(self, default_location: str = "-") -> str:
+        """``<severity> <rule-or-field> <location>: <message>``."""
+        return "%s %s %s: %s" % (
+            self.severity, self.code, self.location or default_location, self.message
+        )
 
 
 def _frame_time(path: str) -> Optional[float]:
@@ -388,52 +403,750 @@ def validate_lecture_schema(
 
 def load_lecture(path: Path) -> Dict[str, Any]:
     """Read and normalise a canonical document, tolerating a stray BOM on input."""
-    return normalize_lecture(json.loads(Path(path).read_text(encoding="utf-8-sig")))
+    return normalize_lecture(read_json(path))
 
 
 def write_json_atomic(path: Path, data: Mapping[str, Any]) -> Path:
-    """Write UTF-8 without BOM, LF only, through a same-directory temp file.
+    """Deprecated alias for :func:`lecture2notes.schema.io.write_json_atomic`.
 
-    The temp file is re-read and parsed before the rename, so a truncated or
-    non-serialisable write can never replace a good file.
+    The implementation moved to ``schema/io.py`` so that every JSON write in the
+    package shares one set of rules; this alias keeps the historical import site
+    working.
     """
-    destination = Path(path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temp_name = tempfile.mkstemp(
-        prefix=".%s." % destination.name, suffix=".tmp", dir=destination.parent
-    )
+    return _write_json_atomic(path, data)
+
+
+# ==========================================================================
+# schema v2
+# ==========================================================================
+# Everything above this line is the ported 1.x shape, still used by the audit
+# and rebuild paths. Everything below is schema v2: the documented, versioned
+# contract that ``l2n check json`` enforces and that ``l2n migrate`` produces.
+
+#: The only version this package writes, and the only one the validator accepts.
+SCHEMA_VERSION = "2.0"
+
+#: Inclusive bounds on the overall summary, in characters.
+MIN_SUMMARY_CHARS = 100
+MAX_SUMMARY_CHARS = 500
+#: Inclusive bounds on the top-level takeaway count.
+MIN_TAKEAWAYS = 6
+MAX_TAKEAWAYS = 12
+#: A bullet is either the writer's own synthesis or a marked quotation.
+BULLET_KINDS = ("synthesis", "quote")
+#: Where a subtitle came from: our own ASR, or one shipped with the talk.
+SUBTITLE_ORIGINS = ("asr", "official")
+#: Slack allowed when comparing two segment boundaries, to absorb float noise.
+BOUNDARY_EPSILON = 1e-6
+
+
+def format_clock(seconds: float) -> str:
+    """``HH:MM:SS`` for a number of seconds; the fractional part is dropped."""
+    total = int(seconds)
+    return "%02d:%02d:%02d" % (total // 3600, total % 3600 // 60, total % 60)
+
+
+def parse_clock(value: Any) -> Optional[float]:
+    """``MM:SS`` or ``HH:MM:SS``, optionally with a fractional second."""
+    if not isinstance(value, str):
+        return None
+    parts = value.strip().split(":")
+    if not 2 <= len(parts) <= 3:
+        return None
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2, allow_nan=False)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        json.loads(Path(temp_name).read_text(encoding="utf-8"))
-        os.replace(temp_name, destination)
-    except BaseException:
-        try:
-            os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
-        raise
-    return destination
+        numbers = [float(part) for part in parts]
+    except ValueError:
+        return None
+    total = 0.0
+    for number in numbers:
+        total = total * 60 + number
+    return total
+
+
+def is_legacy(data: Any) -> bool:
+    """A document without ``schema_version`` is 1.x and must be migrated."""
+    return not isinstance(data, Mapping) or "schema_version" not in data
+
+
+# -- dataclasses -----------------------------------------------------------
+# These are the in-memory shape of a v2 document. They are plain dataclasses
+# rather than a validation library on purpose: the validator below has to report
+# *every* problem in an arbitrary dict together with its location, which is not
+# what a parse-or-raise model gives you, and a runtime dependency is not worth
+# one constructor.
+
+@dataclass
+class Bullet:
+    """One summary point. ``t`` is when it was said, or None if synthesised."""
+
+    text: str
+    t: Optional[float] = None
+    kind: str = "synthesis"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"text": self.text, "t": self.t, "kind": self.kind}
+
+    @classmethod
+    def from_any(cls, value: Any) -> "Bullet":
+        """Accept a v2 object or a 1.x bare string."""
+        if isinstance(value, Mapping):
+            return cls(
+                text=str(value.get("text", "")),
+                t=finite_number(value.get("t")),
+                kind=str(value.get("kind") or "synthesis"),
+            )
+        return cls(text=str(value), t=None, kind="synthesis")
+
+
+@dataclass
+class Quote:
+    """A speaker's own words, kept verbatim, with the time they were said."""
+
+    text: str
+    t: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"text": self.text, "t": self.t}
+
+    @classmethod
+    def from_any(cls, value: Any) -> "Quote":
+        if isinstance(value, Mapping):
+            return cls(text=str(value.get("text", "")), t=finite_number(value.get("t")))
+        return cls(text=str(value), t=None)
+
+
+@dataclass
+class FrameOcr:
+    """The text OCR found on one frame."""
+
+    frame: str
+    text: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"frame": self.frame, "text": self.text}
+
+    @classmethod
+    def from_any(cls, value: Any) -> "FrameOcr":
+        if isinstance(value, Mapping):
+            return cls(frame=str(value.get("frame", "")), text=str(value.get("text", "")))
+        return cls(frame=str(value), text="")
+
+
+@dataclass
+class Subtitle:
+    """Where the transcript came from, and how its clock was corrected."""
+
+    path: str
+    origin: str = "asr"
+    engine: Optional[str] = None
+    lang: Optional[str] = None
+    #: ``{"a": float, "b": float}`` for ``offset(t) = a + b*t``, or None.
+    offset_model: Optional[Dict[str, float]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "path": self.path,
+            "origin": self.origin,
+            "engine": self.engine,
+            "lang": self.lang,
+            "offset_model": dict(self.offset_model) if self.offset_model else None,
+        }
+
+    @classmethod
+    def from_any(cls, value: Any, stem: str = "") -> "Subtitle":
+        if not isinstance(value, Mapping):
+            return cls(path="%s.srt" % stem)
+        model = value.get("offset_model")
+        return cls(
+            path=str(value.get("path") or ("%s.srt" % stem)),
+            origin=str(value.get("origin") or "asr"),
+            engine=value.get("engine"),
+            lang=value.get("lang"),
+            offset_model=dict(model) if isinstance(model, Mapping) else None,
+        )
+
+
+@dataclass
+class Source:
+    """The media this document was derived from."""
+
+    video: str
+    subtitle: Subtitle
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"video": self.video, "subtitle": self.subtitle.to_dict()}
+
+    @classmethod
+    def from_any(cls, value: Any, stem: str = "") -> "Source":
+        if not isinstance(value, Mapping):
+            return cls(video="%s.mp4" % stem, subtitle=Subtitle.from_any(None, stem))
+        return cls(
+            video=str(value.get("video") or ("%s.mp4" % stem)),
+            subtitle=Subtitle.from_any(value.get("subtitle"), stem),
+        )
+
+
+@dataclass
+class Segment:
+    """One contiguous span of the lecture."""
+
+    index: int
+    start_sec: float
+    end_sec: float
+    start_time: str
+    end_time: str
+    title: str
+    summary_zh: str
+    bullets_zh: List[Bullet] = field(default_factory=list)
+    quotes_zh: List[Quote] = field(default_factory=list)
+    frame: Optional[str] = None
+    frames: List[str] = field(default_factory=list)
+    frame_ocr: List[FrameOcr] = field(default_factory=list)
+    editorial_notes_zh: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "index": self.index,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "start_sec": self.start_sec,
+            "end_sec": self.end_sec,
+            "title": self.title,
+            "summary_zh": self.summary_zh,
+            "bullets_zh": [bullet.to_dict() for bullet in self.bullets_zh],
+            "quotes_zh": [quote.to_dict() for quote in self.quotes_zh],
+            "frame": self.frame,
+            "frames": list(self.frames),
+            "frame_ocr": [entry.to_dict() for entry in self.frame_ocr],
+            "editorial_notes_zh": list(self.editorial_notes_zh),
+        }
+
+    @classmethod
+    def from_any(cls, value: Mapping[str, Any], index: int) -> "Segment":
+        start = finite_number(value.get("start_sec", value.get("start"))) or 0.0
+        end = finite_number(value.get("end_sec", value.get("end"))) or 0.0
+        bullets = value.get("bullets_zh")
+        if not isinstance(bullets, list):
+            legacy = value.get("takeaways_zh")
+            bullets = legacy if isinstance(legacy, list) else []
+        return cls(
+            index=int(value.get("index") or index),
+            start_sec=start,
+            end_sec=end,
+            start_time=str(value.get("start_time") or format_clock(start)),
+            end_time=str(value.get("end_time") or format_clock(end)),
+            title=str(value.get("title") or ""),
+            summary_zh=str(value.get("summary_zh") or ""),
+            bullets_zh=[Bullet.from_any(item) for item in bullets],
+            quotes_zh=[Quote.from_any(item) for item in (value.get("quotes_zh") or [])],
+            frame=value.get("frame"),
+            frames=[str(item) for item in (value.get("frames") or [])],
+            frame_ocr=[FrameOcr.from_any(item) for item in (value.get("frame_ocr") or [])],
+            editorial_notes_zh=[
+                str(item) for item in (value.get("editorial_notes_zh") or [])
+            ],
+        )
+
+
+@dataclass
+class LectureDocument:
+    """A whole canonical lecture document at schema version 2.0."""
+
+    stem: str
+    title: str
+    duration_sec: float
+    source: Source
+    profile: str = "generic"
+    overall_summary_zh: str = ""
+    takeaways_zh: List[str] = field(default_factory=list)
+    segments: List[Segment] = field(default_factory=list)
+    corrections: List[Dict[str, Any]] = field(default_factory=list)
+    unverified_terms: List[str] = field(default_factory=list)
+    ocr_meta: Optional[Dict[str, Any]] = None
+    schema_version: str = SCHEMA_VERSION
+
+    def to_dict(self) -> Dict[str, Any]:
+        """The canonical key order, which is what ends up on disk."""
+        payload: Dict[str, Any] = {
+            "schema_version": self.schema_version,
+            "stem": self.stem,
+            "title": self.title,
+            "duration_sec": self.duration_sec,
+            "source": self.source.to_dict(),
+            "profile": self.profile,
+            "overall_summary_zh": self.overall_summary_zh,
+            "takeaways_zh": list(self.takeaways_zh),
+            "segments": [segment.to_dict() for segment in self.segments],
+            "corrections": [dict(item) for item in self.corrections],
+            "unverified_terms": list(self.unverified_terms),
+        }
+        if self.ocr_meta is not None:
+            payload["ocr_meta"] = dict(self.ocr_meta)
+        return payload
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any], stem: str = "") -> "LectureDocument":
+        """Build the dataclass from a dict. Lenient; validate separately."""
+        resolved_stem = str(data.get("stem") or stem)
+        segments = data.get("segments")
+        segments = segments if isinstance(segments, list) else []
+        ocr_meta = data.get("ocr_meta")
+        return cls(
+            stem=resolved_stem,
+            title=str(data.get("title") or resolved_stem),
+            duration_sec=finite_number(data.get("duration_sec")) or 0.0,
+            source=Source.from_any(data.get("source"), resolved_stem),
+            profile=str(data.get("profile") or "generic"),
+            overall_summary_zh=str(data.get("overall_summary_zh") or ""),
+            takeaways_zh=[str(item) for item in (data.get("takeaways_zh") or [])],
+            segments=[
+                Segment.from_any(item if isinstance(item, Mapping) else {}, position)
+                for position, item in enumerate(segments, 1)
+            ],
+            corrections=[
+                dict(item)
+                for item in (data.get("corrections") or [])
+                if isinstance(item, Mapping)
+            ],
+            unverified_terms=[str(item) for item in (data.get("unverified_terms") or [])],
+            ocr_meta=dict(ocr_meta) if isinstance(ocr_meta, Mapping) else None,
+            schema_version=str(data.get("schema_version") or SCHEMA_VERSION),
+        )
+
+
+# -- validation ------------------------------------------------------------
+
+def _error(
+    code: str, location: str, message: str, segment_index: Optional[int] = None
+) -> Finding:
+    return Finding("error", code, message, segment_index, None, location)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _validate_subtitle(subtitle: Any, findings: List[Finding]) -> None:
+    where = "source.subtitle"
+    if not isinstance(subtitle, Mapping):
+        findings.append(_error("source", where, "source.subtitle must be an object"))
+        return
+    if not isinstance(subtitle.get("path"), str) or not subtitle.get("path"):
+        findings.append(_error(
+            "source", where + ".path", "source.subtitle.path must be a non-empty string"
+        ))
+    origin = subtitle.get("origin")
+    if origin not in SUBTITLE_ORIGINS:
+        findings.append(_error(
+            "source", where + ".origin",
+            "source.subtitle.origin must be one of %s, got %r"
+            % ("/".join(SUBTITLE_ORIGINS), origin),
+        ))
+    for key in ("engine", "lang"):
+        value = subtitle.get(key, None)
+        if value is not None and not isinstance(value, str):
+            findings.append(_error(
+                "source", "%s.%s" % (where, key),
+                "source.subtitle.%s must be a string or null" % key,
+            ))
+    model = subtitle.get("offset_model", None)
+    if model is None:
+        return
+    if not isinstance(model, Mapping):
+        findings.append(_error(
+            "source", where + ".offset_model",
+            "source.subtitle.offset_model must be an object {a, b} or null",
+        ))
+        return
+    for key in ("a", "b"):
+        if not _is_number(model.get(key)):
+            findings.append(_error(
+                "source", "%s.offset_model.%s" % (where, key),
+                "source.subtitle.offset_model.%s must be a number" % key,
+            ))
+
+
+def _validate_top_level(data: Mapping[str, Any], findings: List[Finding]) -> None:
+    version = data.get("schema_version")
+    if version != SCHEMA_VERSION:
+        findings.append(_error(
+            "schema_version", "schema_version",
+            "schema_version must be %r, got %r" % (SCHEMA_VERSION, version),
+        ))
+
+    for key in ("stem", "title", "profile"):
+        if not isinstance(data.get(key), str) or not data.get(key):
+            findings.append(_error(key, key, "%s must be a non-empty string" % key))
+
+    duration = data.get("duration_sec")
+    if not _is_number(duration) or float(duration) <= 0:
+        findings.append(_error(
+            "duration_sec", "duration_sec", "duration_sec must be a positive number"
+        ))
+
+    source = data.get("source")
+    if not isinstance(source, Mapping):
+        findings.append(_error("source", "source", "source must be an object"))
+    else:
+        if not isinstance(source.get("video"), str) or not source.get("video"):
+            findings.append(_error(
+                "source", "source.video", "source.video must be a non-empty string"
+            ))
+        _validate_subtitle(source.get("subtitle"), findings)
+
+    summary = data.get("overall_summary_zh")
+    if not isinstance(summary, str):
+        findings.append(_error(
+            "summary_length", "overall_summary_zh", "overall_summary_zh must be a string"
+        ))
+    elif len(summary) < MIN_SUMMARY_CHARS:
+        findings.append(_error(
+            "summary_length", "overall_summary_zh",
+            "overall_summary_zh length %d < %d" % (len(summary), MIN_SUMMARY_CHARS),
+        ))
+    elif len(summary) > MAX_SUMMARY_CHARS:
+        findings.append(_error(
+            "summary_length", "overall_summary_zh",
+            "overall_summary_zh length %d > %d" % (len(summary), MAX_SUMMARY_CHARS),
+        ))
+
+    takeaways = data.get("takeaways_zh")
+    if not isinstance(takeaways, list):
+        findings.append(_error(
+            "takeaway_count", "takeaways_zh", "takeaways_zh must be an array of strings"
+        ))
+    else:
+        if len(takeaways) < MIN_TAKEAWAYS:
+            findings.append(_error(
+                "takeaway_count", "takeaways_zh",
+                "takeaways_zh count %d < %d" % (len(takeaways), MIN_TAKEAWAYS),
+            ))
+        elif len(takeaways) > MAX_TAKEAWAYS:
+            findings.append(_error(
+                "takeaway_count", "takeaways_zh",
+                "takeaways_zh count %d > %d" % (len(takeaways), MAX_TAKEAWAYS),
+            ))
+        for position, item in enumerate(takeaways):
+            if not isinstance(item, str):
+                findings.append(_error(
+                    "takeaway_type", "takeaways_zh[%d]" % position,
+                    "takeaways_zh[%d] must be a string" % position,
+                ))
+
+    corrections = data.get("corrections")
+    if not isinstance(corrections, list):
+        findings.append(_error(
+            "corrections", "corrections", "corrections must be an array of objects"
+        ))
+    else:
+        for position, item in enumerate(corrections):
+            where = "corrections[%d]" % position
+            if not isinstance(item, Mapping):
+                findings.append(_error("corrections", where, "%s must be an object" % where))
+                continue
+            for key in ("heard", "correct", "source"):
+                if not isinstance(item.get(key), str):
+                    findings.append(_error(
+                        "corrections", "%s.%s" % (where, key),
+                        "%s.%s must be a string" % (where, key),
+                    ))
+
+    terms = data.get("unverified_terms")
+    if not isinstance(terms, list) or not all(isinstance(item, str) for item in terms):
+        findings.append(_error(
+            "unverified_terms", "unverified_terms",
+            "unverified_terms must be an array of strings",
+        ))
+
+    if "ocr_meta" in data and not isinstance(data.get("ocr_meta"), Mapping):
+        findings.append(_error("ocr_meta", "ocr_meta", "ocr_meta must be an object"))
+
+
+def _validate_bullets(
+    segment: Mapping[str, Any], number: int, findings: List[Finding]
+) -> None:
+    where = "segments[%d].bullets_zh" % number
+    bullets = segment.get("bullets_zh")
+    if not isinstance(bullets, list):
+        findings.append(_error(
+            "bullets_zh", where,
+            "segment %d bullets_zh must be an array of objects" % number, number,
+        ))
+        return
+    for position, bullet in enumerate(bullets):
+        at = "%s[%d]" % (where, position)
+        if not isinstance(bullet, Mapping):
+            findings.append(_error(
+                "bullets_zh", at,
+                "segment %d bullets_zh[%d] is not an object (legacy?)" % (number, position),
+                number,
+            ))
+            continue
+        if not isinstance(bullet.get("text"), str) or not bullet.get("text"):
+            findings.append(_error(
+                "bullets_zh", at + ".text",
+                "segment %d bullets_zh[%d].text must be a non-empty string"
+                % (number, position),
+                number,
+            ))
+        moment = bullet.get("t", None)
+        if moment is not None and not _is_number(moment):
+            findings.append(_error(
+                "bullets_zh", at + ".t",
+                "segment %d bullets_zh[%d].t must be a number or null" % (number, position),
+                number,
+            ))
+        kind = bullet.get("kind")
+        if kind not in BULLET_KINDS:
+            findings.append(_error(
+                "bullets_zh", at + ".kind",
+                "segment %d bullets_zh[%d].kind must be one of %s, got %r"
+                % (number, position, "/".join(BULLET_KINDS), kind),
+                number,
+            ))
+
+
+def _validate_segment_lists(
+    segment: Mapping[str, Any], number: int, findings: List[Finding]
+) -> None:
+    quotes = segment.get("quotes_zh")
+    if not isinstance(quotes, list):
+        findings.append(_error(
+            "quotes_zh", "segments[%d].quotes_zh" % number,
+            "segment %d quotes_zh must be an array of objects" % number, number,
+        ))
+    else:
+        for position, quote in enumerate(quotes):
+            at = "segments[%d].quotes_zh[%d]" % (number, position)
+            if not isinstance(quote, Mapping):
+                findings.append(_error(
+                    "quotes_zh", at,
+                    "segment %d quotes_zh[%d] must be an object with text and t"
+                    % (number, position),
+                    number,
+                ))
+                continue
+            if not isinstance(quote.get("text"), str) or not quote.get("text"):
+                findings.append(_error(
+                    "quotes_zh", at + ".text",
+                    "segment %d quotes_zh[%d].text must be a non-empty string"
+                    % (number, position),
+                    number,
+                ))
+            moment = quote.get("t", None)
+            if moment is not None and not _is_number(moment):
+                findings.append(_error(
+                    "quotes_zh", at + ".t",
+                    "segment %d quotes_zh[%d].t must be a number or null"
+                    % (number, position),
+                    number,
+                ))
+
+    if "frame" not in segment:
+        findings.append(_error(
+            "frame", "segments[%d].frame" % number,
+            "segment %d is missing the frame key" % number, number,
+        ))
+    elif segment.get("frame") is not None and not isinstance(segment.get("frame"), str):
+        findings.append(_error(
+            "frame", "segments[%d].frame" % number,
+            "segment %d frame must be a string or null" % number, number,
+        ))
+
+    frames = segment.get("frames")
+    if not isinstance(frames, list) or not all(isinstance(item, str) for item in frames):
+        findings.append(_error(
+            "frames", "segments[%d].frames" % number,
+            "segment %d frames must be an array of strings" % number, number,
+        ))
+
+    frame_ocr = segment.get("frame_ocr")
+    if not isinstance(frame_ocr, list):
+        findings.append(_error(
+            "frame_ocr", "segments[%d].frame_ocr" % number,
+            "segment %d frame_ocr must be an array of objects" % number, number,
+        ))
+    else:
+        for position, entry in enumerate(frame_ocr):
+            at = "segments[%d].frame_ocr[%d]" % (number, position)
+            if (
+                not isinstance(entry, Mapping)
+                or not isinstance(entry.get("frame"), str)
+                or not isinstance(entry.get("text"), str)
+            ):
+                findings.append(_error(
+                    "frame_ocr", at,
+                    "segment %d frame_ocr[%d] must be an object with frame and text"
+                    % (number, position),
+                    number,
+                ))
+
+    notes = segment.get("editorial_notes_zh")
+    if not isinstance(notes, list) or not all(isinstance(item, str) for item in notes):
+        findings.append(_error(
+            "editorial_notes_zh", "segments[%d].editorial_notes_zh" % number,
+            "segment %d editorial_notes_zh must be an array of strings" % number, number,
+        ))
+
+
+def _validate_segment_times(
+    segment: Mapping[str, Any], number: int, findings: List[Finding]
+) -> None:
+    for key in ("start_sec", "end_sec"):
+        if not _is_number(segment.get(key)):
+            findings.append(_error(
+                key, "segments[%d].%s" % (number, key),
+                "segment %d %s must be a number" % (number, key), number,
+            ))
+
+    start, end = segment.get("start_sec"), segment.get("end_sec")
+    if _is_number(start) and _is_number(end) and float(start) >= float(end):
+        findings.append(_error(
+            "time_range", "segments[%d]" % number,
+            "segment %d start_sec %s is not before end_sec %s" % (number, start, end),
+            number,
+        ))
+
+    for key, seconds in (("start_time", start), ("end_time", end)):
+        value = segment.get(key)
+        parsed = parse_clock(value)
+        if not isinstance(value, str) or parsed is None:
+            findings.append(_error(
+                "clock_format", "segments[%d].%s" % (number, key),
+                "segment %d %s=%r is not a HH:MM:SS clock value" % (number, key, value),
+                number,
+            ))
+            continue
+        if not _is_number(seconds):
+            continue
+        expected = format_clock(float(seconds))
+        if value != expected:
+            findings.append(_error(
+                "clock_mismatch", "segments[%d].%s" % (number, key),
+                "segment %d %s mismatch: %s is %d seconds but %s is %s"
+                % (number, key, value, int(parsed), key.replace("_time", "_sec"), seconds),
+                number,
+            ))
+
+
+def validate_document(data: Mapping[str, Any]) -> List[Finding]:
+    """Every v2 rule violation in ``data``, as an ordered list of findings.
+
+    Purely structural: nothing here touches the file system, so the same
+    function validates a document that is still in memory. ``check json`` adds
+    the file-backed rules (frame existence) on top of it.
+    """
+    findings: List[Finding] = []
+    if not isinstance(data, Mapping):
+        return [_error("document", "$", "document must be a JSON object")]
+
+    _validate_top_level(data, findings)
+
+    segments = data.get("segments")
+    if not isinstance(segments, list) or not segments:
+        findings.append(_error("segments", "segments", "segments must be a non-empty array"))
+        return findings
+
+    for position, segment in enumerate(segments, 1):
+        if not isinstance(segment, Mapping):
+            findings.append(_error(
+                "segments", "segments[%d]" % position,
+                "segment %d must be an object" % position, position,
+            ))
+            continue
+
+        index = segment.get("index")
+        if not isinstance(index, int) or isinstance(index, bool) or index != position:
+            findings.append(_error(
+                "index", "segments[%d].index" % position,
+                "segment %d index is %r, expected %d" % (position, index, position),
+                position,
+            ))
+
+        for key in ("title", "summary_zh"):
+            if not isinstance(segment.get(key), str) or not str(segment.get(key)).strip():
+                findings.append(_error(
+                    key, "segments[%d].%s" % (position, key),
+                    "segment %d %s must be a non-empty string" % (position, key), position,
+                ))
+
+        _validate_segment_times(segment, position, findings)
+        _validate_bullets(segment, position, findings)
+        _validate_segment_lists(segment, position, findings)
+
+    # Boundaries: each segment ends exactly where the next one begins, and the
+    # last one ends at the floored media duration. Checked after the per-segment
+    # pass so each message can name both sides of the join.
+    for position in range(len(segments) - 1):
+        current, following = segments[position], segments[position + 1]
+        if not isinstance(current, Mapping) or not isinstance(following, Mapping):
+            continue
+        end, start = current.get("end_sec"), following.get("start_sec")
+        if not _is_number(end) or not _is_number(start):
+            continue
+        if abs(float(end) - float(start)) > BOUNDARY_EPSILON:
+            findings.append(_error(
+                "contiguity", "segments[%d].end_sec" % (position + 1),
+                "segment %d end_sec %s does not meet segment %d start_sec %s"
+                % (position + 1, end, position + 2, start),
+                position + 1,
+            ))
+
+    last = segments[-1]
+    duration = data.get("duration_sec")
+    if isinstance(last, Mapping) and _is_number(last.get("end_sec")) and _is_number(duration):
+        expected = float(int(float(duration)))
+        if abs(float(last["end_sec"]) - expected) > BOUNDARY_EPSILON:
+            findings.append(_error(
+                "contiguity", "segments[%d].end_sec" % len(segments),
+                "segment %d end_sec %s does not equal floor(duration_sec) %d"
+                % (len(segments), last.get("end_sec"), int(expected)),
+                len(segments),
+            ))
+
+    return findings
+
+
+def load_document(path: Path) -> Dict[str, Any]:
+    """Read a canonical document verbatim: no normalisation, BOM tolerated."""
+    return read_json(path)
 
 
 __all__ = [
+    "BOUNDARY_EPSILON",
+    "BULLET_KINDS",
+    "Bullet",
     "DEFAULT_FRAME_TOLERANCE",
     "Finding",
+    "FrameOcr",
+    "LectureDocument",
     "MAX_FRAMES_PER_SEGMENT",
+    "MAX_SUMMARY_CHARS",
+    "MAX_TAKEAWAYS",
     "MIN_FRAMES_PER_SEGMENT",
+    "MIN_SUMMARY_CHARS",
+    "MIN_TAKEAWAYS",
+    "Quote",
     "REQUIRED_TAKEAWAYS",
+    "SCHEMA_VERSION",
+    "SUBTITLE_ORIGINS",
+    "Segment",
+    "Source",
+    "Subtitle",
     "assert_times_unchanged",
     "finite_number",
+    "format_clock",
+    "is_legacy",
+    "load_document",
     "load_lecture",
     "normalize_lecture",
+    "parse_clock",
     "path_within_base",
     "safe_relative_frame_path",
     "segment_end",
     "segment_start",
     "time_signature",
+    "validate_document",
     "validate_lecture_schema",
     "write_json_atomic",
 ]
