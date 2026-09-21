@@ -28,6 +28,8 @@ from lecture2notes.engines import convert
 from lecture2notes.engines import corrections as corrections_mod
 from lecture2notes.engines import pipeline, registry
 from lecture2notes.engines.base import Engine
+from lecture2notes.notes import guideline, render
+from lecture2notes.profiles import loader
 from lecture2notes.schema.migrate import migrate_file
 
 LANG_CHOICES = ("zh", "en", "ja", "auto")
@@ -261,8 +263,48 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+def _load_document(path: Path) -> Optional[Dict[str, Any]]:
+    """Read one canonical JSON, reporting the two ways it can be unusable."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        _out.error("cannot read %s: %s" % (path, exc))
+        return None
+    if not isinstance(data, dict):
+        _out.error("%s does not contain a JSON object" % path)
+        return None
+    return data
+
+
 def cmd_render(args: argparse.Namespace) -> int:
-    not_implemented("render")
+    """`l2n render <doc>`: the deterministic skeleton, or the expansion bundle.
+
+    The skeleton is the file the language model then rewrites in place, so an
+    existing note is never overwritten without ``--force``: losing an expanded
+    note to a re-run of a mechanical stage is not a recoverable mistake.
+    """
+    path = _existing_path(args.json_file, "render")
+    if path is None:
+        return exit_codes.ERROR
+    data = _load_document(path)
+    if data is None:
+        return exit_codes.ERROR
+
+    profile = str(data.get("profile") or loader.BUILTIN_PROFILE)
+    if not (loader.profile_dir(profile) / loader.NOTE_TEMPLATE).is_file():
+        profile = loader.BUILTIN_PROFILE
+    style = loader.note_style(profile, getattr(args, "style", None))
+    note_path = path.with_name(path.stem + ".v4.md")
+
+    if getattr(args, "expand_prompt", False):
+        _out.line(guideline.expand_prompt(path, note_path, style=style))
+        return exit_codes.OK
+
+    if note_path.exists() and not getattr(args, "force", False):
+        _out.stage("render", "skip (%s exists; use --force)" % note_path.name)
+        return exit_codes.OK
+    render.write_skeleton(note_path, data, style=style, stem=path.stem, profile=profile)
+    _out.ok("render -> %s (style %s, profile %s)" % (note_path, style, profile))
     return exit_codes.OK
 
 

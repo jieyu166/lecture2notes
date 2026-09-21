@@ -1,0 +1,10 @@
+# Output settings for the public generic profile.
+
+[note]
+# faithful keeps every quote; concise keeps at most one per section.
+style = "concise"
+
+[guideline]
+# Severity `l2n check note` reports R5 (transcript paste) at: "warning" or
+# "error". A profile whose notes are published verbatim should set "error".
+transcript_paste = "warning"
