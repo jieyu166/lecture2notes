@@ -16,6 +16,9 @@ import pytest
 
 from lecture2notes.notes import guideline
 from lecture2notes.notes.render import (
+    CANDIDATE_CALLOUT,
+    DRAFT_DECLARATION,
+    SUMMARY_SLOTS,
     UNVERIFIED_MARK,
     render_skeleton,
     write_skeleton,
@@ -66,6 +69,34 @@ def test_frontmatter_comes_first(document):
 
     assert text.startswith("---\n")
     assert text.split("---\n")[1].startswith('title: "')
+
+
+def test_the_first_body_line_declares_the_note_is_a_model_draft(document):
+    """A drafted list reads exactly like a written one; the file says which."""
+    text = render_skeleton(document)
+    body = text.split("---", 2)[2].lstrip()
+
+    assert body.splitlines()[0] == DRAFT_DECLARATION
+    assert "> 本筆記為模型產出的初稿，未經本人確認。" in text
+
+
+def test_summary_carries_two_sentence_openings_for_the_reader(document):
+    body = _section(render_skeleton(document), "# Summary")
+
+    for slot in SUMMARY_SLOTS:
+        assert slot in body
+    assert "開這篇之前我卡在___" in body
+    assert "這篇沒回答到的是___" in body
+    assert "我為什麼開這篇" not in body
+
+
+def test_the_three_candidates_arrive_folded(document):
+    body = _section(render_skeleton(document), "## 學習驗證")
+
+    assert CANDIDATE_CALLOUT in body
+    assert "> [!note]- 模型候選（未經本人確認）" in body
+    for number in (1, 2, 3):
+        assert "> %d. " % number in body
 
 
 def test_evergreen_is_the_first_takeaway_in_bold_quotation_marks(document):

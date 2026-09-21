@@ -130,6 +130,22 @@ AI_DRAFT_MARK = "<!-- ai-draft -->"
 #: How many candidates the model drafts under "我應該記住的 3 件事".
 REMEMBER_COUNT = 3
 
+#: The skeleton's first body line. A list an agent filled in reads exactly like
+#: one a person wrote, and a reader three months later cannot tell them apart,
+#: so the file says which it is before anything else on the page.
+DRAFT_DECLARATION = "> 本筆記為模型產出的初稿，未經本人確認。"
+
+#: The reader's two slots in Summary. They carry a sentence opening rather than
+#: a question: an empty box gets skipped, a half-written sentence gets finished.
+SUMMARY_SLOTS = ("開這篇之前我卡在___", "這篇沒回答到的是___")
+
+#: What the slots say about the option nobody remembers they have.
+SUMMARY_SLOT_NOTE = "（兩格都填不出來就選「丟棄」。模型不要代填，也不要刪。）"
+
+#: The model's three candidates live behind this, collapsed. A list that arrives
+#: already full invites agreement; one that arrives folded has to be opened.
+CANDIDATE_CALLOUT = "> [!note]- 模型候選（未經本人確認）"
+
 #: The learning-verification checklist. Fixed text, so two renders agree.
 VERIFICATION_ITEMS = (
     "能用自己的話說出本講座的核心觀念，不看筆記也說得完整",
@@ -465,6 +481,11 @@ def render_questions(data: Mapping[str, Any]) -> List[str]:
     return lines
 
 
+def render_summary_slots() -> str:
+    """The reader's two slots, each an unfinished sentence rather than a box."""
+    return "\n\n".join([*SUMMARY_SLOTS, SUMMARY_SLOT_NOTE])
+
+
 def render_verification(takeaways: Sequence[str]) -> List[str]:
     """"我應該記住的 3 件事" as a draft, then the reader's own checklist.
 
@@ -473,11 +494,11 @@ def render_verification(takeaways: Sequence[str]) -> List[str]:
     is to keep, delete or rewrite them. A note whose marker is still in place is
     one that nobody has read, and that is worth being able to count.
     """
-    lines = ["### 我應該記住的 3 件事", "", AI_DRAFT_MARK, ""]
+    lines = ["### 我應該記住的 3 件事", "", AI_DRAFT_MARK, "", CANDIDATE_CALLOUT]
     drafts = list(takeaways[:REMEMBER_COUNT])
     while len(drafts) < REMEMBER_COUNT:
         drafts.append("（素材不足，讀者自行補上或刪除本行）")
-    lines.extend("%d. %s" % (number, text) for number, text in enumerate(drafts, 1))
+    lines.extend("> %d. %s" % (number, text) for number, text in enumerate(drafts, 1))
     lines.extend([
         "",
         "保留／刪除／改寫上面三條是讀者的工作；一個字都沒改，這份筆記就等於沒有人碰過。",
@@ -528,6 +549,8 @@ def render_skeleton(
 
     context = {
         "frontmatter": render_frontmatter(data, frontmatter, stem, profile),
+        "declaration": DRAFT_DECLARATION,
+        "summary_slots": render_summary_slots(),
         "evergreen": evergreen,
         "summary": summary,
         "segments": "\n".join(section_lines) or "（尚無段落）",
@@ -552,6 +575,10 @@ def write_skeleton(path: Path, data: Mapping[str, Any], **kwargs: Any) -> Path:
 
 __all__ = [
     "AI_DRAFT_MARK",
+    "CANDIDATE_CALLOUT",
+    "DRAFT_DECLARATION",
+    "SUMMARY_SLOTS",
+    "SUMMARY_SLOT_NOTE",
     "ANSWER_INDENT",
     "ANSWER_PLACEHOLDER",
     "CORRECTION_COLUMNS",
@@ -577,6 +604,7 @@ __all__ = [
     "render_references",
     "render_segment",
     "render_skeleton",
+    "render_summary_slots",
     "render_verification",
     "segment_titles",
     "strings_of",

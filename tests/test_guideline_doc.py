@@ -68,6 +68,24 @@ def test_the_document_states_the_inference_question_pattern(doc_text):
     assert "Karpicke" in part and "Dunlosky" in part
 
 
+def test_the_document_carries_the_ramp_self_check(doc_text):
+    """A made-up ramp sentence is worse than a note that admits it has none."""
+    part = guideline.must_follow_text()
+
+    assert "坡道句自檢" in part
+    assert "> [!warning] 降級：本筆記只是資訊重排" in part
+    assert "這篇為什麼值得開" in part and "前人卡在哪" in part
+
+
+def test_the_document_describes_the_declaration_and_the_two_slots(doc_text):
+    part = guideline.must_follow_text()
+
+    assert "> 本筆記為模型產出的初稿，未經本人確認。" in part
+    assert "開這篇之前我卡在___" in part
+    assert "這篇沒回答到的是___" in part
+    assert "> [!note]- 模型候選（未經本人確認）" in part
+
+
 def test_the_r5_boundary_table_is_in_the_document(doc_text):
     machine = guideline.section_text(doc_text, guideline.MACHINE_CHECKABLE_HEADING)
 
