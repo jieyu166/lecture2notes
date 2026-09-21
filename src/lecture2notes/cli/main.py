@@ -192,7 +192,9 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
         table_path=table_path,
         s2t=not getattr(args, "no_s2t", False),
         force=getattr(args, "force", False),
-        chunk_sec=getattr(args, "chunk_sec", None),
+        # An engine that cannot take an arbitrarily long input says so itself;
+        # --chunk-sec overrides that, and no engine forces chunking on the rest.
+        chunk_sec=getattr(args, "chunk_sec", None) or getattr(engine, "chunk_sec", None),
     )
     if result.skipped:
         return exit_codes.OK
@@ -300,6 +302,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--engine", default=None, help="轉錄引擎（預設 breeze_ct2）")
     p.add_argument("--model", default=None, help="模型名稱或大小")
     p.add_argument("--model-dir", default=None, help="本機權重目錄")
+    p.add_argument(
+        "--aligner-dir",
+        default=None,
+        dest="aligner_dir",
+        help="qwen3_asr 的 forced aligner 權重目錄（時間戳由它產生）",
+    )
+    p.add_argument(
+        "--backend",
+        default=None,
+        help="引擎後端（qwen3_asr：transformers 預設，vllm 選配）",
+    )
     p.add_argument(
         "--allow-cloud", action="store_true", help="允許使用非本機引擎（預設拒絕）"
     )

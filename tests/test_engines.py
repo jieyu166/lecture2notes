@@ -245,3 +245,301 @@ def test_list_engines_still_prints_under_quiet(capsys):
 def test_transcribe_without_lang_still_exits_two():
     _out.reset()
     assert run_main(["transcribe", "video.mp4"]) == 2
+
+
+# -- qwen3_asr -------------------------------------------------------------
+# The API these tests pin was read off the upstream source on 2026-09-21; see
+# README's engine table for the links. Two facts drive most of them: the ASR
+# model emits no timestamps of its own (they come from a separate forced-aligner
+# checkpoint), and the aligner emits one item per character for Chinese, so cues
+# have to be reassembled here rather than read off.
+from lecture2notes.engines import qwen3_asr as qwen
+
+
+class FakeAlignItem:
+    def __init__(self, text, start_time, end_time):
+        self.text = text
+        self.start_time = start_time
+        self.end_time = end_time
+
+
+class FakeAlignResult:
+    def __init__(self, items):
+        self.items = items
+
+
+class FakeTranscription:
+    def __init__(self, text, time_stamps=None, language="Chinese"):
+        self.text = text
+        self.time_stamps = time_stamps
+        self.language = language
+
+
+class FakeQwenModel:
+    """Stands in for qwen_asr.Qwen3ASRModel. Records how it was constructed."""
+
+    created = []
+
+    def __init__(self, kind, args, kwargs):
+        self.kind = kind
+        self.args = args
+        self.kwargs = kwargs
+        self.calls = []
+        type(self).created.append(self)
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        return cls("from_pretrained", args, kwargs)
+
+    @classmethod
+    def LLM(cls, *args, **kwargs):
+        return cls("LLM", args, kwargs)
+
+    def transcribe(self, **kwargs):
+        self.calls.append(kwargs)
+        items = [
+            FakeAlignItem("佔", 0.0, 0.2),
+            FakeAlignItem("位", 0.2, 0.4),
+            FakeAlignItem("文", 0.4, 0.6),
+            FakeAlignItem("字", 0.6, 0.8),
+            FakeAlignItem("。", 0.8, 0.9),
+            FakeAlignItem("第", 1.2, 1.4),
+            FakeAlignItem("二", 1.4, 1.6),
+            FakeAlignItem("句", 1.6, 1.8),
+            FakeAlignItem("。", 1.8, 1.9),
+        ]
+        return [FakeTranscription("佔位文字。第二句。", FakeAlignResult(items))]
+
+
+@pytest.fixture()
+def fake_qwen(monkeypatch):
+    import types
+
+    FakeQwenModel.created = []
+    module = types.SimpleNamespace(Qwen3ASRModel=FakeQwenModel)
+    monkeypatch.setattr(_deps, "require_qwen_asr", lambda: module)
+    monkeypatch.setattr(
+        _deps, "require_module",
+        lambda name, **kw: types.SimpleNamespace(bfloat16="BF16", float16="FP16"),
+    )
+    return module
+
+
+def test_language_codes_map_to_the_names_upstream_expects():
+    assert qwen.language_name("zh") == "Chinese"
+    assert qwen.language_name("en") == "English"
+    assert qwen.language_name("ja") == "Japanese"
+    assert qwen.language_name("auto") is None
+
+
+def test_a_local_model_directory_wins_over_the_hub_name(tmp_path):
+    engine = qwen.Qwen3AsrEngine(model_dir=tmp_path / "Qwen3-ASR-0.6B")
+    assert engine.model_reference() == str(tmp_path / "Qwen3-ASR-0.6B")
+    assert engine.model_reference() != qwen.DEFAULT_MODEL
+
+
+def test_the_aligner_has_its_own_directory(tmp_path):
+    engine = qwen.Qwen3AsrEngine(aligner_dir=tmp_path / "aligner")
+    assert engine.aligner_reference() == str(tmp_path / "aligner")
+    assert qwen.Qwen3AsrEngine().aligner_reference() == qwen.DEFAULT_ALIGNER
+
+
+def test_an_unknown_backend_is_rejected_at_construction():
+    with pytest.raises(ValueError) as excinfo:
+        qwen.Qwen3AsrEngine(backend="onnx")
+    assert "transformers" in str(excinfo.value)
+
+
+def test_the_engine_declares_a_chunk_length_the_aligner_can_handle():
+    """The forced aligner is documented for up to five minutes of speech."""
+    assert qwen.Qwen3AsrEngine().chunk_sec == qwen.DEFAULT_CHUNK_SEC
+    assert qwen.DEFAULT_CHUNK_SEC <= 300.0
+
+
+def test_transformers_backend_uses_from_pretrained_with_the_aligner(fake_qwen, tmp_path):
+    engine = qwen.Qwen3AsrEngine(model_dir=tmp_path / "weights")
+    engine.transcribe(tmp_path / "audio.wav", "zh")
+    model = FakeQwenModel.created[0]
+    assert model.kind == "from_pretrained"
+    assert model.args == (str(tmp_path / "weights"),)
+    assert model.kwargs["forced_aligner"] == qwen.DEFAULT_ALIGNER
+    assert model.kwargs["device_map"] == "cuda:0"
+
+
+def test_vllm_backend_uses_the_other_constructor(fake_qwen, tmp_path):
+    """vLLM is selected by calling LLM(), not by a flag on from_pretrained()."""
+    engine = qwen.Qwen3AsrEngine(backend="vllm", model_dir=tmp_path / "weights")
+    engine.transcribe(tmp_path / "audio.wav", "zh")
+    model = FakeQwenModel.created[0]
+    assert model.kind == "LLM"
+    assert model.kwargs["model"] == str(tmp_path / "weights")
+
+
+def test_the_model_is_loaded_once_across_several_chunks(fake_qwen, tmp_path):
+    engine = qwen.Qwen3AsrEngine()
+    engine.transcribe(tmp_path / "a.wav", "zh")
+    engine.transcribe(tmp_path / "b.wav", "zh")
+    assert len(FakeQwenModel.created) == 1
+
+
+def test_transcribe_asks_for_timestamps_and_passes_the_language(fake_qwen, tmp_path):
+    qwen.Qwen3AsrEngine().transcribe(tmp_path / "a.wav", "zh")
+    call = FakeQwenModel.created[0].calls[0]
+    assert call["return_time_stamps"] is True
+    assert call["language"] == "Chinese"
+    assert call["audio"] == str(tmp_path / "a.wav")
+
+
+def test_transcribe_builds_cues_from_the_alignment(fake_qwen, tmp_path):
+    cues = qwen.Qwen3AsrEngine().transcribe(tmp_path / "a.wav", "zh")
+    assert [c.text for c in cues] == ["佔位文字。", "第二句。"]
+    assert (cues[0].start, cues[0].end) == (0.0, 0.9)
+    assert (cues[1].start, cues[1].end) == (1.2, 1.9)
+
+
+def test_missing_timestamps_raise_a_message_naming_the_aligner(
+    fake_qwen, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        FakeQwenModel, "transcribe",
+        lambda self, **kw: [FakeTranscription("文字但沒有時間戳", None)],
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        qwen.Qwen3AsrEngine().transcribe(tmp_path / "a.wav", "zh")
+    assert "forced aligner" in str(excinfo.value)
+    assert "--aligner-dir" in str(excinfo.value)
+
+
+def test_missing_qwen_asr_raises_before_anything_is_loaded(monkeypatch, tmp_path):
+    def missing():
+        raise _deps.MissingDependency("qwen_asr", _deps.INSTALL_HINTS["qwen_asr"])
+
+    monkeypatch.setattr(_deps, "require_qwen_asr", missing)
+    with pytest.raises(_deps.MissingDependency):
+        qwen.Qwen3AsrEngine().transcribe(tmp_path / "a.wav", "zh")
+
+
+def test_missing_qwen_asr_exits_3_through_the_cli(monkeypatch, tmp_path, capsys):
+    def missing():
+        raise _deps.MissingDependency("qwen_asr", _deps.INSTALL_HINTS["qwen_asr"])
+
+    monkeypatch.setattr(_deps, "require_qwen_asr", missing)
+    monkeypatch.setattr(_deps, "require", lambda name, *a, **k: "fake-" + name)
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+    code = run_main(["transcribe", str(video), "--lang", "zh", "--engine", "qwen3_asr"])
+    assert code == 3
+    assert "pip install lecture2notes[qwen]" in capsys.readouterr().out
+    assert not (tmp_path / "lecture.srt").exists()
+
+
+# -- cue assembly from per-character alignment -----------------------------
+def align(*triples):
+    return [FakeAlignItem(t, s, e) for t, s, e in triples]
+
+
+def test_a_sentence_ending_closes_a_cue():
+    cues = qwen.cues_from_alignment(
+        align(("一", 0.0, 0.1), ("二", 0.1, 0.2), ("。", 0.2, 0.3), ("三", 0.4, 0.5))
+    )
+    assert [c.text for c in cues] == ["一二。", "三"]
+
+
+def test_a_long_silence_closes_a_cue_even_without_punctuation():
+    cues = qwen.cues_from_alignment(
+        align(("一", 0.0, 0.1), ("二", 0.1, 0.2), ("三", 5.0, 5.1))
+    )
+    assert [c.text for c in cues] == ["一二", "三"]
+
+
+def test_a_cue_never_grows_past_the_character_cap():
+    long_run = [("字", i * 0.1, i * 0.1 + 0.1) for i in range(70)]
+    cues = qwen.cues_from_alignment(align(*long_run))
+    assert all(len(c.text) <= qwen.MAX_CUE_CHARS for c in cues)
+    assert len(cues) >= 2
+
+
+def test_a_cue_never_grows_past_the_duration_cap():
+    slow = [("字", i * 1.0, i * 1.0 + 0.5) for i in range(20)]
+    cues = qwen.cues_from_alignment(align(*slow), gap_sec=10.0)
+    assert all(c.duration() <= qwen.MAX_CUE_SEC + 1.0 for c in cues)
+
+
+def test_latin_words_are_joined_with_spaces_and_cjk_is_not():
+    latin = qwen.cues_from_alignment(align(("hello", 0.0, 0.5), ("world", 0.5, 1.0)))
+    assert latin[0].text == "hello world"
+    cjk = qwen.cues_from_alignment(align(("中", 0.0, 0.2), ("文", 0.2, 0.4)))
+    assert cjk[0].text == "中文"
+
+
+def test_alignment_items_accepts_a_mapping_shape():
+    """A shape change upstream degrades to "no timestamps", never an exception."""
+    assert qwen.alignment_items(FakeTranscription("x", None)) == []
+    payload = FakeTranscription("x", {"items": [{"text": "a", "start_time": 0,
+                                                 "end_time": 1}]})
+    assert len(qwen.alignment_items(payload)) == 1
+    assert qwen.cues_from_alignment(qwen.alignment_items(payload))[0].text == "a"
+
+
+def test_items_missing_a_field_are_skipped_not_fatal():
+    usable = {"text": "b", "start_time": 0, "end_time": 1}
+    assert qwen.cues_from_alignment([{"text": "a"}, usable])[0].text == "b"
+
+
+def test_timestamps_are_read_as_seconds_not_milliseconds():
+    """Upstream annotates these int but divides by 1000 before returning them."""
+    cues = qwen.cues_from_alignment(align(("字", 12.5, 13.0)))
+    assert cues[0].start == 12.5 and cues[0].end == 13.0
+
+
+# -- the real thing, only on a machine that has one ------------------------
+QWEN_WEIGHTS_ENV = "LECTURE2NOTES_QWEN_MODEL_DIR"
+QWEN_ALIGNER_ENV = "LECTURE2NOTES_QWEN_ALIGNER_DIR"
+
+
+def _cuda_available() -> bool:
+    try:
+        import torch  # type: ignore
+    except ImportError:
+        return False
+    try:
+        return bool(torch.cuda.is_available())
+    except Exception:  # pragma: no cover - a broken CUDA install
+        return False
+
+
+@pytest.mark.gpu
+def test_qwen3_asr_transcribes_a_real_clip_into_a_valid_srt(tmp_path):
+    """Real weights, real CUDA, real audio. Skipped unless all three are present.
+
+    Set LECTURE2NOTES_QWEN_MODEL_DIR and LECTURE2NOTES_QWEN_ALIGNER_DIR to
+    already-downloaded weight directories, and drop a short CC-licensed clip at
+    tests/fixtures/sample.mp4. Nothing here downloads anything.
+    """
+    import os
+
+    if not _deps.module_available("qwen_asr"):
+        pytest.skip("qwen-asr is not installed")
+    if not _cuda_available():
+        pytest.skip("no CUDA device")
+    model_dir = os.environ.get(QWEN_WEIGHTS_ENV)
+    aligner_dir = os.environ.get(QWEN_ALIGNER_ENV)
+    if not model_dir or not Path(model_dir).is_dir():
+        pytest.skip("set %s to a downloaded Qwen3-ASR directory" % QWEN_WEIGHTS_ENV)
+    if not aligner_dir or not Path(aligner_dir).is_dir():
+        pytest.skip("set %s to a downloaded aligner directory" % QWEN_ALIGNER_ENV)
+    clip = Path(__file__).parent / "fixtures" / "sample.mp4"
+    if not clip.is_file():
+        pytest.skip("no tests/fixtures/sample.mp4 to transcribe")
+
+    from lecture2notes.acceptance import check as check_mod
+    from lecture2notes.engines import pipeline
+
+    engine = qwen.Qwen3AsrEngine(model_dir=model_dir, aligner_dir=aligner_dir)
+    result = pipeline.transcribe_video(
+        clip, "zh", engine, out_dir=tmp_path, workdir=tmp_path / "work"
+    )
+    assert result.srt.is_file()
+    report = check_mod.Report(result.srt.name)
+    check_mod.check_transcribe(result.srt, report)
+    assert report.errors == []
