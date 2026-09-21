@@ -94,6 +94,16 @@ def test_the_r5_boundary_table_is_in_the_document(doc_text):
     assert machine.count("| 120 |") == 2
 
 
+def test_the_document_states_the_speaker_outline_rules(doc_text):
+    """The outline is worth having only if it records actions, not topics."""
+    part = guideline.must_follow_text()
+
+    assert "講者骨架" in part
+    assert "用一個誤診案例開場" in part
+    assert "講了椎間盤分級" in part
+    assert "坡道" in part
+
+
 def test_the_document_names_every_mandatory_section(doc_text):
     for heading, _ in guideline.MANDATORY_SECTIONS:
         assert "`%s`" % heading in doc_text, heading

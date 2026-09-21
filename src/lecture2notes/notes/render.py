@@ -481,6 +481,87 @@ def render_questions(data: Mapping[str, Any]) -> List[str]:
     return lines
 
 
+#: Columns of one speaker-outline row, separated so a reader scans down one.
+OUTLINE_SEPARATOR = " ｜ "
+
+#: What the section is for. "Did", not "said": "opens with a misdiagnosis case,
+#: 6% of the running time" transfers to the next lecture; "covered disc grading"
+#: is only the table of contents again.
+OUTLINE_NOTE = "每段一行，動詞開頭，只寫講者做了什麼，不寫他講了什麼。"
+
+#: Said once above the rows, because it is a reading instruction, not data. The
+#: ramp is the opening 5 to 8%, where the speaker says why this is worth doing
+#: and where everyone before got stuck; it is the raw material for Evergreen.
+OUTLINE_RAMP_NOTE = (
+    "開頭 5 至 8% 是坡道（為什麼值得講、前人卡在哪），Evergreen 的原料在那裡；"
+    "首段與末段呼應不起來，多半是坡道被併進了第 2 段，回頭檢查分段。"
+)
+
+#: Each row's third column until the expansion rewrites it.
+OUTLINE_DRAFT = "（改寫成動詞開頭一句：講者在「%s」這一段做了什麼）"
+
+
+def _span_seconds(segment: Mapping[str, Any]) -> float:
+    """One segment's running time, or 0.0 when the times are unusable."""
+    try:
+        return max(segment_end(segment) - segment_start(segment), 0.0)
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+
+
+def segment_shares(segments: Sequence[Any]) -> List[int]:
+    """Each segment's share of the running time, as whole percents summing to 100.
+
+    Largest remainder rather than independent rounding: a column that adds up to
+    99 sends the reader to check the arithmetic instead of reading the outline.
+    """
+    spans = [_span_seconds(segment) for segment in segments]
+    if not spans:
+        return []
+    total = sum(spans)
+    if total <= 0:
+        base = 100 // len(spans)
+        shares = [base] * len(spans)
+        shares[0] += 100 - base * len(spans)
+        return shares
+    exact = [span * 100.0 / total for span in spans]
+    shares = [int(value) for value in exact]
+    order = sorted(
+        range(len(exact)), key=lambda index: (int(exact[index]) - exact[index], index)
+    )
+    for position in order[:100 - sum(shares)]:
+        shares[position] += 1
+    return shares
+
+
+def render_speaker_outline(data: Mapping[str, Any]) -> List[str]:
+    """The reverse outline: one row per segment, projected from the times.
+
+    Mechanical on purpose. The timecodes and the shares come from the document,
+    so the only thing the expansion supplies is the verb, and the only thing it
+    can get wrong is the verb.
+    """
+    segments = [
+        segment for segment in (data.get("segments") or [])
+        if isinstance(segment, Mapping)
+    ]
+    lines = [OUTLINE_NOTE, "", OUTLINE_RAMP_NOTE, "", AI_DRAFT_MARK, ""]
+    if not segments:
+        lines.append("（尚無段落）")
+        return lines
+    for segment, share in zip(segments, segment_shares(segments)):
+        try:
+            span = "%s - %s" % (
+                clock(segment_start(segment)), clock(segment_end(segment))
+            )
+        except (KeyError, TypeError, ValueError):
+            span = "-"
+        lines.append(OUTLINE_SEPARATOR.join([
+            span, "%d%%" % share, OUTLINE_DRAFT % text_of(segment.get("title")),
+        ]))
+    return lines
+
+
 def render_summary_slots() -> str:
     """The reader's two slots, each an unfinished sentence rather than a box."""
     return "\n\n".join([*SUMMARY_SLOTS, SUMMARY_SLOT_NOTE])
@@ -551,6 +632,7 @@ def render_skeleton(
         "frontmatter": render_frontmatter(data, frontmatter, stem, profile),
         "declaration": DRAFT_DECLARATION,
         "summary_slots": render_summary_slots(),
+        "speaker_outline": "\n".join(render_speaker_outline(data)),
         "evergreen": evergreen,
         "summary": summary,
         "segments": "\n".join(section_lines) or "（尚無段落）",
@@ -583,6 +665,10 @@ __all__ = [
     "ANSWER_PLACEHOLDER",
     "CORRECTION_COLUMNS",
     "PLACEHOLDER",
+    "OUTLINE_DRAFT",
+    "OUTLINE_NOTE",
+    "OUTLINE_RAMP_NOTE",
+    "OUTLINE_SEPARATOR",
     "QUESTION_FILLER",
     "QUESTION_NOTE",
     "REMEMBER_COUNT",
@@ -604,8 +690,10 @@ __all__ = [
     "render_references",
     "render_segment",
     "render_skeleton",
+    "render_speaker_outline",
     "render_summary_slots",
     "render_verification",
+    "segment_shares",
     "segment_titles",
     "strings_of",
     "text_of",

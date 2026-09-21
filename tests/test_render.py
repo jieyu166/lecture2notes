@@ -18,9 +18,11 @@ from lecture2notes.notes import guideline
 from lecture2notes.notes.render import (
     CANDIDATE_CALLOUT,
     DRAFT_DECLARATION,
+    OUTLINE_SEPARATOR,
     SUMMARY_SLOTS,
     UNVERIFIED_MARK,
     render_skeleton,
+    segment_shares,
     write_skeleton,
 )
 
@@ -45,6 +47,23 @@ def _section(text: str, heading: str) -> str:
         if line.startswith("#") and len(line) - len(line.lstrip("#")) <= depth:
             return "\n".join(lines[start:position])
     return "\n".join(lines[start:])
+
+
+def _outline_rows(text):
+    """Only the data rows of the speaker outline, not its reading notes."""
+    body = _section(text, "## 講者骨架")
+    return [line for line in body.splitlines() if OUTLINE_SEPARATOR in line]
+
+
+def _three_segments(document):
+    """The fixture's two segments plus a third, with 1:2:3 running times."""
+    first = dict(document["segments"][0])
+    first.update({"start_sec": 0, "end_sec": 60})
+    second = dict(document["segments"][1])
+    second.update({"start_sec": 60, "end_sec": 180})
+    third = dict(second)
+    third.update({"title": "佔位段落三：把兩端接回去", "start_sec": 180, "end_sec": 360})
+    return [first, second, third]
 
 
 def test_same_document_renders_to_the_same_bytes(document):
@@ -110,6 +129,48 @@ def test_summary_lists_every_takeaway(document):
 
     for item in document["takeaways_zh"]:
         assert "- %s" % item in body
+
+
+def test_the_speaker_outline_has_one_row_per_segment(document):
+    """Three segments, three rows: the outline is projected, not summarised."""
+    document["segments"] = _three_segments(document)
+    rows = _outline_rows(render_skeleton(document))
+
+    assert len(rows) == 3
+    for row in rows:
+        timecode, share, sentence = row.split(OUTLINE_SEPARATOR)
+        assert re.fullmatch(r"\d{2}:\d{2}:\d{2} - \d{2}:\d{2}:\d{2}", timecode)
+        assert re.fullmatch(r"\d+%", share)
+        assert sentence
+
+
+def test_the_outline_shares_add_up_to_a_hundred(document):
+    document["segments"] = _three_segments(document)
+    rows = _outline_rows(render_skeleton(document))
+    shares = [int(row.split(OUTLINE_SEPARATOR)[1].rstrip("%")) for row in rows]
+
+    assert len(shares) == 3
+    assert abs(sum(shares) - 100) <= 1
+
+
+def test_the_outline_shares_follow_the_running_time(document):
+    """A segment that ran twice as long carries twice the share."""
+    document["segments"] = _three_segments(document)
+
+    assert segment_shares(document["segments"]) == [17, 33, 50]
+
+
+def test_the_outline_sits_between_summary_and_the_note_body(document):
+    text = render_skeleton(document)
+
+    assert text.index("# Summary") < text.index("## 講者骨架") < text.index("# Note (layer 1-3)")
+
+
+def test_the_outline_survives_a_document_with_no_usable_times(document):
+    document["segments"] = [{"title": "無時間碼"}]
+    body = _section(render_skeleton(document), "## 講者骨架")
+
+    assert "100%" in body
 
 
 def test_segment_section_orders_embed_summary_quotes_bullets(document):

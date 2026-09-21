@@ -32,6 +32,7 @@ MACHINE_CHECKABLE_HEADING = "機器可檢查"
 MANDATORY_SECTIONS: Tuple[Tuple[str, str], ...] = (
     ("# Evergreen Note", "Evergreen Note"),
     ("# Summary", "Summary"),
+    ("## 講者骨架", "講者骨架"),
     ("# Note (layer 1-3)", "Note (layer 1-3)"),
     ("### References", "References"),
     ("## 題目", "題目"),

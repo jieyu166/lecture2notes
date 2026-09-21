@@ -11,6 +11,10 @@
 
 {{summary}}
 
+## 講者骨架
+
+{{speaker_outline}}
+
 # Note (layer 1-3)
 
 {{segments}}
