@@ -156,6 +156,57 @@ def test_page_is_written_as_the_course_home(course: Path) -> None:
     assert "佔位課程" in result["path"].read_text(encoding="utf-8")
 
 
+# -- the optional course summary -------------------------------------------
+def test_a_course_with_no_summary_file_renders_no_summary_block(course: Path) -> None:
+    page = hub.build(course)["path"].read_text(encoding="utf-8")
+
+    assert 'class="course"' not in page
+
+
+def test_the_course_summary_is_printed_above_the_cards(course: Path) -> None:
+    (course / hub.COURSE_FILE).write_text(
+        json.dumps(
+            {"question": "這一系列到底在回答什麼？", "start_with": "第 02 場"},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    page = hub.build(course)["path"].read_text(encoding="utf-8")
+
+    assert hub.COURSE_QUESTION_LABEL in page
+    assert "這一系列到底在回答什麼？" in page
+    assert hub.COURSE_START_LABEL in page
+    assert "第 02 場" in page
+    assert page.index('class="course"') < page.index("<main>")
+
+
+def test_a_series_with_no_through_line_says_so(course: Path) -> None:
+    """Saying there is no thread is an answer; an empty summary is not."""
+    (course / hub.COURSE_FILE).write_text(
+        json.dumps({"no_common_thread": True}, ensure_ascii=False), encoding="utf-8"
+    )
+    page = hub.build(course)["path"].read_text(encoding="utf-8")
+
+    assert hub.NO_COMMON_THREAD in page
+    assert "本系列各場主題獨立，無共同主線" in page
+
+
+def test_an_unparseable_summary_does_not_break_the_hub(course: Path) -> None:
+    (course / hub.COURSE_FILE).write_text("{not json", encoding="utf-8")
+    result = hub.build(course)
+
+    assert result["path"].is_file()
+    assert 'class="course"' not in result["path"].read_text(encoding="utf-8")
+
+
+def test_the_summary_file_is_not_mistaken_for_a_lecture(course: Path) -> None:
+    (course / hub.COURSE_FILE).write_text(
+        json.dumps({"question": "甲"}, ensure_ascii=False), encoding="utf-8"
+    )
+
+    assert [card["stem"] for card in hub.collect(course)] == [STEM_A, STEM_B]
+
+
 # -- the command -----------------------------------------------------------
 def test_cli_builds_the_hub(course: Path) -> None:
     result = run_cli(["hub", str(course)])

@@ -131,6 +131,24 @@ def test_the_document_states_the_four_arc_check(doc_text):
         assert arc in part, arc
 
 
+def test_the_document_carries_the_third_step_zero_layer(doc_text):
+    """Step 0 asks what shape the output takes, not only whether to write."""
+    part = guideline.must_follow_text()
+
+    assert "產物型態" in part
+    assert "以題材為單位，不以專科為單位" in part
+    assert "不做完整筆記" in part
+
+
+def test_the_document_requires_a_course_summary(doc_text):
+    part = guideline.must_follow_text()
+
+    assert "_course.json" in part
+    assert "本系列在回答的問題" in part
+    assert "最該先看的一場" in part
+    assert "本系列各場主題獨立，無共同主線" in part
+
+
 def test_the_document_names_every_mandatory_section(doc_text):
     for heading, _ in guideline.MANDATORY_SECTIONS:
         assert "`%s`" % heading in doc_text, heading
