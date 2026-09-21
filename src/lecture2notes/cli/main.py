@@ -15,11 +15,13 @@ from __future__ import annotations
 import argparse
 import inspect
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from lecture2notes import __version__, _deps, _out, exit_codes
 from lecture2notes.acceptance import check
+from lecture2notes.engines import calibrate
 from lecture2notes.engines import convert
 from lecture2notes.engines import corrections as corrections_mod
 from lecture2notes.engines import pipeline, registry
@@ -205,8 +207,36 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
 
 
 def cmd_calibrate_subs(args: argparse.Namespace) -> int:
+    lang = require_lang(args)
+    video = getattr(args, "video", None)
+    subs = getattr(args, "subs", None)
+    if not video or not subs:
+        _out.error("calibrate-subs needs a video and a subtitle file")
+        return exit_codes.ERROR
+    for path in (Path(video), Path(subs)):
+        if not path.is_file():
+            _out.error("no such file: %s" % path)
+            return exit_codes.ERROR
     _deps.require("ffmpeg")
-    not_implemented("calibrate-subs")
+    engine = resolve_engine(args)
+    engine.check()
+    with tempfile.TemporaryDirectory(prefix="l2n-probes-") as scratch:
+        try:
+            result = calibrate.run_calibration(
+                Path(video),
+                Path(subs),
+                lang,
+                engine,
+                probes=getattr(args, "probes", None),
+                out_dir=Path(args.out_dir) if getattr(args, "out_dir", None) else None,
+                workdir=Path(scratch),
+            )
+        except calibrate.CalibrationError as exc:
+            _out.error(str(exc))
+            return exit_codes.ERROR
+    _out.ok("calibrate-subs: %s" % ", ".join(
+        path.name for path in result["files"].values()
+    ))
     return exit_codes.OK
 
 
@@ -385,7 +415,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("video", nargs="?", help="影片路徑")
     p.add_argument("subs", nargs="?", help="官方字幕路徑（VTT 或 SRT）")
-    p.add_argument("--probes", type=int, default=3, help="探針數量（至少 3）")
+    _add_lang(p)
+    p.add_argument(
+        "--probes",
+        default=None,
+        help="探針數量（例如 4，至少 3）或明確位置秒數（例如 300,1800,4200）",
+    )
+    p.add_argument("--engine", default=None, help="探針用的轉錄引擎（預設 breeze_ct2）")
+    p.add_argument("--model", default=None, help="模型名稱或大小")
+    p.add_argument("--model-dir", default=None, help="本機權重目錄")
+    p.add_argument(
+        "--aligner-dir", default=None, dest="aligner_dir", help="qwen3_asr 對齊器目錄"
+    )
+    p.add_argument("--backend", default=None, help="引擎後端")
+    p.add_argument("--whisper-cpp-bin", default=None, help="whisper.cpp 執行檔路徑")
+    p.add_argument("--whisper-cpp-model", default=None, help="whisper.cpp ggml 模型路徑")
+    p.add_argument(
+        "--allow-cloud", action="store_true", help="允許使用非本機引擎（預設拒絕）"
+    )
+    p.add_argument(
+        "--out-dir", default=None, dest="out_dir", help="輸出目錄（預設與字幕同目錄）"
+    )
     p.set_defaults(func=cmd_calibrate_subs)
 
     p = sub.add_parser("frames", parents=[common], help="抓取投影片換頁影格")
