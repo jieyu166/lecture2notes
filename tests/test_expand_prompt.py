@@ -88,3 +88,41 @@ def test_render_writes_the_skeleton_and_then_refuses_to_clobber_it(lecture, caps
 
     assert main(["render", "--force", str(lecture)]) == exit_codes.OK
     assert note.read_text(encoding="utf-8") != "expanded by hand\n"
+
+
+# --------------------------------------------------------------------------
+# 15.1 -- the bundle and its acceptance command must agree on the style
+# --------------------------------------------------------------------------
+def test_the_acceptance_command_carries_the_same_style(lecture, capsys):
+    """`check note` defaults to the profile, so the bundle has to be explicit.
+
+    Without `--style` on the acceptance command, a note written to the faithful
+    contract is checked under concise rules and R6 -- the only rule faithful
+    adds -- never runs. A field run followed the bundle exactly and passed a
+    note that had no quotation in any section.
+    """
+    main(["render", "--expand-prompt", "--style", "faithful", str(lecture)])
+    out = capsys.readouterr().out
+
+    assert "style: faithful" in out
+    acceptance = [line for line in out.splitlines() if line.startswith("l2n check note")]
+    assert acceptance, out
+    assert acceptance[0].endswith("--style faithful"), acceptance[0]
+
+
+def test_the_acceptance_command_says_concise_when_concise_is_in_force(lecture, capsys):
+    main(["render", "--expand-prompt", str(lecture)])
+    out = capsys.readouterr().out
+
+    acceptance = [line for line in out.splitlines() if line.startswith("l2n check note")]
+    assert acceptance[0].endswith("--style concise"), acceptance[0]
+    assert "style: concise" in out
+
+
+def test_the_style_in_the_header_and_in_the_command_are_the_same_value(lecture, capsys):
+    for style in ("faithful", "concise"):
+        main(["render", "--expand-prompt", "--style", style, str(lecture)])
+        out = capsys.readouterr().out
+        header = [l for l in out.splitlines() if l.startswith("style: ")][0]
+        command = [l for l in out.splitlines() if l.startswith("l2n check note")][0]
+        assert header.split(": ", 1)[1] == command.rsplit(" ", 1)[1]

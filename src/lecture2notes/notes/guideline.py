@@ -171,7 +171,12 @@ def expand_prompt(
         "",
         "## 完成後必做",
         "",
-        "l2n check note %s --note %s" % (json_path, note),
+        # --style is not optional here. `check note` defaults to the profile's
+        # style, so an acceptance command without it silently runs concise
+        # rules over a note written to the faithful contract, and R6 -- the one
+        # rule faithful adds -- never fires. The value is the same one printed
+        # under "style:" above, so the bundle cannot disagree with itself.
+        "l2n check note %s --note %s --style %s" % (json_path, note, style),
         "",
         "check 回報任何 error 就回頭修，不要交出去。",
     ])
