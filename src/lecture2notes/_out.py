@@ -84,15 +84,19 @@ def stage(name: str, msg: str) -> None:
     _write(_message_stream(), "[%s] %s" % (name, msg))
 
 
-def line(msg: str) -> None:
-    """Print one raw line, with no level marker.
+def line(text: str) -> None:
+    """Write one raw line of *result* output, with no level marker.
 
-    Used by the acceptance checks, whose output format is part of the contract
-    (``<severity> <rule-or-field> <location>: <message>``) and therefore must
-    not be prefixed. Still goes through the encoding-safe writer, and still
-    moves to stderr under ``--json-progress``.
+    Two callers need this. The acceptance checks emit a format that is part of
+    the contract (``<severity> <rule-or-field> <location>: <message>``) and so
+    must not be prefixed. Commands such as ``--list-engines`` and the report
+    tables print the answer the user asked for rather than reporting on work,
+    so unlike :func:`say` and :func:`stage` this is not suppressed by
+    ``--quiet`` -- that would leave the command with no output at all. Still
+    goes through the encoding-safe writer, and still moves to stderr under
+    ``--json-progress``.
     """
-    _write(_message_stream(), msg)
+    _write(_message_stream(), text)
 
 
 def error(msg: str) -> None:

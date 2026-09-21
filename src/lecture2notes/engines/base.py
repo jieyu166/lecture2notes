@@ -66,6 +66,26 @@ class EngineMeta:
         return data
 
 
+@dataclass(frozen=True)
+class DependencyStatus:
+    """Whether an engine could run right now, and what is missing if not.
+
+    ``--list-engines`` must answer this for four engines in well under a second,
+    so a probe never imports a model runtime and never touches a weight file
+    beyond asking the filesystem whether it is there.
+    """
+
+    name: str
+    satisfied: bool
+    detail: str = ""
+
+    def mark(self) -> str:
+        return "ready" if self.satisfied else "missing"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"name": self.name, "satisfied": self.satisfied, "detail": self.detail}
+
+
 class Engine:
     """Base class for every transcription backend.
 
@@ -88,6 +108,21 @@ class Engine:
     def check(self) -> None:
         """Raise MissingDependency if this engine cannot run on this machine."""
         raise NotImplementedError
+
+    def probe(self) -> DependencyStatus:
+        """Report dependency state without importing or loading anything heavy.
+
+        The default runs :meth:`check` and catches the dependency error, which is
+        correct but may import a runtime. An engine whose ``check`` is expensive
+        overrides this with a ``find_spec``/``Path.exists`` version.
+        """
+        from lecture2notes import _deps
+
+        try:
+            self.check()
+        except _deps.MissingDependency as exc:
+            return DependencyStatus(self.meta.name, False, "%s (%s)" % (exc.name, exc.how))
+        return DependencyStatus(self.meta.name, True, "")
 
     def transcribe(self, audio: Path, lang: str) -> List[Cue]:
         raise NotImplementedError
@@ -190,41 +225,15 @@ def write_srt(path: Path, cues: Sequence[Cue]) -> Path:
     return destination
 
 
-def hallucination_runs(cues: Sequence[Cue], threshold: int = 30) -> List[Dict[str, Any]]:
-    """Find runs of identical cue text, the signature of an ASR loop.
-
-    Returns one record per run of at least ``threshold`` cues, with the 1-based
-    first and last cue numbers so a report can point at them.
-    """
-    runs: List[Dict[str, Any]] = []
-    if not cues:
-        return runs
-    start_index = 0
-    for position in range(1, len(cues) + 1):
-        same = position < len(cues) and cues[position].text == cues[start_index].text
-        if same:
-            continue
-        length = position - start_index
-        if length >= threshold:
-            runs.append({
-                "first_cue": start_index + 1,
-                "last_cue": position,
-                "count": length,
-                "text": cues[start_index].text,
-            })
-        start_index = position
-    return runs
-
-
 __all__ = [
     "Cue",
+    "DependencyStatus",
     "Engine",
     "EngineMeta",
     "MIN_CUE_DURATION",
     "SRT_TIME",
     "cues_to_srt",
     "format_timestamp",
-    "hallucination_runs",
     "parse_srt",
     "parse_srt_text",
     "parse_timestamp",

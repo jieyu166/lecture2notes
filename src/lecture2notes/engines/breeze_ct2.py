@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from lecture2notes import _deps
-from lecture2notes.engines.base import EngineMeta
+from lecture2notes.engines.base import DependencyStatus, EngineMeta
 from lecture2notes.engines.faster_whisper import FasterWhisperEngine
 
 #: Source weights that ``l2n convert-model`` converts.
@@ -54,6 +54,16 @@ class BreezeCT2Engine(FasterWhisperEngine):
     def check(self) -> None:
         _deps.require_module("faster_whisper")
         _deps.require_ct2_model(self.model_dir)
+
+    def probe(self) -> DependencyStatus:
+        missing = []
+        if not _deps.module_available("faster_whisper"):
+            missing.append("faster_whisper (%s)" % _deps.INSTALL_HINTS["faster_whisper"])
+        if not (self.model_dir / "model.bin").is_file():
+            missing.append("ct2_model (%s)" % _deps.INSTALL_HINTS["ct2_model"])
+        if missing:
+            return DependencyStatus(self.meta.name, False, "; ".join(missing))
+        return DependencyStatus(self.meta.name, True, "weights %s" % self.model_dir)
 
     def _model_reference(self) -> str:
         return str(self.model_dir)

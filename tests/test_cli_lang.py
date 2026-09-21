@@ -50,5 +50,8 @@ def test_valid_lang_passes_the_gate(tmp_path, lang):
     proc = run_cli(["transcribe", "video.mp4", "--lang", lang], cwd=tmp_path)
     combined = proc.stdout + proc.stderr
     assert MESSAGE not in combined
-    # 3 = ffmpeg absent on this machine, 4 = stage body not written yet.
-    assert proc.returncode in (3, 4), combined
+    # Past the gate the command fails on something else entirely: 2 = the input
+    # file does not exist, 3 = ffmpeg or the engine runtime is absent on this
+    # machine, 4 = the stage body is not written yet. The MESSAGE assertion
+    # above is what tells a gate-2 apart from a missing-file-2.
+    assert proc.returncode in (2, 3, 4), combined

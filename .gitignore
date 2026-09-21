@@ -78,8 +78,12 @@ staging/
 *.m4a
 *.flac
 
-# Test fixtures are the only media allowed in the repository.
+# Test fixtures are the only media allowed in the repository. The subtitle
+# fixtures are synthetic placeholder text written for the tests, never a
+# real transcript.
 !tests/fixtures/*.mp4
+!tests/fixtures/*.srt
+!tests/fixtures/*.vtt
 
 # --- OS ---
 Thumbs.db

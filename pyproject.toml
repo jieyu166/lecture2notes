@@ -38,8 +38,11 @@ breeze = [
   "transformers>=4.40.0",
   "torch>=2.2.0",
 ]
-# Qwen3-ASR open-weight local inference. Upper bound pinned: the package is tightly
-# coupled to transformers and breaks easily on upgrades.
+# Qwen3-ASR open-weight local inference. The upper bound is not caution: qwen-asr
+# itself pins transformers to an exact version (4.57.6 as of 0.0.6), so installing
+# it alongside `breeze` resolves transformers to that pin for both. torch is not
+# declared by qwen-asr at all and must be installed to match the local CUDA.
+# `qwen-asr[vllm]` adds the optional vLLM backend.
 qwen = ["qwen-asr>=0.0.6,<0.1"]
 # whisper.cpp has no Python dependency: supply the binary yourself and point at it
 # with --whisper-cpp-bin. This extra exists only as an explicit marker.
@@ -74,3 +77,6 @@ lecture2notes = ["profiles/*/*.md", "profiles/*/*.yaml", "profiles/*/*.json", "p
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  "gpu: needs a CUDA device and real model weights; skipped everywhere else",
+]

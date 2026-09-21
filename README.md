@@ -22,10 +22,60 @@ l2n --help
 | Extra | 用途 | 備註 |
 |---|---|---|
 | `breeze` | Breeze-ASR-25（預設引擎） | 需先跑 `l2n convert-model` 產生 CTranslate2 權重 |
-| `qwen` | Qwen3-ASR 本機推論 | 開源權重，transformers 後端 |
+| `qwen` | Qwen3-ASR 本機推論 | 開源權重；時間戳需另載 forced aligner，見引擎相容表 |
 | `whispercpp` | whisper.cpp | 無 pip 相依，需自備編譯好的二進位並以 `--whisper-cpp-bin` 指定 |
 | `scene` | PySceneDetect 場景偵測抓圖 | 未安裝時退回 ffmpeg scene filter |
 | `dev` | pytest / pytest-cov | 開發與測試 |
+
+## 轉錄引擎相容表
+
+`l2n transcribe --list-engines` 會依本機現況印出同樣四行並標示相依是否滿足。
+
+| 引擎 | local | needs_gpu | native_timestamps | 預設模型 | 相依 | 實測狀態 |
+|---|---|---|---|---|---|---|
+| `breeze_ct2`（預設） | yes | yes | yes | MediaTek-Research/Breeze-ASR-25 | `faster-whisper` + 自行轉檔的 CT2 權重 | 已在 Windows + RTX 4060 使用 |
+| `faster_whisper` | yes | no | yes | large-v3 | `faster-whisper` | CPU 可跑，有 CUDA 更快 |
+| `whisper_cpp` | yes | no | yes | ggml-large-v3-turbo.bin | 自備二進位與 ggml 模型 | 以 `--whisper-cpp-bin` / `--whisper-cpp-model` 或 `WHISPER_SRT_BIN` / `WHISPER_SRT_MODEL` 指定 |
+| `qwen3_asr` | yes | yes | yes（需對齊器） | Qwen/Qwen3-ASR-0.6B | `pip install lecture2notes[qwen]` | **待實測**（見下） |
+
+### Qwen3-ASR 的三個實作前提
+
+程式碼依 2026-09-21 查證的上游原始碼撰寫，以下三點與一般預期不同：
+
+1. **ASR 模型本身不輸出時間戳。** `Qwen3ASRModel.transcribe()` 只回 `language` 與
+   `text`；cue 時間來自另一份第一方權重 `Qwen/Qwen3-ForcedAligner-0.6B`（以
+   `forced_aligner=` 掛上，**不需要**外部 ctc-forced-aligner）。因此 `--model-dir`
+   之外另有 `--aligner-dir`。
+2. **對齊結果是逐 token 的**（中文為逐字），本套件在 `cues_from_alignment()` 依句末
+   標點、靜默間隔、字數上限與時長上限重新組成 cue。時間戳單位是**秒**（上游型別標註
+   寫 `int`，但回傳前已除以 1000）。
+3. **對齊器文件標示上限約 5 分鐘語音**，所以本引擎宣告 `chunk_sec = 240`，轉錄階段會
+   自動切窗並把每窗的 cue 位移回整片的時間軸；`--chunk-sec` 可覆寫。
+
+權重大小：0.6B 約 1.88 GB、1.7B 約 4.7 GB，對齊器另計 1.84 GB。`qwen-asr` 0.0.6 把
+`transformers` 鎖在 `==4.57.6`，且**未宣告 torch**，torch 需自行依本機 CUDA 安裝；官方
+文件所有範例皆假設 CUDA。vLLM 後端以 `pip install "qwen-asr[vllm]"` 安裝，並以
+`--backend vllm` 選用（上游是換一個 constructor，不是加參數）。
+
+Hugging Face 上另有 `-hf` 後綴的 repo（例如 `Qwen/Qwen3-ASR-0.6B-hf`），那是原生
+transformers 路線、需要 `transformers>=5.13`，與 `qwen-asr` 套件路線**互斥**；`--model-dir`
+指向哪一份權重決定能用哪一套 API。本套件走 `qwen-asr` 套件路線。
+
+DashScope 的 `qwen3-asr-flash` 是**雲端付費 API**，與上述開源權重是不同東西；本套件不接它，
+也不會有 local=false 的內建引擎。
+
+來源（查證日 2026-09-21）：
+[QwenLM/Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR)（README news：2026-01-29 發布、2026-06-26 原生 transformers 支援）、
+[qwen_asr/inference/qwen3_asr.py](https://github.com/QwenLM/Qwen3-ASR/blob/main/qwen_asr/inference/qwen3_asr.py)、
+[qwen_asr/inference/qwen3_forced_aligner.py](https://github.com/QwenLM/Qwen3-ASR/blob/main/qwen_asr/inference/qwen3_forced_aligner.py)、
+[PyPI qwen-asr 0.0.6](https://pypi.org/project/qwen-asr/)（0.0.6 上傳於 2026-01-30）、
+[HF Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B)、
+[HF Qwen/Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)、
+[HF Qwen/Qwen3-ForcedAligner-0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B)。
+
+**待實測欄位**：實際 torch 版本、0.6B 對 fixture 的 WER 與速度、`language="Japanese"`
+是否為上游接受的字串（文件只逐字出現 Chinese / English / Cantonese）。權重尚未下載，
+因此 `tests/test_engines.py` 的 `@pytest.mark.gpu` 測試目前一律 skip。
 
 ## 子命令
 

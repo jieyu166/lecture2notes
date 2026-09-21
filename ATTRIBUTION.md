@@ -91,11 +91,15 @@ Relation values:
 | `cli/__init__.py` | original | — | Package marker. |
 | `cli/main.py` | original | — | This package's own subcommand dispatch; not present upstream in this form. |
 | `engines/__init__.py` | original | — | Package marker. |
+| `engines/audio.py` | original | — | Single ffmpeg audio-extraction and duration contract for all engines; the rad-workflow scripts each shelled out to their own ffmpeg line. No upstream analog. |
 | `engines/base.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/whisper-srt-zh/scripts/transcribe.py` (timestamp formatting, cue-writing loop) and `skills/lecture-to-notes/scripts/build_lecture_viewer.py` (`parse_srt`); defines this package's own `Engine`/`Cue` interface, not present upstream. |
 | `engines/breeze_ct2.py` | inspired | `scripts/transcribe_video.py` | Shares the faster-whisper wrapper shape and CLI-flag surface inherent to the faster-whisper API itself (`beam_size`, `compute_type`, `vad_filter`, …), not copied prose; adds the CTranslate2 Breeze-ASR-25 model-directory checks, which upstream does not have. |
 | `engines/calibrate.py` | original | — | Session-written subtitle-offset measurement and drift-fit code (`offset3.py`/`vtt_fix.py` in `rad-workflow`, never itself a port of an upstream or rad-workflow *package* file — see `docs/group2.md`). No upstream analog. |
 | `engines/corrections.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/whisper-srt-zh/scripts/correct_srt.py`. Upstream's equivalent (`flag_asr_suspects.py`) is deliberately flag-only by design (never rewrites); this module does the opposite on purpose (deterministic find/replace with an audit sidecar) — an independently-designed third approach, not derived from either of upstream's two rejected auto-rewrite attempts. |
+| `engines/convert.py` | original | — | `l2n convert-model`: one-time Hugging Face to CTranslate2 conversion with a disk estimate and an overwrite refusal. No upstream or rad-workflow prior script. |
 | `engines/faster_whisper.py` | inspired | `scripts/transcribe_video.py` | Same reasoning as `breeze_ct2.py`: shared flag surface is inherent to the faster-whisper API, not copied; `--engine` selects something different in each project (cloud-vs-GPU upstream vs. local-engine-choice here). |
+| `engines/hallucination.py` | original | — | Repeated-cue loop detection for the Whisper-family failure mode that looks like a working transcript. No upstream analog. |
+| `engines/pipeline.py` | original | — | The transcribe stage glue (audio, engine, SRT, corrections sidecar); this package's own stage contract, not present upstream. |
 | `engines/qwen3_asr.py` | original | — | New engine registration for Qwen3-ASR; no upstream or rad-workflow prior script. |
 | `engines/registry.py` | original | — | This package's own `--engine` lookup and `--allow-cloud` gate; no prior script. |
 | `engines/whisper_cpp.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/whisper-srt-zh/scripts/transcribe.py` (the `--engine whisper.cpp` subprocess branch). |
@@ -120,6 +124,8 @@ Relation values:
 | `schema/__init__.py` | original | — | Package marker. |
 | `schema/builder.py` | original | — | Session-written lecture-document builder (`mkseg3.py` in `rad-workflow`, never itself a port of an upstream file). No upstream analog. |
 | `schema/condense.py` | original | — | Session-written per-minute transcript condensing (`condense_agent.py` in `rad-workflow`, never itself a port of an upstream file). No upstream analog. |
+| `schema/io.py` | original | — | The single atomic, BOM-free, LF-only canonical JSON writer/reader. No upstream analog. |
+| `schema/migrate.py` | original | — | `l2n migrate`: upgrades a 1.x lecture document to canonical schema v2. No upstream analog. |
 | `schema/model.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/lecture_model.py`. No upstream canonical-schema module or time-signature validator exists in `drpwchen/lecture-to-notes`. |
 
 Counts: 7 inspired, 15 ported-from-rad-workflow, 20 original — 42 modules total.

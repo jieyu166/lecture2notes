@@ -13,13 +13,21 @@ Exit codes (see ``lecture2notes.exit_codes``):
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import sys
+import tempfile
 from pathlib import Path
-from typing import Callable, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from lecture2notes import __version__, _deps, _out, exit_codes
+from lecture2notes.acceptance import check
 from lecture2notes.acceptance.check import check_json
+from lecture2notes.engines import calibrate
+from lecture2notes.engines import convert
+from lecture2notes.engines import corrections as corrections_mod
+from lecture2notes.engines import pipeline, registry
+from lecture2notes.engines.base import Engine
 from lecture2notes.schema.migrate import migrate_file
 
 LANG_CHOICES = ("zh", "en", "ja", "auto")
@@ -96,18 +104,142 @@ def require_lang(args: argparse.Namespace) -> str:
 
 
 # --------------------------------------------------------------------------
+# engine resolution
+# --------------------------------------------------------------------------
+#: Maps a CLI flag onto the constructor keyword an engine would call it.
+ENGINE_OPTION_FLAGS = {
+    "model": "model",
+    "model_dir": "model_dir",
+    "aligner_dir": "aligner_dir",
+    "backend": "backend",
+    "whisper_cpp_bin": "binary",
+    "whisper_cpp_model": "model",
+}
+
+
+def engine_options(args: argparse.Namespace, factory) -> Dict[str, Any]:
+    """Which of the engine flags this particular backend actually accepts.
+
+    Flags are filtered against the constructor rather than hard-coded per engine
+    name, so a third-party engine gets the same treatment as a shipped one.
+    """
+    try:
+        accepted = set(inspect.signature(factory).parameters)
+    except (TypeError, ValueError):  # pragma: no cover - exotic callables
+        accepted = set(ENGINE_OPTION_FLAGS.values())
+    options: Dict[str, Any] = {}
+    for flag, keyword in ENGINE_OPTION_FLAGS.items():
+        value = getattr(args, flag, None)
+        if value in (None, ""):
+            continue
+        if keyword in accepted:
+            options[keyword] = value
+    return options
+
+
+def resolve_engine(args: argparse.Namespace) -> Engine:
+    """Build the requested engine, refusing a cloud one without --allow-cloud."""
+    name = getattr(args, "engine", None) or registry.DEFAULT_ENGINE
+    try:
+        factory = registry._get(name)
+    except KeyError as exc:
+        _out.error(str(exc).strip("'"))
+        raise SystemExit(exit_codes.ERROR)
+    options = engine_options(args, factory)
+    # whisper.cpp names its ggml file with --whisper-cpp-model, so a bare
+    # --model must not silently become the path to a model file.
+    if name == "whisper_cpp" and getattr(args, "whisper_cpp_model", None):
+        options["model"] = args.whisper_cpp_model
+    try:
+        return registry.create(
+            name, allow_cloud=getattr(args, "allow_cloud", False), **options
+        )
+    except registry.CloudEngineBlocked as exc:
+        _out.error(str(exc))
+        raise SystemExit(exit_codes.ERROR)
+
+
+def load_corrections(args: argparse.Namespace):
+    """Read the correction table, or return None when none was asked for."""
+    table = getattr(args, "corrections", None)
+    if not table:
+        return None, None
+    path = Path(table)
+    if not path.is_file():
+        _out.error("corrections table not found: %s" % path)
+        raise SystemExit(exit_codes.ERROR)
+    return corrections_mod.load_table_file(path), str(path)
+
+
+# --------------------------------------------------------------------------
 # stage handlers
 # --------------------------------------------------------------------------
 def cmd_transcribe(args: argparse.Namespace) -> int:
-    require_lang(args)
+    if getattr(args, "list_engines", False):
+        for text in registry.engine_lines():
+            _out.line(text)
+        return exit_codes.OK
+    lang = require_lang(args)
+    video = getattr(args, "video", None)
+    if not video:
+        _out.error("transcribe needs a video or audio file")
+        return exit_codes.ERROR
+    source = Path(video)
+    if not source.is_file():
+        _out.error("no such file: %s" % source)
+        return exit_codes.ERROR
     _deps.require("ffmpeg")
-    not_implemented("transcribe")
+    engine = resolve_engine(args)
+    pairs, table_path = load_corrections(args)
+    result = pipeline.transcribe_video(
+        source,
+        lang,
+        engine,
+        pairs=pairs,
+        table_path=table_path,
+        s2t=not getattr(args, "no_s2t", False),
+        force=getattr(args, "force", False),
+        # An engine that cannot take an arbitrarily long input says so itself;
+        # --chunk-sec overrides that, and no engine forces chunking on the rest.
+        chunk_sec=getattr(args, "chunk_sec", None) or getattr(engine, "chunk_sec", None),
+    )
+    if result.skipped:
+        return exit_codes.OK
+    _out.ok("transcribe: %s" % ", ".join(p.name for p in result.outputs()))
     return exit_codes.OK
 
 
 def cmd_calibrate_subs(args: argparse.Namespace) -> int:
+    lang = require_lang(args)
+    video = getattr(args, "video", None)
+    subs = getattr(args, "subs", None)
+    if not video or not subs:
+        _out.error("calibrate-subs needs a video and a subtitle file")
+        return exit_codes.ERROR
+    for path in (Path(video), Path(subs)):
+        if not path.is_file():
+            _out.error("no such file: %s" % path)
+            return exit_codes.ERROR
     _deps.require("ffmpeg")
-    not_implemented("calibrate-subs")
+    engine = resolve_engine(args)
+    engine.check()
+    with tempfile.TemporaryDirectory(prefix="l2n-probes-") as scratch:
+        try:
+            result = calibrate.run_calibration(
+                Path(video),
+                Path(subs),
+                lang,
+                engine,
+                probes=getattr(args, "probes", None),
+                out_dir=Path(args.out_dir) if getattr(args, "out_dir", None) else None,
+                workdir=Path(scratch),
+            )
+        except calibrate.CalibrationError as exc:
+            _out.error(str(exc))
+            return exit_codes.ERROR
+    _out.ok("calibrate-subs: %s" % ", ".join(
+        path.name for path in result["files"].values()
+    ))
     return exit_codes.OK
 
 
@@ -149,6 +281,8 @@ def cmd_hub(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+#: Stages `l2n check` knows about. Only the ones with a handler are wired up;
+#: the rest still report "not implemented yet" rather than silently passing.
 CHECK_STAGES = ("transcribe", "frames", "json", "note")
 
 
@@ -164,22 +298,50 @@ def _existing_path(value: Optional[str], what: str) -> Optional[Path]:
     return path
 
 
-def cmd_check(args: argparse.Namespace) -> int:
-    stage = args.what
-    if stage not in CHECK_STAGES:
-        _out.error("check 需要階段名稱：%s" % " / ".join(CHECK_STAGES))
+def _check_transcribe(target: Optional[str]) -> int:
+    """`l2n check transcribe <srt>`: cue structure and hallucination loops."""
+    if not target:
+        _out.error("check transcribe needs a subtitle file")
         return exit_codes.ERROR
-    if stage != "json":
-        # The other three stages belong to the groups that own their outputs.
-        not_implemented("check %s" % stage)
-        return exit_codes.OK
+    path = Path(target)
+    if not path.is_file():
+        _out.error("no such file: %s" % path)
+        return exit_codes.ERROR
 
-    path = _existing_path(args.target, "check json")
+    report = check.Report(path.name)
+    check.check_transcribe(path, report)
+    report.emit()
+    _out.line(report.summary("transcribe"))
+    return check.exit_code([report])
+
+
+def _check_json(target: Optional[str]) -> int:
+    """`l2n check json <doc>`: the canonical schema v2 validator."""
+    path = _existing_path(target, "check json")
     if path is None:
         return exit_codes.ERROR
     report = check_json(path)
     report.emit()
     return report.exit_code()
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    stage = getattr(args, "what", None)
+    if not stage:
+        _out.error("check needs a stage: %s" % " / ".join(CHECK_STAGES))
+        return exit_codes.ERROR
+    if stage not in CHECK_STAGES:
+        _out.error("unknown check stage: %s (known: %s)"
+                   % (stage, ", ".join(CHECK_STAGES)))
+        return exit_codes.ERROR
+    target = getattr(args, "target", None)
+    if stage == "transcribe":
+        return _check_transcribe(target)
+    if stage == "json":
+        return _check_json(target)
+    # frames and note belong to the groups that own those outputs.
+    not_implemented("check %s" % stage)
+    return exit_codes.OK
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
@@ -206,7 +368,16 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_convert_model(args: argparse.Namespace) -> int:
-    not_implemented("convert-model")
+    try:
+        convert.convert(
+            out_dir=Path(args.out) if getattr(args, "out", None) else None,
+            source=getattr(args, "src", None) or convert.SOURCE_MODEL,
+            quantization=getattr(args, "quantization", convert.DEFAULT_QUANTIZATION),
+            force=getattr(args, "force", False),
+        )
+    except convert.ConversionRefused as exc:
+        _out.error(str(exc))
+        return exit_codes.ERROR
     return exit_codes.OK
 
 
@@ -245,7 +416,42 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", default=None, help="模型名稱或大小")
     p.add_argument("--model-dir", default=None, help="本機權重目錄")
     p.add_argument(
+        "--aligner-dir",
+        default=None,
+        dest="aligner_dir",
+        help="qwen3_asr 的 forced aligner 權重目錄（時間戳由它產生）",
+    )
+    p.add_argument(
+        "--backend",
+        default=None,
+        help="引擎後端（qwen3_asr：transformers 預設，vllm 選配）",
+    )
+    p.add_argument(
         "--allow-cloud", action="store_true", help="允許使用非本機引擎（預設拒絕）"
+    )
+    p.add_argument(
+        "--whisper-cpp-bin", default=None, help="whisper.cpp 執行檔路徑"
+    )
+    p.add_argument(
+        "--whisper-cpp-model", default=None, help="whisper.cpp 的 ggml 模型檔路徑"
+    )
+    p.add_argument(
+        "--corrections", default=None, help="對照表 JSON 路徑（套用後寫 raw 與 sidecar）"
+    )
+    p.add_argument(
+        "--no-s2t", action="store_true", help="不做簡轉繁（預設會轉）"
+    )
+    p.add_argument(
+        "--chunk-sec",
+        type=float,
+        default=None,
+        dest="chunk_sec",
+        help="把音訊切成這麼長的區塊逐段轉錄（給無法吃長音訊的後端）",
+    )
+    p.add_argument(
+        "--list-engines",
+        action="store_true",
+        help="列出所有已註冊引擎與其相依狀態後結束",
     )
     p.set_defaults(func=cmd_transcribe)
 
@@ -254,7 +460,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("video", nargs="?", help="影片路徑")
     p.add_argument("subs", nargs="?", help="官方字幕路徑（VTT 或 SRT）")
-    p.add_argument("--probes", type=int, default=3, help="探針數量（至少 3）")
+    _add_lang(p)
+    p.add_argument(
+        "--probes",
+        default=None,
+        help="探針數量（例如 4，至少 3）或明確位置秒數（例如 300,1800,4200）",
+    )
+    p.add_argument("--engine", default=None, help="探針用的轉錄引擎（預設 breeze_ct2）")
+    p.add_argument("--model", default=None, help="模型名稱或大小")
+    p.add_argument("--model-dir", default=None, help="本機權重目錄")
+    p.add_argument(
+        "--aligner-dir", default=None, dest="aligner_dir", help="qwen3_asr 對齊器目錄"
+    )
+    p.add_argument("--backend", default=None, help="引擎後端")
+    p.add_argument("--whisper-cpp-bin", default=None, help="whisper.cpp 執行檔路徑")
+    p.add_argument("--whisper-cpp-model", default=None, help="whisper.cpp ggml 模型路徑")
+    p.add_argument(
+        "--allow-cloud", action="store_true", help="允許使用非本機引擎（預設拒絕）"
+    )
+    p.add_argument(
+        "--out-dir", default=None, dest="out_dir", help="輸出目錄（預設與字幕同目錄）"
+    )
     p.set_defaults(func=cmd_calibrate_subs)
 
     p = sub.add_parser("frames", parents=[common], help="抓取投影片換頁影格")
@@ -323,9 +549,12 @@ def build_parser() -> argparse.ArgumentParser:
         "convert-model", parents=[common], help="把 Breeze-ASR-25 轉為 CTranslate2 權重"
     )
     p.add_argument("--src", default=None, help="來源模型（HuggingFace id 或本機目錄）")
-    p.add_argument("--out", default=None, help="輸出目錄")
+    p.add_argument("--out", default=None, help="輸出目錄（預設在 whisper-models 下）")
     p.add_argument(
-        "--quantization", default="float16", help="量化方式（預設 float16）"
+        "--quantization",
+        default=convert.DEFAULT_QUANTIZATION,
+        choices=list(convert.QUANTIZATIONS),
+        help="量化方式（預設 float16）",
     )
     p.set_defaults(func=cmd_convert_model)
 
@@ -376,6 +605,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except _deps.MissingDependency as exc:
         exc.report()
         return exit_codes.MISSING_DEPENDENCY
+    except RuntimeError as exc:
+        # An external tool or an engine failed. The message already says what
+        # and where, so print it as an error instead of a traceback.
+        _out.error(str(exc))
+        return exit_codes.ERROR
     except SystemExit as exc:
         code = exc.code
         return exit_codes.OK if code is None else int(code)

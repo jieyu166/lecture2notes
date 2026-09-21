@@ -9,6 +9,7 @@ it) and exits 3.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import shutil
 from pathlib import Path
 from typing import Callable, Dict, Optional
@@ -63,6 +64,19 @@ def require_binary(name: str, hint: Optional[str] = None) -> str:
     if not found:
         raise MissingDependency(name, hint or _hint(name))
     return found
+
+
+def module_available(name: str) -> bool:
+    """Is this module importable, without importing it?
+
+    ``--list-engines`` has to report every engine's dependency state, and
+    importing a model runtime just to answer that question would cost seconds and
+    load CUDA. ``find_spec`` answers it without executing the module.
+    """
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
 
 
 def require_module(name: str, import_name: Optional[str] = None,
@@ -142,6 +156,7 @@ __all__ = [
     "require_ct2_model",
     "require_ffmpeg",
     "require_ffprobe",
+    "module_available",
     "require_module",
     "require_qwen_asr",
     "require_rapidocr",
