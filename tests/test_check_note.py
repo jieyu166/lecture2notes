@@ -1,4 +1,4 @@
-"""`l2n check note`: rules R1 to R8, one passing and one failing case each.
+"""`l2n check note`: rules R1 to R9, one passing and one failing case each.
 
 Every note here starts as a real skeleton render and is then damaged in exactly
 one way, so a failure names the rule that broke rather than a fixture that
@@ -56,6 +56,15 @@ def lecture(tmp_path):
 def _edit(note_path: Path, transform):
     lines = note_path.read_text(encoding="utf-8").split("\n")
     note_path.write_text("\n".join(transform(lines)), encoding="utf-8", newline="\n")
+
+
+def _replace_question_section(note_path: Path, questions):
+    """Swap the whole 題目 body for a handwritten list, R9's only input."""
+    def transform(lines):
+        at = lines.index("## 題目")
+        stop = lines.index("## 學習驗證")
+        return lines[:at + 1] + ["", *questions, ""] + lines[stop:]
+    _edit(note_path, transform)
 
 
 def _insert_into_first_section(note_path: Path, text: str):
@@ -294,6 +303,55 @@ def test_r8_reports_placeholder_text(lecture):
     finding = next(f for f in report.findings if f.code == "R8")
     assert finding.severity == "warn"
     assert "delete the section instead" in finding.message
+
+
+# -- R9 ---------------------------------------------------------------------
+def test_r9_passes_on_a_freshly_rendered_question_section(lecture):
+    json_path, note_path = lecture
+
+    assert "R9" not in _codes(check.check_note_stage(json_path, note_path))
+
+
+def test_r9_reports_a_question_section_with_fewer_than_three_questions(lecture):
+    json_path, note_path = lecture
+    _replace_question_section(note_path, [
+        "1. 關於甲的理由是什麼？",
+        "2. %s 若某個案例缺少乙，結論還成立嗎？" % guideline.INFERENCE_MARK,
+    ])
+    report = check.check_note_stage(json_path, note_path)
+
+    finding = next(f for f in report.findings if f.code == "R9")
+    assert finding.severity == "warn"
+    assert "at least %d" % guideline.MIN_QUESTIONS in finding.message
+
+
+def test_r9_reports_a_question_section_with_no_inference_question(lecture):
+    json_path, note_path = lecture
+    _replace_question_section(note_path, [
+        "1. 甲的定義是什麼？",
+        "2. 乙的定義是什麼？",
+        "3. 丙的定義是什麼？",
+    ])
+    report = check.check_note_stage(json_path, note_path)
+
+    findings = [f for f in report.findings if f.code == "R9"]
+    assert [f.severity for f in findings] == ["warn"]
+    assert guideline.INFERENCE_MARK in findings[0].message
+
+
+def test_r9_is_silent_when_the_section_is_missing_because_that_is_r1(lecture):
+    json_path, note_path = lecture
+
+    def transform(lines):
+        at = lines.index("## 題目")
+        stop = lines.index("## 學習驗證")
+        return lines[:at] + lines[stop:]
+
+    _edit(note_path, transform)
+    report = check.check_note_stage(json_path, note_path)
+
+    assert "R1" in _codes(report)
+    assert "R9" not in _codes(report)
 
 
 # -- the report contract ----------------------------------------------------

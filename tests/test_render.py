@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,9 @@ from lecture2notes.notes.render import (
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "note_doc.json"
+
+#: A numbered question line, the same shape rule R9 counts.
+QUESTION_LINE = re.compile(r"^\s*\d+[.)、]\s*\S")
 
 
 @pytest.fixture()
@@ -124,11 +128,35 @@ def test_references_carry_the_correction_table_and_the_source_block(document):
     assert "offset model" not in references
 
 
-def test_questions_are_one_per_segment(document):
+def test_the_question_section_is_never_empty(document):
+    """Recall is answering, not rereading, so the section always carries drafts."""
+    body = _section(render_skeleton(document), "## 題目")
+    numbered = [line for line in body.splitlines() if QUESTION_LINE.match(line)]
+
+    assert guideline.MIN_QUESTIONS <= len(numbered) <= guideline.MAX_QUESTIONS
+
+
+def test_every_drafted_question_hides_its_answer_behind_a_callout(document):
+    body = _section(render_skeleton(document), "## 題目")
+    numbered = [line for line in body.splitlines() if QUESTION_LINE.match(line)]
+
+    assert body.count(guideline.ANSWER_CALLOUT) == len(numbered)
+    assert "> [!answer]-" in body
+
+
+def test_at_least_one_question_is_an_inference_question(document):
     body = _section(render_skeleton(document), "## 題目")
 
-    assert "1. 關於「佔位段落一：名詞與判準」" in body
-    assert "2. 關於「佔位段落二：追蹤與邊界」" in body
+    assert guideline.INFERENCE_MARK in body
+    assert "[推論]" in body
+
+
+def test_questions_cross_segments_rather_than_repeating_one(document):
+    """A question answerable from a single section is rereading in disguise."""
+    body = _section(render_skeleton(document), "## 題目")
+    first, second = (segment["title"] for segment in document["segments"][:2])
+
+    assert first in body and second in body
 
 
 def test_learning_verification_drafts_three_things_behind_a_marker(document):

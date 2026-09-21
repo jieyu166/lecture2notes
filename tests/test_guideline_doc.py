@@ -54,8 +54,18 @@ def test_the_must_follow_part_can_be_extracted(doc_text):
 def test_every_rule_id_is_documented(doc_text):
     machine = guideline.section_text(doc_text, guideline.MACHINE_CHECKABLE_HEADING)
 
-    for rule in guideline.RULES + ("R8",):
+    for rule in guideline.RULES:
         assert "**%s**" % rule in machine, rule
+
+
+def test_the_document_states_the_inference_question_pattern(doc_text):
+    """R9 counts the marker; the wording that makes it worth counting is here."""
+    part = guideline.must_follow_text()
+
+    assert guideline.INFERENCE_MARK in part
+    assert "若病人有 A 但沒有 B" in part
+    assert guideline.ANSWER_CALLOUT in part
+    assert "Karpicke" in part and "Dunlosky" in part
 
 
 def test_the_r5_boundary_table_is_in_the_document(doc_text):

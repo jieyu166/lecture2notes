@@ -4,7 +4,7 @@
 
 ## 規範在哪裡
 
-唯一的規範文件是 **[`docs/note-writing-guideline.md`](../../docs/note-writing-guideline.md)**，目前版本 **`guideline_version: 1.0`**。
+唯一的規範文件是 **[`docs/note-writing-guideline.md`](../../docs/note-writing-guideline.md)**，目前版本 **`guideline_version: 1.1`**。
 
 這份參考不重寫規則。規則只有一份，重寫兩份就會分岔。下面只寫流程。
 

@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from lecture2notes.notes import guideline
 from lecture2notes.profiles import loader
 from lecture2notes.schema.model import segment_end, segment_start
 
@@ -379,19 +380,88 @@ def render_references(data: Mapping[str, Any]) -> List[str]:
     return lines
 
 
-def render_questions(segments: Sequence[Any]) -> List[str]:
-    """One placeholder question per segment, for the expansion to rewrite."""
-    lines: List[str] = []
-    for position, segment in enumerate(segments, 1):
-        if not isinstance(segment, Mapping):
-            continue
-        title = text_of(segment.get("title"))
-        lines.append(
-            "%d. 關於「%s」，講者的理由是什麼？結論在什麼情況下不成立？"
-            % (position, title)
+#: What an unanswered draft question carries until the expansion fills it in.
+ANSWER_PLACEHOLDER = "（擴寫時填入答案，並標出對應時間碼）"
+
+#: Indent that keeps a callout inside its numbered list item.
+ANSWER_INDENT = "   "
+
+#: Used when the document has too few segments to pair two of them.
+QUESTION_FILLER = "（素材不足，擴寫時自行補一題問理由或邊界的題目）"
+
+#: The line that says what this section is for, so nobody treats it as decoration.
+QUESTION_NOTE = "回看是答題，不是重讀：先自己答完，再展開下面的答案。"
+
+
+def segment_titles(data: Mapping[str, Any]) -> List[str]:
+    """Every segment title that is a non-empty string, in document order."""
+    segments = data.get("segments") if isinstance(data.get("segments"), list) else []
+    titles: List[str] = []
+    for segment in segments:
+        if isinstance(segment, Mapping) and text_of(segment.get("title")):
+            titles.append(text_of(segment.get("title")))
+    return titles
+
+
+def _inference_draft(titles: Sequence[str]) -> str:
+    """The one question that cannot be answered by scanning the note.
+
+    Its shape is "if a case has A but not B, does the conclusion still hold" --
+    a question about the boundary of the claim, not about what a term means. A
+    definition question is answerable by rereading, which is exactly the habit
+    this section exists to break.
+    """
+    if len(titles) >= 2:
+        return "%s 若某個案例具備「%s」但缺少「%s」，這篇的結論還成立嗎？" % (
+            guideline.INFERENCE_MARK, titles[0], titles[-1]
         )
-    if not lines:
-        lines.append("1. （尚無段落，擴寫時請補上題目）")
+    if titles:
+        return "%s 若把「%s」的前提拿掉一個，這篇的結論還成立嗎？" % (
+            guideline.INFERENCE_MARK, titles[0]
+        )
+    return "%s 若把本講座的前提拿掉一個，結論還成立嗎？" % guideline.INFERENCE_MARK
+
+
+def question_drafts(data: Mapping[str, Any]) -> List[str]:
+    """Three to five draft questions, the last one inferential.
+
+    The section is never allowed to be empty, because answering is what makes a
+    lecture stick and rereading is not: retrieval practice is the high-utility
+    study technique and rereading is the low-utility one (Karpicke & Blunt 2011;
+    Dunlosky 2013). Questions are drafted across segments rather than one per
+    segment, so answering one cannot be done by looking at a single section.
+    """
+    titles = segment_titles(data)
+    drafts: List[str] = []
+    for position, title in enumerate(titles[:guideline.MAX_QUESTIONS - 1]):
+        other = titles[(position + 1) % len(titles)]
+        if other == title:
+            drafts.append("不看筆記說出「%s」這一段的推理鏈，講者的理由是什麼？" % title)
+        elif position % 2 == 0:
+            drafts.append(
+                "不看筆記說出「%s」與「%s」的關聯，講者為什麼把兩者放在一起？"
+                % (title, other)
+            )
+        else:
+            drafts.append(
+                "不看筆記說出「%s」的結論，在「%s」的情境下會怎麼變？講者的理由是什麼？"
+                % (title, other)
+            )
+    while len(drafts) < guideline.MIN_QUESTIONS - 1:
+        drafts.append(QUESTION_FILLER)
+    drafts.append(_inference_draft(titles))
+    return drafts
+
+
+def render_questions(data: Mapping[str, Any]) -> List[str]:
+    """The 題目 section: drafted questions, each with a collapsed answer."""
+    lines: List[str] = [QUESTION_NOTE, "", AI_DRAFT_MARK, ""]
+    for number, question in enumerate(question_drafts(data), 1):
+        if number > 1:
+            lines.append("")
+        lines.append("%d. %s" % (number, question))
+        lines.append("%s%s 答案" % (ANSWER_INDENT, guideline.ANSWER_CALLOUT))
+        lines.append("%s> %s" % (ANSWER_INDENT, ANSWER_PLACEHOLDER))
     return lines
 
 
@@ -462,7 +532,7 @@ def render_skeleton(
         "summary": summary,
         "segments": "\n".join(section_lines) or "（尚無段落）",
         "references": "\n".join(render_references(data)),
-        "questions": "\n".join(render_questions(segments)),
+        "questions": "\n".join(render_questions(data)),
         "verification": "\n".join(render_verification(takeaways)),
         "title": text_of(data.get("title")),
     }
@@ -482,8 +552,12 @@ def write_skeleton(path: Path, data: Mapping[str, Any], **kwargs: Any) -> Path:
 
 __all__ = [
     "AI_DRAFT_MARK",
+    "ANSWER_INDENT",
+    "ANSWER_PLACEHOLDER",
     "CORRECTION_COLUMNS",
     "PLACEHOLDER",
+    "QUESTION_FILLER",
+    "QUESTION_NOTE",
     "REMEMBER_COUNT",
     "STYLES",
     "UNVERIFIED_MARK",
@@ -495,6 +569,7 @@ __all__ = [
     "frontmatter_block",
     "frontmatter_context",
     "frontmatter_keys",
+    "question_drafts",
     "quote_items",
     "render_frontmatter",
     "render_note",
@@ -503,6 +578,7 @@ __all__ = [
     "render_segment",
     "render_skeleton",
     "render_verification",
+    "segment_titles",
     "strings_of",
     "text_of",
     "write_note",
