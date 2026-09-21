@@ -347,9 +347,6 @@ def cmd_frames(args: argparse.Namespace) -> int:
 
 
 def cmd_ocr(args: argparse.Namespace) -> int:
-    # Checked before the target is even resolved: a run that cannot OCR must say
-    # so with exit 3 rather than reporting a missing file it never needed.
-    _deps.require("rapidocr")
     target = getattr(args, "target", None)
     if not target:
         _out.error("ocr needs a frames folder or a canonical JSON")
@@ -358,6 +355,21 @@ def cmd_ocr(args: argparse.Namespace) -> int:
     if not path.exists():
         _out.error("no such file or folder: %s" % path)
         return exit_codes.ERROR
+    # The target is resolved before the dependency is required, not after. A
+    # frames folder that names no lecture -- or names more than one -- is a
+    # usage error the caller fixes by naming the document; a machine without
+    # the optional OCR package was being told "install rapidocr" instead and
+    # could never reach the real problem. Resolving first costs one directory
+    # listing and loads no model, so nothing is paid for the better message.
+    if path.is_dir():
+        try:
+            ocr_mod.resolve_folder_target(path)
+        except ocr_mod.OcrTargetError as exc:
+            _out.error("ocr: %s" % exc.message)
+            return exit_codes.ERROR
+    # There is a lecture to OCR: a run that cannot OCR now says so with exit 3,
+    # before a single frame is read.
+    _deps.require("rapidocr")
     try:
         result = ocr_mod.run_ocr(
             path,
