@@ -17,6 +17,7 @@ from lecture2notes.notes import guideline
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOC = REPO_ROOT / "docs" / "note-writing-guideline.md"
 SKILL_REFERENCE = REPO_ROOT / "skill" / "references" / "note-writing.md"
+REFERENCE_SEGMENTATION = REPO_ROOT / "skill" / "references" / "segmentation.md"
 
 
 @pytest.fixture(scope="module")
@@ -104,6 +105,32 @@ def test_the_document_states_the_speaker_outline_rules(doc_text):
     assert "坡道" in part
 
 
+def test_the_document_states_summary_quotes_the_takeaways(doc_text):
+    """Rewriting the takeaways makes the note and the JSON disagree silently."""
+    part = guideline.must_follow_text()
+
+    assert "直接引用 `takeaways_zh`" in part
+    assert "跨版本對照" in part
+    assert "閱片連結" in part
+
+
+def test_the_document_lists_the_six_kinds_of_speaker_aside(doc_text):
+    part = guideline.must_follow_text()
+
+    for kind in ("界定概念", "後果嚴重", "與認知相反", "遞進缺環", "轉折", "多面向印證"):
+        assert kind in part, kind
+    assert "只在 JSON 留一個時間碼" in part
+
+
+def test_the_document_states_the_four_arc_check(doc_text):
+    part = guideline.must_follow_text()
+
+    assert "四段弧" in part
+    assert "questions_zh" in part
+    for arc in ("坡道", "背景", "正文", "昇華"):
+        assert arc in part, arc
+
+
 def test_the_document_names_every_mandatory_section(doc_text):
     for heading, _ in guideline.MANDATORY_SECTIONS:
         assert "`%s`" % heading in doc_text, heading
@@ -116,6 +143,18 @@ def test_the_skill_reference_points_at_the_document():
     assert "docs/note-writing-guideline.md" in text
     assert guideline.VERSION_LINE in text
     assert "l2n check note" in text
+
+
+def test_the_segmentation_reference_asks_for_questions_and_the_four_arcs():
+    """The LLM writes the questions; the reference is where it is told to."""
+    assert REFERENCE_SEGMENTATION.is_file()
+    text = REFERENCE_SEGMENTATION.read_text(encoding="utf-8")
+
+    assert "questions_zh" in text
+    assert "四段弧" in text
+    for arc in ("坡道", "背景", "正文", "昇華"):
+        assert arc in text, arc
+    assert "缺哪一段就照實寫" in text
 
 
 def test_the_document_uses_no_console_unsafe_markers(doc_text):

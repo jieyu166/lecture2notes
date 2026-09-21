@@ -861,6 +861,65 @@ def _validate_top_level(data: Mapping[str, Any], findings: List[Finding]) -> Non
     if "ocr_meta" in data and not isinstance(data.get("ocr_meta"), Mapping):
         findings.append(_error("ocr_meta", "ocr_meta", "ocr_meta must be an object"))
 
+    _validate_questions(data, findings)
+
+
+def _validate_questions(data: Mapping[str, Any], findings: List[Finding]) -> None:
+    """`questions_zh` is optional, but a malformed one is an error.
+
+    Optional because a document written before the segmentation step drafted
+    questions is still a valid document. An error when present and wrong,
+    because a question that points at a segment which does not exist is worse
+    than no question: it renders into the note and reads like it was checked.
+
+    Shape: ``[{"text": "...", "segments": [1, 3]}]``. The indexes are the
+    1-based ``segments[].index`` the rest of the schema already uses, and more
+    than one of them is the point -- a question answerable from a single
+    section is rereading with extra steps.
+    """
+    if "questions_zh" not in data:
+        return
+    questions = data.get("questions_zh")
+    if not isinstance(questions, list):
+        findings.append(_error(
+            "questions_zh", "questions_zh",
+            "questions_zh must be an array of objects",
+        ))
+        return
+    segments = data.get("segments")
+    count = len(segments) if isinstance(segments, list) else 0
+    for position, item in enumerate(questions):
+        where = "questions_zh[%d]" % position
+        if not isinstance(item, Mapping):
+            findings.append(_error(
+                "questions_zh", where, "%s must be an object" % where
+            ))
+            continue
+        if not isinstance(item.get("text"), str) or not item.get("text").strip():
+            findings.append(_error(
+                "questions_zh", where + ".text",
+                "%s.text must be a non-empty string" % where,
+            ))
+        indexes = item.get("segments")
+        if not isinstance(indexes, list) or not indexes:
+            findings.append(_error(
+                "questions_zh", where + ".segments",
+                "%s.segments must be a non-empty array of segment indexes" % where,
+            ))
+            continue
+        for index in indexes:
+            if (
+                not isinstance(index, int)
+                or isinstance(index, bool)
+                or not 1 <= index <= count
+            ):
+                findings.append(_error(
+                    "questions_zh", where + ".segments",
+                    "%s.segments names segment %r, which does not exist" % (
+                        where, index
+                    ),
+                ))
+
 
 def _validate_bullets(
     segment: Mapping[str, Any], number: int, findings: List[Finding]

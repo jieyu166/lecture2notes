@@ -438,6 +438,22 @@ def _inference_draft(titles: Sequence[str]) -> str:
     return "%s 若把本講座的前提拿掉一個，結論還成立嗎？" % guideline.INFERENCE_MARK
 
 
+def explicit_questions(data: Mapping[str, Any]) -> List[str]:
+    """The questions the segmentation step already wrote, if it wrote any.
+
+    ``questions_zh`` is optional, so this is allowed to come back empty and the
+    skeleton falls back to drafting its own from the segment titles.
+    """
+    raw = data.get("questions_zh")
+    if not isinstance(raw, list):
+        return []
+    out: List[str] = []
+    for item in raw:
+        if isinstance(item, Mapping) and text_of(item.get("text")).strip():
+            out.append(text_of(item["text"]).strip())
+    return out
+
+
 def question_drafts(data: Mapping[str, Any]) -> List[str]:
     """Three to five draft questions, the last one inferential.
 
@@ -446,10 +462,21 @@ def question_drafts(data: Mapping[str, Any]) -> List[str]:
     study technique and rereading is the low-utility one (Karpicke & Blunt 2011;
     Dunlosky 2013). Questions are drafted across segments rather than one per
     segment, so answering one cannot be done by looking at a single section.
+
+    ``questions_zh`` wins when the segmentation step already wrote a usable set;
+    a set that is short or has no inference question is kept and topped up
+    rather than discarded.
     """
     titles = segment_titles(data)
-    drafts: List[str] = []
+    written = explicit_questions(data)[:guideline.MAX_QUESTIONS]
+    if len(written) >= guideline.MIN_QUESTIONS and any(
+        guideline.INFERENCE_MARK in question for question in written
+    ):
+        return written
+    drafts: List[str] = written[:guideline.MAX_QUESTIONS - 1]
     for position, title in enumerate(titles[:guideline.MAX_QUESTIONS - 1]):
+        if len(drafts) >= guideline.MAX_QUESTIONS - 1:
+            break
         other = titles[(position + 1) % len(titles)]
         if other == title:
             drafts.append("不看筆記說出「%s」這一段的推理鏈，講者的理由是什麼？" % title)
@@ -678,6 +705,7 @@ __all__ = [
     "bullet_items",
     "bullet_texts",
     "clock",
+    "explicit_questions",
     "fill",
     "frontmatter_block",
     "frontmatter_context",

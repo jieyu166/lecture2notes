@@ -251,6 +251,31 @@ def test_questions_cross_segments_rather_than_repeating_one(document):
     assert first in body and second in body
 
 
+def test_questions_written_into_the_document_win_over_the_drafts(document):
+    """`questions_zh` is where the segmentation step puts real questions."""
+    document["questions_zh"] = [
+        {"text": "甲與乙為什麼要放在一起看？", "segments": [1, 2]},
+        {"text": "乙的判準在什麼情況下會失效？", "segments": [2]},
+        {"text": "[推論] 若某案例有甲但沒有乙，結論還成立嗎？", "segments": [1, 2]},
+    ]
+    body = _section(render_skeleton(document), "## 題目")
+
+    assert "1. 甲與乙為什麼要放在一起看？" in body
+    assert "3. [推論] 若某案例有甲但沒有乙，結論還成立嗎？" in body
+    assert "不看筆記說出" not in body
+
+
+def test_a_short_question_set_is_topped_up_rather_than_trusted(document):
+    """Two questions and no inference question is not a usable set."""
+    document["questions_zh"] = [{"text": "甲的理由是什麼？", "segments": [1]}]
+    body = _section(render_skeleton(document), "## 題目")
+    numbered = [line for line in body.splitlines() if QUESTION_LINE.match(line)]
+
+    assert "1. 甲的理由是什麼？" in body
+    assert guideline.MIN_QUESTIONS <= len(numbered) <= guideline.MAX_QUESTIONS
+    assert guideline.INFERENCE_MARK in body
+
+
 def test_learning_verification_drafts_three_things_behind_a_marker(document):
     body = _section(render_skeleton(document), "## 學習驗證")
 

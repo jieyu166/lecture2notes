@@ -246,6 +246,56 @@ def test_an_empty_segment_list_is_an_error():
 
 # -- file-backed rules ------------------------------------------------------
 
+# -- questions_zh, the optional cross-segment question set -----------------
+
+def test_a_document_without_questions_is_still_valid():
+    """The field is optional: documents written before it existed still pass."""
+    document = load_valid()
+    assert "questions_zh" not in document
+    assert validate_document(document) == []
+
+
+def test_a_well_formed_question_set_is_accepted():
+    document = load_valid()
+    document["questions_zh"] = [
+        {"text": "若某個案例具備甲但缺少乙，這篇的結論還成立嗎？", "segments": [1, 2]},
+    ]
+
+    assert validate_document(document) == []
+
+
+def test_a_question_set_that_is_not_a_list_is_an_error():
+    document = load_valid()
+    document["questions_zh"] = "一題"
+
+    assert "questions_zh" in codes(document)
+
+
+def test_a_question_without_text_is_an_error():
+    document = load_valid()
+    document["questions_zh"] = [{"segments": [1]}]
+
+    assert "questions_zh" in codes(document)
+    assert "questions_zh[0].text" in messages(document)
+
+
+def test_a_question_with_no_segments_is_an_error():
+    document = load_valid()
+    document["questions_zh"] = [{"text": "甲為什麼成立？", "segments": []}]
+
+    assert "questions_zh" in codes(document)
+    assert "segments" in messages(document)
+
+
+def test_a_question_naming_a_segment_that_does_not_exist_is_an_error():
+    document = load_valid()
+    document["questions_zh"] = [{"text": "甲為什麼成立？", "segments": [99]}]
+    report = messages(document)
+
+    assert "questions_zh" in codes(document)
+    assert "99" in report and "does not exist" in report
+
+
 def test_check_json_reports_a_frame_that_is_not_on_disk(tmp_path):
     document = load_valid()
     path = materialize(document, tmp_path)
