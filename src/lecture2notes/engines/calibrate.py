@@ -32,7 +32,9 @@ from __future__ import annotations
 import difflib
 import json
 import re
+import shutil
 import statistics
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -496,8 +498,15 @@ def run_calibration(
 
     Nothing is written until the measurement has succeeded: a run that cannot
     place three reliable probes raises :class:`CalibrationError` and leaves the
-    directory exactly as it found it, because a half-calibrated subtitle file is
-    worse than an uncalibrated one.
+    directory exactly as it found it.
+
+    The probe audio itself needs somewhere to live while it is being
+    transcribed. Unless the caller passes ``workdir`` explicitly, that scratch
+    directory is created with :func:`tempfile.mkdtemp` (in the system temp
+    area, never next to the subtitle) and is always removed again -- on
+    success and on failure alike -- before this function returns or raises.
+    A caller-supplied ``workdir`` is never removed: it belongs to the caller,
+    who is free to inspect or reuse the probe audio afterwards.
     """
     from lecture2notes.engines import audio as audio_mod
     from lecture2notes.engines.base import parse_srt
@@ -520,23 +529,28 @@ def run_calibration(
             "need %d" % (len(positions), total, MIN_POINTS_PER_PROBE)
         )
 
-    scratch = Path(workdir) if workdir else Path(subtitle).parent / ".l2n-probes"
-    windows = cut_probes(video, positions, scratch, window_sec, extract)
-    probe_windows = transcribe_probes(engine, windows, lang)
-
+    owns_scratch = workdir is None
+    scratch = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="l2n-probes-"))
     try:
-        corrected, report = calibrate(
-            official_cues, probe_windows, min_duration=min_duration, threshold=threshold
-        )
-    except ValueError as exc:
-        raise CalibrationError(str(exc)) from None
+        windows = cut_probes(video, positions, scratch, window_sec, extract)
+        probe_windows = transcribe_probes(engine, windows, lang)
 
-    destination = Path(out_dir) / subtitle.name if out_dir else subtitle
-    written = write_outputs(destination, official_cues, corrected, report)
-    for text in report_lines(report):
-        _out.stage("calibrate", text)
-    return {"report": report, "files": written, "positions": positions,
-            "cues": corrected}
+        try:
+            corrected, report = calibrate(
+                official_cues, probe_windows, min_duration=min_duration, threshold=threshold
+            )
+        except ValueError as exc:
+            raise CalibrationError(str(exc)) from None
+
+        destination = Path(out_dir) / subtitle.name if out_dir else subtitle
+        written = write_outputs(destination, official_cues, corrected, report)
+        for text in report_lines(report):
+            _out.stage("calibrate", text)
+        return {"report": report, "files": written, "positions": positions,
+                "cues": corrected}
+    finally:
+        if owns_scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
 
 
 __all__ = [

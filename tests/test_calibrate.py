@@ -15,6 +15,7 @@ Every subtitle string is synthetic placeholder text generated in the test.
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -330,6 +331,55 @@ def test_fewer_than_three_reliable_probes_writes_nothing(workspace):
     assert after == before - {"lecture.vtt"}
     assert not (tmp_path / "lecture.offset.json").exists()
     assert not (tmp_path / "lecture.official.srt").exists()
+
+
+def test_a_failed_run_with_no_workdir_leaves_no_scratch_directory_anywhere(
+    workspace, monkeypatch
+):
+    """The default probe workdir lives in the system temp area, and a failed
+    run removes it again: no ``.l2n-probes`` next to the subtitle, and no
+    ``l2n-probes-*`` directory left behind in the temp area either.
+    """
+    tmp_path, video = workspace
+    subs = tmp_path / "lecture.vtt"
+    write_srt(subs, build_official(DRIFTING))
+
+    created: list = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def spy_mkdtemp(*args, **kwargs):
+        path = real_mkdtemp(*args, **kwargs)
+        created.append(Path(path))
+        return path
+
+    monkeypatch.setattr(calibrate.tempfile, "mkdtemp", spy_mkdtemp)
+
+    with pytest.raises(calibrate.CalibrationError):
+        calibrate.run_calibration(
+            video, subs, "zh", replay_engine(DRIFTING, drop=(1,)),
+            duration_sec=DURATION, extract=stub_extract,
+        )
+
+    assert created, "expected the default workdir to be created via tempfile.mkdtemp"
+    assert created[0].name.startswith("l2n-probes-")
+    assert not created[0].exists()
+    assert not (tmp_path / ".l2n-probes").exists()
+
+
+def test_a_caller_supplied_workdir_is_left_in_place(workspace):
+    """A ``workdir`` the caller passed in is theirs; calibration never deletes it."""
+    tmp_path, video = workspace
+    subs = tmp_path / "lecture.vtt"
+    write_srt(subs, build_official(CONSTANT))
+    workdir = tmp_path / "my-scratch"
+
+    calibrate.run_calibration(
+        video, subs, "zh", replay_engine(CONSTANT), duration_sec=DURATION,
+        workdir=workdir, extract=stub_extract,
+    )
+
+    assert workdir.is_dir()
+    assert any(workdir.iterdir())
 
 
 def test_an_unparseable_subtitle_file_is_refused(workspace):
