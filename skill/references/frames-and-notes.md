@@ -53,7 +53,7 @@ l2n ocr <frames 資料夾>       # 只有在同層剛好一場講座時才可用
 同一個課程資料夾放好幾場講座、共用一個 `frames/` 是常態，這時請傳 `<stem>.json`
 或 `<stem>.frames.json`。傳 `<stem>.frames.json` 時快取寫到 `<stem>.frames_ocr.json`，
 同層若已有 `<stem>.json` 也會一併寫入 `frame_ocr`；manifest 本身不會被改寫。
-`l2n run` 已經知道 stem，會自己依序選 `<stem>.json` → `<stem>.frames.json` →
+`l2n run` 已經知道 stem，會自己依序選 `<stem>.json` -> `<stem>.frames.json` ->
 只取 `frames/<stem>-*` 的影格，不會因為旁邊有別場講座而 exit 2。
 傳入的 JSON 如果不是物件（例如把 manifest 清單改名成 `x.json`），會 exit 2 並說明。
 
