@@ -31,6 +31,33 @@ import pytest
 from lecture2notes import _out
 
 
+#: Tests marked with this build a wheel and install it into a throwaway venv.
+PACKAGING_MARKER = "packaging"
+
+
+def pytest_collection_modifyitems(config, items):
+    """Leave the packaging tests out of a plain run, without a `-m` in addopts.
+
+    `-m` in ``addopts`` does not survive: every CI job already passes its own
+    ``-m "not gpu and not e2e"``, and argparse keeps the last one, so the slow
+    tests would silently rejoin the fast run. Deselecting here is immune to
+    that. The hook stands aside as soon as ``-m`` mentions ``packaging`` at
+    all, so both ``-m packaging`` and ``-m "not packaging"`` mean what they say
+    and pytest's own filter decides.
+    """
+    if PACKAGING_MARKER in (config.getoption("markexpr") or ""):
+        return
+    selected, deselected = [], []
+    for item in items:
+        if item.get_closest_marker(PACKAGING_MARKER) is None:
+            selected.append(item)
+        else:
+            deselected.append(item)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = selected
+
+
 @pytest.fixture(autouse=True)
 def reset_output_flags():
     """Keep the module-level output flags from leaking between tests."""

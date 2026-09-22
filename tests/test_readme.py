@@ -240,8 +240,8 @@ def _declared_version() -> str:
     return match.group(1)
 
 
-def test_the_project_is_at_0_2_0():
-    assert _declared_version() == "0.2.0"
+def test_the_project_is_at_0_2_1():
+    assert _declared_version() == "0.2.1"
 
 
 def test_the_source_fallback_matches_pyproject():
@@ -264,13 +264,28 @@ def test_the_version_flag_prints_the_package_version(capsys):
     assert printed == "lecture2notes %s" % lecture2notes.__version__
 
 
-def test_the_readme_lists_both_releases():
+def test_the_readme_lists_every_release():
     text = _readme_text()
 
     assert "## 版本說明" in text
-    assert text.count("### v0.1.0") == 1
-    assert text.count("### v0.2.0") == 1
+    for heading in ("### v0.1.0", "### v0.2.0", "### v0.2.1"):
+        assert text.count(heading) == 1, heading
     assert text.index("### v0.1.0") < text.index("### v0.2.0")
+    assert text.index("### v0.2.0") < text.index("### v0.2.1")
+
+
+def test_the_readme_says_a_plain_pip_install_can_deploy_the_skill():
+    """The 0.2.1 change is only real if the install section states it.
+
+    v0.2.0's install section sent people to a `git clone` for `install-skill`,
+    which was true then and is the exact sentence that has to stop being
+    there.
+    """
+    text = _readme_text()
+    section = text[text.index("## 安裝"):text.index("## 快速開始")]
+
+    assert "install-skill" in section
+    assert "profile init" in section
 
 
 def test_the_readme_says_what_is_still_untested():

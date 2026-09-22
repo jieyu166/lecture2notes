@@ -7,7 +7,7 @@ from importlib import metadata
 #: contributors and several of this project's own verification runs execute it.
 #: It must equal ``pyproject.toml``'s ``version``; a test asserts that, because
 #: two numbers that are allowed to disagree eventually do.
-FALLBACK_VERSION = "0.2.0"
+FALLBACK_VERSION = "0.2.1"
 
 try:
     __version__ = metadata.version("lecture2notes")

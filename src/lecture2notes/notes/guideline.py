@@ -13,6 +13,8 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from lecture2notes import resources
+
 #: Bump this whenever a rule changes meaning. `l2n check note` prints it, so a
 #: report always says which edition of the rules produced it.
 GUIDELINE_VERSION = "1.3"
@@ -165,17 +167,23 @@ _HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$")
 
 
 def find_guideline_doc(start: Optional[Path] = None) -> Optional[Path]:
-    """Locate ``docs/note-writing-guideline.md`` by walking up from the package.
+    """Locate ``docs/note-writing-guideline.md``.
 
-    Present in a source checkout, absent from a wheel that ships only the
-    package. Callers treat None as "print the path, not the text".
+    A checkout has it at its repository path; an installed wheel has the copy
+    the build mapped into ``lecture2notes/_bundled/docs/``, so since 0.2.1
+    ``render --expand-prompt`` quotes the rules rather than only naming the
+    file. Passing *start* keeps the old walk-up behaviour for a caller that
+    wants to search from a particular directory. Callers still treat ``None``
+    as "print the path, not the text".
     """
-    here = Path(start) if start is not None else Path(__file__).resolve()
-    for parent in [here] + list(here.parents):
-        candidate = parent / GUIDELINE_DOC
-        if candidate.is_file():
-            return candidate
-    return None
+    if start is not None:
+        here = Path(start)
+        for parent in [here] + list(here.parents):
+            candidate = parent / GUIDELINE_DOC
+            if candidate.is_file():
+                return candidate
+        return None
+    return resources.guideline_doc()
 
 
 def section_text(markdown: str, heading_contains: str) -> str:

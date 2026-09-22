@@ -41,7 +41,7 @@ from lecture2notes.outputs import pbf as pbf_mod
 from lecture2notes.outputs import publish as publish_mod
 from lecture2notes.outputs import viewer as viewer_mod
 from lecture2notes.outputs.plan import plan_for
-from lecture2notes.profiles import loader
+from lecture2notes.profiles import bootstrap, loader
 from lecture2notes.schema import condense as condense_mod
 from lecture2notes.schema import scaffold as scaffold_mod
 from lecture2notes.schema.io import read_json, write_json_atomic
@@ -1127,7 +1127,7 @@ def cmd_convert_model(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
-PROFILE_ACTIONS = ("show",)
+PROFILE_ACTIONS = ("show", "init")
 
 
 def _profile_value(value: Any) -> str:
@@ -1144,6 +1144,32 @@ def _profile_value(value: Any) -> str:
     return json.dumps(value)
 
 
+def _profile_init(args: argparse.Namespace) -> int:
+    """`l2n profile init`: write the shipped overlay example, keeping yours.
+
+    Prints one line per file so the difference between "written" and "kept"
+    is visible, because that difference is the whole safety property: a second
+    run must be able to add a missing file without touching the four the user
+    has since edited.
+    """
+    try:
+        target, written, kept = bootstrap.init_overlay(dest=getattr(args, "dest", None))
+    except bootstrap.BootstrapError as exc:
+        _out.error(str(exc))
+        return exit_codes.ERROR
+
+    _out.stage("profile init", str(target))
+    for name in written:
+        _out.line("wrote %s" % name)
+    for name in kept:
+        _out.stage("profile init", "kept existing file: %s" % name)
+    _out.ok(
+        "overlay example: %d written, %d kept -> %s"
+        % (len(written), len(kept), target)
+    )
+    return exit_codes.OK
+
+
 def cmd_profile(args: argparse.Namespace) -> int:
     """`l2n profile show`: every effective key, its value and its source layer."""
     action = getattr(args, "action", None) or "show"
@@ -1153,6 +1179,9 @@ def cmd_profile(args: argparse.Namespace) -> int:
             % (action, " / ".join(PROFILE_ACTIONS))
         )
         return exit_codes.ERROR
+
+    if action == "init":
+        return _profile_init(args)
 
     resolved = loader.resolve(overrides={"note.style": getattr(args, "style", None)})
 
@@ -1478,8 +1507,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.set_defaults(func=cmd_convert_model)
 
-    p = sub.add_parser("profile", parents=[common], help="檢視 profile 與 overlay 的生效設定")
-    p.add_argument("action", nargs="?", default="show", help="子動作：show")
+    p = sub.add_parser(
+        "profile", parents=[common], help="檢視 profile 與 overlay 的生效設定，或寫出範例"
+    )
+    p.add_argument(
+        "action", nargs="?", default="show", help="子動作：show / init"
+    )
+    p.add_argument(
+        "--dest",
+        default=None,
+        help="profile init 的目標目錄（預設 ~/.lecture2notes）",
+    )
     # `--profile` itself comes from the shared option group above.
     p.add_argument(
         "--style",
