@@ -1,10 +1,18 @@
+# hatchling, not setuptools, for one reason: `force-include`. Three things a
+# user needs at runtime live outside `src/` because that is where a person
+# edits and reads them -- `skill/`, `docs/note-writing-guideline.md` and
+# `examples/overlay-minimal/`. setuptools can only package files that sit
+# inside the package directory, so a plain `pip install` shipped none of them
+# and `l2n install-skill` failed for everyone who had not cloned the repo.
+# hatchling maps them into `lecture2notes/_bundled/` at build time, which
+# keeps exactly one editable copy of each file in the repository.
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
 
 [project]
 name = "lecture2notes"
-version = "0.2.0"
+version = "0.2.1"
 description = "Turn lecture recordings into structured notes, a time-synced viewer and a course hub, with local ASR."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -65,19 +73,52 @@ Issues = "https://github.com/jieyu166/lecture2notes/issues"
 [project.scripts]
 l2n = "lecture2notes.cli:main"
 
-[tool.setuptools]
-package-dir = { "" = "src" }
+[tool.hatch.build.targets.wheel]
+packages = ["src/lecture2notes"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# The three resources that live outside the package, mapped into it. The keys
+# are repository paths (the single place a human edits them); the values are
+# where `lecture2notes.resources` looks for them in an installed wheel. Do not
+# create these copies in the working tree -- `resources` prefers the repository
+# originals when it can see them, so a source checkout never reads a stale copy.
+[tool.hatch.build.targets.wheel.force-include]
+"skill" = "lecture2notes/_bundled/skill"
+"docs/note-writing-guideline.md" = "lecture2notes/_bundled/docs/note-writing-guideline.md"
+"examples/overlay-minimal" = "lecture2notes/_bundled/examples/overlay-minimal"
 
-[tool.setuptools.package-data]
-lecture2notes = ["profiles/*/*.md", "profiles/*/*.yaml", "profiles/*/*.json", "profiles/*/*.toml"]
+# An editable install exposes `src/` directly, where `_bundled/` does not and
+# must not exist; `resources` finds the repository originals by walking up.
+# Naming the target keeps hatchling from copying force-included files into
+# site-packages next to a path hook that would never read them.
+[tool.hatch.build.targets.editable]
+packages = ["src/lecture2notes"]
+force-include = {}
+
+# The sdist carries the repository layout, so `pip install <sdist>` rebuilds a
+# wheel with the same mapping and the test suite is runnable from it.
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/skill",
+  "/docs",
+  "/examples",
+  "/install.py",
+  "/README.md",
+  "/ATTRIBUTION.md",
+  "/NOTICE",
+  "/LICENSE",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `packaging` is deselected by default, but not from here: a `-m` in addopts is
+# overridden by the `-m` every CI job already passes, which would quietly put
+# the slow tests back into the fast run. tests/conftest.py deselects them with a
+# collection hook instead, and stands aside as soon as `-m` mentions them.
 addopts = "-q"
 markers = [
   "gpu: needs a CUDA device and real model weights; skipped everywhere else",
+  "packaging: builds a wheel and installs it into a temporary venv. Slow and network-dependent, so deselected by the default addopts; run it with `-m packaging`.",
   "e2e: runs the real pipeline on the committed clip; needs ffmpeg and faster-whisper, and downloads the tiny model on first use. Excluded from the default CI run with -m \"not gpu and not e2e\".",
 ]

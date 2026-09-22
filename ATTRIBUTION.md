@@ -85,6 +85,7 @@ Relation values:
 | `_out.py` | original | — | Shared `Progress`/console-output helper. |
 | `exit_codes.py` | original | — | Exit-code constants for the CLI contract. |
 | `install.py` | original | — | `l2n install-skill` / repo-root `install.py`: copies `skill/` into the three agent skill directories, preserves existing overlay files and reports content drift. No upstream or rad-workflow counterpart (`sync_skills.py` in rad-workflow distributes a different layout and does not hash-check targets). |
+| `resources.py` | original | — | Locates the three files authored outside `src/` (`skill/`, `docs/note-writing-guideline.md`, `examples/overlay-minimal/`) in either a checkout or an installed wheel. No upstream or rad-workflow counterpart. |
 | `acceptance/__init__.py` | original | — | Package marker. |
 | `acceptance/audit.py` | inspired | `scripts/audit_note.py` | Both produce a structured pass/fail audit record; upstream audits frontmatter/wikilinks/citations for a vault note, this audits a canonical lecture JSON's derivatives (viewer/chapter-file/note) against each other. No shared function names. |
 | `acceptance/check.py` | inspired | `scripts/audit_note.py` | Shares only the FAIL/WARN severity-tier philosophy (a generic QA pattern, named explicitly in upstream's own docstring); checks (JSON structure, frame existence, time monotonicity) and function names are unrelated. |
@@ -127,6 +128,7 @@ Relation values:
 | `outputs/publish.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/publish_transaction.py`. Upstream's `finalize_to_vault.py` is a plain copy-with-refresh-check; this module is a full transactional publish system (manifest, atomic replace-with-rollback, recovery) with no shared design. |
 | `outputs/viewer.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/lecture-to-notes/scripts/build_lecture_viewer.py`. Benchmarked in its own upstream (rad-workflow) docstring against a different in-workspace tool, not against `drpwchen/lecture-to-notes`'s `export_web.py` / `build_single_talk_web.py`; no shared function names with either. |
 | `profiles/__init__.py` | original | — | Package marker; ships the `generic`/`radiology` corrections-table profiles (written from scratch for this project; not derived from any third-party correction table). |
+| `profiles/bootstrap.py` | original | — | `l2n profile init`: writes the packaged overlay example into the user's overlay directory, never overwriting a file already there. No prior script. |
 | `profiles/layers.py` | original | — | This package's own five-layer configuration resolver (cli / project / user / profile / builtin), its merge rules and its overlay parse errors; no prior script. |
 | `profiles/loader.py` | original | — | This package's own reader for the built-in profile's template and settings files; no prior script. |
 | `schema/__init__.py` | original | — | Package marker. |
@@ -137,7 +139,7 @@ Relation values:
 | `schema/scaffold.py` | original | — | Written for this package: `l2n scaffold` projects a structurally valid, entirely placeholder schema v2 document from a subtitle file. No rad-workflow or upstream counterpart. |
 | `schema/model.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/lecture_model.py`. No upstream canonical-schema module or time-signature validator exists in `drpwchen/lecture-to-notes`. |
 
-Counts: 7 inspired, 15 ported-from-rad-workflow, 35 original — 57 modules total.
+Counts: 7 inspired, 15 ported-from-rad-workflow, 37 original — 59 modules total.
 
 ## ASR default parameters
 

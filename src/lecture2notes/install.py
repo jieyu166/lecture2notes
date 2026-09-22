@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from lecture2notes import __version__
+from lecture2notes import __version__, resources
 
 #: The skill's name, and therefore the leaf directory name in every target.
 SKILL_NAME = "lecture2notes"
@@ -67,18 +67,22 @@ class InstallError(RuntimeError):
 # locating things
 # --------------------------------------------------------------------------
 def source_dir() -> Path:
-    """The repository's ``skill/`` directory.
+    """The ``skill/`` directory to copy from.
 
-    Resolved from this module's location so an editable install and a plain
-    ``python install.py`` find the same files. A non-editable wheel does not
-    ship ``skill/``; that case raises rather than installing nothing.
+    In a checkout that is the repository's own ``skill/``, the one a person
+    edits; in an installed wheel it is the copy the build mapped into
+    ``lecture2notes/_bundled/skill``. :mod:`lecture2notes.resources` decides
+    which, preferring the repository original. Both kinds of install work,
+    which is the whole of the 0.2.1 change; a directory that is neither still
+    raises rather than installing nothing.
     """
-    candidate = Path(__file__).resolve().parents[2] / "skill"
-    if (candidate / "SKILL.md").is_file():
-        return candidate
+    found = resources.skill_dir()
+    if found is not None:
+        return found
     raise InstallError(
-        "skill source directory not found (looked for %s); install the "
-        "repository with `pip install -e .` to use install-skill" % candidate
+        "skill source directory not found (looked for %s); reinstall the "
+        "package, or install the repository with `pip install -e .`, to use "
+        "install-skill" % resources.searched_paths(resources.SKILL_RELATIVE)
     )
 
 

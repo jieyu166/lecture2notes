@@ -135,3 +135,30 @@ jobs:
 
       - name: Run the end-to-end test on the committed clip
         run: python -m pytest -q -m e2e
+
+  # v0.2.0 shipped a wheel with no `skill/`, no writing guideline and no overlay
+  # example in it, and the whole suite passed, because the suite runs in a
+  # checkout where those files are sitting at their repository paths. The only
+  # test that can catch that builds the archive and installs it somewhere the
+  # checkout is not reachable, so this job exists to run it. It gates: a wheel
+  # that cannot deploy its own skill is not a releasable wheel.
+  packaging:
+    name: wheel install (packaging)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # No ffmpeg step: these tests never touch media. `build` is the only
+      # extra, and `-e .` is what puts the test helpers on the path -- the test
+      # itself builds and installs a non-editable wheel of its own.
+      - name: Install the package and the build frontend
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pip install build
+
+      - name: Build a wheel, install it into a clean venv and use it
+        run: python -m pytest -q -m packaging

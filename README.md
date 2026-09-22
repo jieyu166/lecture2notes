@@ -31,7 +31,11 @@ faster-whisper / whisper.cpp / Qwen3-ASR）、投影片換頁抓圖、OCR、一�
 pip install lecture2notes
 ```
 
-從原始碼安裝（開發或要用 `install.py` 部署 skill 時）：
+一般安裝（非 editable）就夠用：`skill/`、撰寫規範與 overlay 範例都打包在套件裡，所以
+`l2n install-skill --all`、`l2n render --expand-prompt`、`l2n profile init` 不需要 clone
+也能跑。v0.2.0 只有 `pip install -e .` 才有這三項，v0.2.1 修掉了。
+
+從原始碼安裝（開發，或要用 `install.py` 部署 skill 時）：
 
 ```bash
 git clone https://github.com/jieyu166/lecture2notes
@@ -277,7 +281,18 @@ CLI 參數 > 專案內 .lecture2notes/ > 家目錄 ~/.lecture2notes/ > profiles/
 病患識別模式，不預設啟用；用 `--profile radiology`，或在 overlay 的 `outputs.toml` 寫
 `profile = "radiology"` 才會生效）。
 
-把自己的設定變成 overlay，最快的方式是複製範例到家目錄：
+把自己的設定變成 overlay，最快的方式是叫套件把範例寫出去：
+
+```bash
+l2n profile init                      # 寫到 ~/.lecture2notes
+l2n profile init --dest D:/somewhere  # 寫到別的目錄
+```
+
+`profile init` **不覆蓋既有檔**：目標已經有的檔名一律保留並印 `kept existing file`，
+只補缺的那幾個，所以升級後再跑一次是安全的。範例檔打包在套件內，一般 `pip install`
+也拿得到（v0.2.1 起）。
+
+要手動複製也可以，範例同時留在 repo 的 `examples/overlay-minimal/`：
 
 ```bash
 # macOS / Linux
@@ -293,7 +308,7 @@ Copy-Item examples\overlay-minimal\note.frontmatter.yaml, examples\overlay-minim
 ```
 
 `examples/overlay-minimal/` 是五個檔案各一份的合法佔位範例（含 `消化層級` 這種自訂
-frontmatter 欄位，註解說明 0–3 各代表什麼）。複製完後跑：
+frontmatter 欄位，註解說明 0–3 各代表什麼）。寫出來之後跑：
 
 ```bash
 l2n profile show          # 每個生效的鍵，值與來源層
@@ -349,7 +364,9 @@ l2n install-skill --dest D:/somewhere    # 自訂目錄
 l2n install-skill --check --all          # 比對內容 hash，有 drift 時 exit 2
 ```
 
-沒安裝套件時，從 repo 根目錄直接跑 `python install.py --all` 也可以。
+`skill/` 打包在 wheel 裡，所以一般 `pip install lecture2notes` 之後就能直接部署，不需要
+clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時，從 repo 根目錄直接跑
+`python install.py --all` 也可以。
 
 | `--target` | 目標目錄 |
 |---|---|
@@ -406,6 +423,28 @@ l2n install-skill --check --all          # 比對內容 hash，有 drift 時 exi
 內容缺失——實測中漏掉 23.5 秒語音的字幕仍是 0 errors。重要場次請抽查逐字稿，或用第二個
 引擎對照。
 
+### v0.2.1（本版）
+
+一個打包缺陷的修正。v0.2.0 的 wheel 不含 `skill/`、`docs/note-writing-guideline.md` 與
+`examples/overlay-minimal/`，因為這三者住在 repo 根目錄而不在套件裡。結果是用
+`pip install lecture2notes` 的人跑 `l2n install-skill` 只會拿到
+`skill source directory not found`，`render --expand-prompt` 印得出規範檔路徑卻印不出
+規範內容，overlay 範例則根本拿不到。
+
+- **打包**：build backend 由 setuptools 換成 hatchling，用 `force-include` 在建置時把這
+  三者映射進 `lecture2notes/_bundled/`。repo 內的原檔仍是唯一可編輯的來源，工作目錄不會
+  多出第二份複本。
+- **執行期**：新增 `lecture2notes.resources`，先找 repo 原檔、找不到才退回套件內的
+  `_bundled`（`importlib.resources`），editable 與一般安裝都能用。
+- **`l2n profile init`**：把 overlay 範例寫進 `~/.lecture2notes`（或 `--dest`），
+  已存在的檔一律保留不覆蓋。
+- **測試**：新增 `-m packaging` 的整合測試，真的建 wheel、裝進乾淨 venv，驗
+  `install-skill --all`／`--check`／`render --expand-prompt`／`profile init` 四項；預設
+  deselect（慢），CI 有獨立的 `packaging` job。
+
+行為沒有其他改變：`render` 仍是確定性的，`install-skill --check` 的 drift hash 算法與
+既有的 `.installed.json` 相容。
+
 ## 開發與測試
 
 ```bash
@@ -414,6 +453,12 @@ l2n install-skill --check --all          # 比對內容 hash，有 drift 時 exi
 
 測試不需要網路，也不需要模型權重；需要 CUDA 的測試以 `@pytest.mark.gpu` 標記，
 沒有 GPU 時自動跳過。
+
+打包測試另外標記，預設不跑（它會真的建一顆 wheel 再裝進臨時 venv，要好幾十秒）：
+
+```bash
+.venv\Scripts\python -m pytest -m packaging
+```
 
 ## 授權
 
