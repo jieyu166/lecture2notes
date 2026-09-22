@@ -177,12 +177,37 @@ class ScaffoldResult:
         segments: int,
         duration_sec: float,
         frames: int,
+        ocr_segments: Optional[int] = None,
     ) -> None:
         self.document_path = document_path
         self.condensed_path = condensed_path
         self.segments = segments
         self.duration_sec = duration_sec
         self.frames = frames
+        #: Segments that received cached OCR text; None when no cache existed.
+        self.ocr_segments = ocr_segments
+
+
+def merge_cached_ocr(
+    document: Dict[str, Any], folder: Path, stem: str
+) -> Tuple[Dict[str, Any], Optional[int]]:
+    """Fold ``<stem>.frames_ocr.json`` into a freshly built document.
+
+    `l2n run` does OCR before the document exists, so the text lands only in
+    the cache; the next run then skips OCR because the cache is there. Without
+    this, a scaffolded document would never carry ``frame_ocr`` unless someone
+    remembered to re-run `l2n ocr <stem>.json` by hand.
+    """
+    from lecture2notes.frames import ocr as ocr_mod
+
+    cache_file = Path(folder) / (stem + ocr_mod.CACHE_SUFFIX)
+    if not cache_file.is_file():
+        return document, None
+    cache = ocr_mod.read_cache(cache_file)
+    if not cache:
+        return document, None
+    merged = ocr_mod.merge_ocr_into_segments(document, cache)
+    return merged, int(merged["ocr_meta"]["segments_with_text"])
 
 
 def scaffold_file(
@@ -217,6 +242,7 @@ def scaffold_file(
         subtitle_name=subtitle.name,
         profile=profile,
     )
+    document, ocr_segments = merge_cached_ocr(document, folder, stem)
     target = Path(destination) if destination else folder / ("%s.json" % stem)
     write_json_atomic(target, document)
     return ScaffoldResult(
@@ -225,6 +251,7 @@ def scaffold_file(
         segments=segments,
         duration_sec=float(int(math.ceil(duration))),
         frames=len(frames),
+        ocr_segments=ocr_segments,
     )
 
 
@@ -246,6 +273,7 @@ __all__ = [
     "condensed_line_range",
     "is_draft",
     "manifest_frames",
+    "merge_cached_ocr",
     "scaffold_file",
     "segment_starts",
     "subtitle_duration",

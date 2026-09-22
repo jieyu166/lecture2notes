@@ -382,6 +382,9 @@ def cmd_ocr(args: argparse.Namespace) -> int:
         # orphan cache nobody reads is the failure this replaces.
         _out.error("ocr: %s" % exc.message)
         return exit_codes.ERROR
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        _out.error("ocr: cannot parse %s (%s)" % (path.name, exc))
+        return exit_codes.ERROR
     _out.ok(
         "ocr: %d frames, %d with text" % (result.total, len(result.recognised))
     )
@@ -474,6 +477,9 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
         result.document_path, result.segments, result.frames
     ))
     _out.stage("scaffold", "condensed -> %s" % result.condensed_path.name)
+    if result.ocr_segments is not None:
+        _out.stage("scaffold", "ocr cache merged (%d segments with text)"
+                   % result.ocr_segments)
     _out.stage("scaffold", SCAFFOLD_NEXT)
     return exit_codes.OK
 
@@ -969,11 +975,23 @@ def _run_ocr(paths: RunPaths, force: bool) -> Optional[str]:
         _out.stage("ocr", SKIP_EXISTS)
         return None
     _deps.require("rapidocr")
-    target = paths.document if paths.document.is_file() else paths.frames_dir
+    # `run` knows the stem, so it names the lecture instead of handing OCR the
+    # shared `frames/` folder: a course folder holds several lectures beside
+    # one `frames/`, and a folder target is refused as ambiguous there. The
+    # manifest lists exactly this lecture's frames; the stem-filtered folder is
+    # the fallback when no manifest was written.
+    if paths.document.is_file():
+        target, stem = paths.document, None
+    elif paths.manifest.is_file():
+        target, stem = paths.manifest, None
+    else:
+        target, stem = paths.frames_dir, paths.stem
     if not target.exists():
         return "no frames to read: %s" % paths.frames_dir
     try:
-        ocr_mod.run_ocr(target, force=force)
+        ocr_mod.run_ocr(target, force=force, stem=stem)
+    except ocr_mod.OcrTargetError as exc:
+        return exc.message
     except (OSError, RuntimeError) as exc:
         return str(exc)
     return None
