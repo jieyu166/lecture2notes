@@ -161,6 +161,8 @@ guideline_version: 1.3
 
 `l2n ocr <frames 資料夾>` 如果解析不出同層唯一的 stem 就會 exit 2——舊行為會寫出一個
 `frames.frames_ocr.json`，快取有了、正式 JSON 一個字也沒有，而擴寫的人要到寫筆記時才發現。
+多場講座共用 `frames/` 時改傳 `<stem>.json` 或 `<stem>.frames.json`；`l2n run` 會自己指定 stem。
+`l2n scaffold` 建骨架時會把既有的 `<stem>.frames_ocr.json` 併進 `frame_ocr`。
 
 兩個地方的文字**都**只用來決定「要不要打開那張影格」，不可以抄進筆記。
 

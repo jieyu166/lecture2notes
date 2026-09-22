@@ -129,15 +129,41 @@ def ocr_one(engine: Any, path: Path, min_conf: float = DEFAULT_MIN_CONF) -> str:
     return lines_from_result(result, min_conf)
 
 
-def collect_frames(data: Optional[Mapping[str, Any]], folder: Optional[Path] = None) -> List[str]:
+def collect_frames(
+    data: Any,
+    folder: Optional[Path] = None,
+    stem: Optional[str] = None,
+) -> List[str]:
     """Every frame referenced by the document, de-duplicated, in order.
 
-    With no document, list the image files in ``folder`` instead.
+    ``data`` is either a canonical document (``{"segments": [...]}``) or a
+    capture manifest (``<stem>.frames.json``: a list of rows, or the
+    ``{"frames": [...]}`` wrapper), each row naming its ``frame``.
+
+    With no document, list the image files in ``folder`` instead -- only the
+    ``<stem>-*`` ones when ``stem`` is given, because several lectures in one
+    course folder share a single ``frames/`` directory.
     """
     seen: set = set()
     out: List[str] = []
     if data is not None:
-        for segment in data.get("segments", []):
+        if isinstance(data, list) or (
+            isinstance(data, Mapping) and isinstance(data.get("frames"), list)
+            and "segments" not in data
+        ):
+            rows = data if isinstance(data, list) else data["frames"]
+            for row in rows:
+                frame = row.get("frame") if isinstance(row, Mapping) else None
+                if frame and str(frame) not in seen:
+                    seen.add(str(frame))
+                    out.append(str(frame))
+            return out
+        if not isinstance(data, Mapping):
+            raise OcrTargetError(
+                "expected a canonical JSON object or a frames manifest list, "
+                "got %s" % type(data).__name__
+            )
+        for segment in data.get("segments") or []:
             if not isinstance(segment, Mapping):
                 continue
             frames = segment.get("frames") or (
@@ -152,7 +178,12 @@ def collect_frames(data: Optional[Mapping[str, Any]], folder: Optional[Path] = N
     if folder is None:
         return out
     folder = Path(folder)
+    # `<stem>-MMSS.png` exactly: a bare prefix test would also take lecture
+    # `a-b`'s frames when OCRing lecture `a`.
+    own = re.compile(r"%s-\d+\.\w+$" % re.escape(stem)) if stem else None
     for path in sorted(folder.iterdir()):
+        if own is not None and not own.match(path.name):
+            continue
         if path.suffix.lower() in IMG_EXT:
             out.append("%s/%s" % (folder.name, path.name))
     return out
@@ -335,10 +366,16 @@ def cache_path_for(target: Path, stem: Optional[str] = None) -> Path:
     if target.is_dir():
         resolved = stem if stem else resolve_folder_target(target)[0]
         return target.parent / (resolved + CACHE_SUFFIX)
-    name = target.name
-    if name.endswith(DOCUMENT_SUFFIX):
-        name = name[: -len(DOCUMENT_SUFFIX)]
-    return target.parent / (name + CACHE_SUFFIX)
+    return target.parent / (stem_of(target) + CACHE_SUFFIX)
+
+
+def stem_of(target: Path) -> str:
+    """The lecture stem a ``<stem>.json`` or ``<stem>.frames.json`` names."""
+    name = Path(target).name
+    for suffix in (MANIFEST_SUFFIX, DOCUMENT_SUFFIX):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
 
 
 def run_ocr(
@@ -348,8 +385,16 @@ def run_ocr(
     force: bool = False,
     engine_factory: Optional[Callable[[], Any]] = None,
     progress_interval: float = 5.0,
+    stem: Optional[str] = None,
 ) -> OcrResult:
     """OCR every frame the target references, using the cache where it can.
+
+    ``target`` is a canonical ``<stem>.json``, a capture manifest
+    ``<stem>.frames.json`` (whose sibling ``<stem>.json``, when present,
+    receives the text), or a frames folder. A folder is resolved to the one
+    lecture beside it unless ``stem`` names it -- which is what ``l2n run``
+    does, since it already knows the stem and a course folder usually holds
+    several lectures sharing one ``frames/``.
 
     The engine is built lazily and only when at least one frame actually needs
     recognising. RapidOCR loads an ONNX runtime and several hundred megabytes of
@@ -359,22 +404,47 @@ def run_ocr(
     target = Path(target)
     document: Optional[Path] = None
     data: Optional[Dict[str, Any]] = None
-    stem: Optional[str] = None
     if target.is_dir():
         # A folder is resolved to the lecture beside it rather than to its own
         # name, so the cache lands on `<stem>.frames_ocr.json` and the text
         # reaches the document. Raises OcrTargetError when that is ambiguous.
-        stem, document = resolve_folder_target(target)
+        if stem:
+            candidate = target.parent / (stem + DOCUMENT_SUFFIX)
+            document = candidate if candidate.is_file() else None
+            frames = collect_frames(None, target, stem=stem)
+        else:
+            stem, document = resolve_folder_target(target)
+            frames = collect_frames(None, target)
         base_dir = target.parent
-        frames = collect_frames(None, target)
         if document is not None:
             data = read_json(document)
+            for frame in collect_frames(data, None):
+                if frame not in frames:
+                    frames.append(frame)
+    elif target.name.endswith(MANIFEST_SUFFIX):
+        # The manifest names its frames and its stem; the document beside it,
+        # if it has been written yet, is where the text goes.
+        stem = stem_of(target)
+        base_dir = target.parent
+        frames = collect_frames(read_json(target), None)
+        candidate = target.parent / (stem + DOCUMENT_SUFFIX)
+        if candidate.is_file():
+            document = candidate
+            data = read_json(candidate)
             for frame in collect_frames(data, None):
                 if frame not in frames:
                     frames.append(frame)
     else:
         document = target
         data = read_json(target)
+        if not isinstance(data, Mapping):
+            # A manifest saved under another name, or not a lecture at all.
+            # Merging into it would rewrite a file no stage reads as a document.
+            raise OcrTargetError(
+                "%s is not a canonical <stem>.json (not a JSON object); pass the "
+                "lecture's <stem>.json, <stem>.frames.json or frames folder"
+                % target.name
+            )
         base_dir = target.parent
         frames = collect_frames(data, None)
 
@@ -439,6 +509,7 @@ __all__ = [
     "cache_path_for",
     "folder_stems",
     "resolve_folder_target",
+    "stem_of",
     "merge_ocr_into_segments",
     "ocr_one",
     "pending_frames",

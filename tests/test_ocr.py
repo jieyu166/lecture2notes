@@ -388,3 +388,171 @@ def test_a_document_target_still_exits_3_without_rapidocr(tmp_path: Path, monkey
     monkeypatch.setitem(_deps._CHECKS, "rapidocr", boom)
 
     assert cli_entry(["ocr", str(document)]) == 3
+
+
+
+# --------------------------------------------------------------------------
+# a course folder: several lectures share one frames/ (v0.2.1 field bugs)
+# --------------------------------------------------------------------------
+def build_course(tmp_path: Path) -> Path:
+    """Two lectures, `a` and `b`, beside one shared `frames/`.
+
+    `b` is already scaffolded (`b.json`); `a` has only its manifest, which is
+    exactly the state `l2n run a.mp4` is in when it reaches the OCR stage.
+    """
+    frames_dir = tmp_path / "frames"
+    for stem in ("a", "b"):
+        for index in range(2):
+            synthetic.gray_image(
+                frames_dir / ("%s-%04d.png" % (stem, index * 10)),
+                40 + index * 30, size=(64, 36),
+            )
+    rows = [
+        {"timestamp_sec": float(index * 10), "frame": "frames/a-%04d.png" % (index * 10)}
+        for index in range(2)
+    ]
+    (tmp_path / "a.frames.json").write_text(json.dumps(rows), encoding="utf-8")
+    (tmp_path / "b.json").write_text(
+        json.dumps({"schema_version": "2.0", "segments": [
+            {"index": 1, "start_sec": 0.0, "end_sec": 10.0,
+             "frame": "frames/b-0000.png", "frames": ["frames/b-0000.png"]},
+        ]}),
+        encoding="utf-8",
+    )
+    (tmp_path / "a.mp4").write_bytes(b"")
+    return tmp_path
+
+
+def test_collect_frames_reads_a_manifest_list_and_its_wrapper():
+    rows = [{"frame": "frames/a-0000.png"}, {"frame": "frames/a-0010.png"},
+            {"frame": "frames/a-0000.png"}, "junk"]
+
+    assert ocr_mod.collect_frames(rows) == ["frames/a-0000.png", "frames/a-0010.png"]
+    assert ocr_mod.collect_frames({"frames": rows}) == [
+        "frames/a-0000.png", "frames/a-0010.png"
+    ]
+
+
+def test_collect_frames_filters_a_shared_folder_by_stem(tmp_path: Path):
+    build_course(tmp_path)
+    # A lecture whose stem merely starts with `a-` is not lecture `a`.
+    synthetic.gray_image(tmp_path / "frames" / "a-b-0000.png", 90, size=(64, 36))
+
+    frames = ocr_mod.collect_frames(None, tmp_path / "frames", stem="a")
+
+    assert frames == ["frames/a-0000.png", "frames/a-0010.png"]
+
+
+def test_a_manifest_target_writes_the_stem_cache_not_a_frames_frames_one(
+    tmp_path: Path, no_s2t
+):
+    build_course(tmp_path)
+    engine = CountingEngine()
+
+    result = ocr_mod.run_ocr(tmp_path / "a.frames.json", engine_factory=lambda: engine)
+
+    assert result.total == 2 and len(engine.calls) == 2
+    assert result.document is None
+    assert result.cache_path == tmp_path / "a.frames_ocr.json"
+    assert sorted(read_json(result.cache_path)) == [
+        "frames/a-0000.png", "frames/a-0010.png"
+    ]
+    assert not (tmp_path / "a.frames.frames_ocr.json").exists()
+    # The manifest is an input, never rewritten as if it were a document.
+    assert isinstance(read_json(tmp_path / "a.frames.json"), list)
+
+
+def test_a_manifest_target_merges_into_the_sibling_document(tmp_path: Path, no_s2t):
+    document = build_lecture(tmp_path, frame_count=2)
+    rows = [{"frame": s["frame"]} for s in read_json(document)["segments"]]
+    (tmp_path / "talk.frames.json").write_text(json.dumps(rows), encoding="utf-8")
+
+    result = ocr_mod.run_ocr(tmp_path / "talk.frames.json", engine_factory=CountingEngine)
+
+    assert result.document == document
+    assert read_json(document)["segments"][0]["frame_ocr"]
+
+
+def test_a_folder_with_an_explicit_stem_ignores_the_other_lectures(
+    tmp_path: Path, no_s2t
+):
+    build_course(tmp_path)
+    engine = CountingEngine()
+
+    result = ocr_mod.run_ocr(
+        tmp_path / "frames", engine_factory=lambda: engine, stem="a"
+    )
+
+    assert result.cache_path == tmp_path / "a.frames_ocr.json"
+    assert len(engine.calls) == 2
+    assert all("a-" in Path(call).name for call in engine.calls)
+    # `b.json` belongs to another lecture and must not be touched.
+    assert "frame_ocr" not in read_json(tmp_path / "b.json")["segments"][0]
+
+
+def test_cli_ocr_on_a_frames_manifest_succeeds(tmp_path: Path, monkeypatch, capsys, no_s2t):
+    build_course(tmp_path)
+    monkeypatch.setitem(_deps._CHECKS, "rapidocr", lambda *a, **k: object())
+    monkeypatch.setattr(ocr_mod, "load_engine", CountingEngine)
+
+    assert cli_entry(["ocr", str(tmp_path / "a.frames.json")]) == 0
+
+    printed = capsys.readouterr().out
+    assert (tmp_path / "a.frames_ocr.json").is_file()
+    printed.encode("ascii")
+
+
+def test_cli_ocr_on_a_list_that_is_not_a_manifest_exits_2(
+    tmp_path: Path, monkeypatch, capsys, no_s2t
+):
+    """A bare list passed as a document used to die with an AttributeError."""
+    build_course(tmp_path)
+    (tmp_path / "odd.json").write_text(
+        (tmp_path / "a.frames.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    monkeypatch.setitem(_deps._CHECKS, "rapidocr", lambda *a, **k: object())
+    monkeypatch.setattr(ocr_mod, "load_engine", CountingEngine)
+
+    assert cli_entry(["ocr", str(tmp_path / "odd.json")]) == 2
+
+    printed = capsys.readouterr().out
+    assert "[error] ocr:" in printed and "odd.json" in printed
+    printed.encode("ascii")
+    assert isinstance(read_json(tmp_path / "odd.json"), list)
+
+
+@pytest.mark.parametrize("keep_manifest", [True, False])
+def test_run_ocr_stage_names_its_lecture_in_a_shared_course_folder(
+    tmp_path: Path, monkeypatch, capsys, no_s2t, keep_manifest
+):
+    """`l2n run a.mp4` beside `b.json` failed with "2 lectures sit beside frames".
+
+    `run` knows the stem, so it targets the manifest -- or, without one, the
+    shared folder filtered to `a-*` -- instead of asking OCR to guess.
+    """
+    import importlib
+
+    cli_main = importlib.import_module("lecture2notes.cli.main")
+
+    build_course(tmp_path)
+    if not keep_manifest:
+        (tmp_path / "a.frames.json").unlink()
+    engine = CountingEngine()
+    monkeypatch.setattr(_deps, "require", lambda *a, **k: None)
+    monkeypatch.setattr(ocr_mod, "load_engine", lambda: engine)
+
+    reason = cli_main._run_ocr(cli_main.RunPaths(tmp_path / "a.mp4"), False)
+
+    assert reason is None, reason
+    cache = read_json(tmp_path / "a.frames_ocr.json")
+    assert sorted(cache) == ["frames/a-0000.png", "frames/a-0010.png"]
+    assert not (tmp_path / "b.frames_ocr.json").exists()
+    capsys.readouterr().out.encode("ascii")
+
+
+def test_cli_ocr_on_unparseable_json_exits_2(tmp_path: Path, monkeypatch, capsys):
+    (tmp_path / "broken.frames.json").write_text("[{", encoding="utf-8")
+    monkeypatch.setitem(_deps._CHECKS, "rapidocr", lambda *a, **k: object())
+
+    assert cli_entry(["ocr", str(tmp_path / "broken.frames.json")]) == 2
+    assert "[error] ocr: cannot parse" in capsys.readouterr().out

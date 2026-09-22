@@ -39,6 +39,7 @@ l2n frames <video> --mode interval --every 45
 
 ```bash
 l2n ocr <stem>.json          # 建議寫法
+l2n ocr <stem>.frames.json   # 還沒有 <stem>.json 時；只 OCR 這場講座的影格
 l2n ocr <frames 資料夾>       # 只有在同層剛好一場講座時才可用
 ```
 
@@ -48,6 +49,17 @@ l2n ocr <frames 資料夾>       # 只有在同層剛好一場講座時才可用
 找不到或不只一個就 exit 2 並說明，不會自己拿資料夾名當 stem。
 （舊行為會寫出 `frames.frames_ocr.json` 這種沒人會再讀的孤兒快取，
 而 `<stem>.json` 一個字的 OCR 都拿不到。）
+
+同一個課程資料夾放好幾場講座、共用一個 `frames/` 是常態，這時請傳 `<stem>.json`
+或 `<stem>.frames.json`。傳 `<stem>.frames.json` 時快取寫到 `<stem>.frames_ocr.json`，
+同層若已有 `<stem>.json` 也會一併寫入 `frame_ocr`；manifest 本身不會被改寫。
+`l2n run` 已經知道 stem，會自己依序選 `<stem>.json` → `<stem>.frames.json` →
+只取 `frames/<stem>-*` 的影格，不會因為旁邊有別場講座而 exit 2。
+傳入的 JSON 如果不是物件（例如把 manifest 清單改名成 `x.json`），會 exit 2 並說明。
+
+`l2n run` 的 OCR 在正式 JSON 寫出之前就跑完，文字先只在快取裡；之後
+`l2n scaffold <stem>.srt` 建骨架時會自動把 `<stem>.frames_ocr.json` 併進每段的
+`frame_ocr`，不必再手動補跑 `l2n ocr <stem>.json`。
 
 ### OCR 文字住在兩個地方
 

@@ -297,3 +297,39 @@ def test_the_scaffold_output_stays_ascii_in_its_markers(subtitle: Path, capsys):
 
     printed = capsys.readouterr().out
     assert not any(marker in printed for marker in "→≥✓✗")
+
+
+
+def test_the_scaffold_picks_up_a_cached_ocr(subtitle: Path):
+    """`l2n run` OCRs before the document exists, so the text sits in the cache.
+
+    The next run skips OCR because the cache is there; unless scaffold folds it
+    in, the written document would never carry `frame_ocr`.
+    """
+    folder = subtitle.parent
+    (folder / "talk.frames.json").write_text(
+        json.dumps([{"timestamp_sec": 0.0, "frame": "frames/talk-0000.png", "sha256": "a"}]),
+        encoding="utf-8",
+    )
+    (folder / "talk.frames_ocr.json").write_text(
+        json.dumps({"frames/talk-0000.png": {"fingerprint": "x", "chars": 5, "text": "SLIDE"}}),
+        encoding="utf-8",
+    )
+
+    result = scaffold.scaffold_file(subtitle, segments=3)
+
+    # Segments 2 and 3 inherit frame 0 (nothing changed on screen), and so
+    # its text, exactly as `l2n ocr <stem>.json` would merge it.
+    assert result.ocr_segments == 3
+    document = json.loads(result.document_path.read_text(encoding="utf-8"))
+    assert document["segments"][0]["frame_ocr"] == [
+        {"frame": "frames/talk-0000.png", "text": "SLIDE"}
+    ]
+    assert document["ocr_meta"]["frames_with_text"] >= 1
+
+
+def test_the_scaffold_without_an_ocr_cache_reports_none(subtitle: Path):
+    result = scaffold.scaffold_file(subtitle, segments=3)
+
+    assert result.ocr_segments is None
+    assert "ocr_meta" not in json.loads(result.document_path.read_text(encoding="utf-8"))
