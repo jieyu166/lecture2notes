@@ -662,6 +662,25 @@ def _digest_preview(digest: str) -> str:
     return "%s.." % str(digest)[:DIGEST_PREVIEW]
 
 
+#: What `l2n frames` appends to the stem for its manifest.
+FRAMES_SUFFIX = ".frames.json"
+
+
+def _document_or_none(path: Path) -> Optional[Mapping[str, Any]]:
+    """The formal document at *path*, or None when it is a frames manifest.
+
+    A manifest is a list (or a ``{"frames": [...]}`` wrapper); a document is an
+    object carrying ``segments``. Anything else is left to the manifest reader
+    so its findings stay the ones people already know.
+    """
+    if path.name.endswith(FRAMES_SUFFIX):
+        return None
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    if isinstance(data, Mapping) and isinstance(data.get("segments"), list):
+        return data
+    return None
+
+
 def check_frames(path: Path) -> StageReport:
     """The ``frames`` stage check over one ``<stem>.frames.json``.
 
@@ -670,9 +689,27 @@ def check_frames(path: Path) -> StageReport:
     at least one frame. The hash rule is the reason the manifest carries
     ``sha256`` at all -- a frame regenerated after the manifest was written
     looks perfectly fine on disk and silently un-anchors every reference to it.
+
+    The formal ``<stem>.json`` is accepted too, because that is the path the
+    skill documents. Then the frames it references are checked as well, and the
+    sibling manifest is read for the rules above, so naming the document is
+    never the weaker check.
     """
     target = Path(path)
     report = StageReport("frames", target.name)
+
+    try:
+        document = _document_or_none(target)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        report.add("error", "parse", target.name, "manifest is unreadable: %s" % exc)
+        return report
+
+    if document is not None:
+        check_json_frames(document, target.parent, report)
+        sibling = target.parent / (target.stem + FRAMES_SUFFIX)
+        if not sibling.is_file():
+            return report
+        target = sibling
 
     try:
         rows = read_manifest(target)

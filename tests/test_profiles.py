@@ -131,7 +131,7 @@ def test_radiology_privacy_adds_patient_identifiers_without_losing_the_generic_o
     patterns = loader.privacy_patterns("radiology")
     joined = "\n".join(patterns)
     # its own
-    assert r"(?<!\d)\d{8}(?!\d)" in patterns
+    assert any(r"\d{8}(?!\d)" in p for p in patterns)
     assert any("病患" in p for p in patterns)
     assert any(r"[A-Za-z][12]\d{8}" in p for p in patterns)
     # and the generic ones it restates, because one key replaces one key
@@ -143,6 +143,19 @@ def test_radiology_privacy_adds_patient_identifiers_without_losing_the_generic_o
     # An ordinary sentence of a lecture note is not an identifier.
     for text in ("左側腎臟可見水腎", "日期 2026-09-21"):
         assert not any(c.search(text) for c in compiled), text
+    # Neither is a yyyymmdd date. A lecture stem is routinely one, and
+    # `l2n render` writes it into the frontmatter, the References block and
+    # every frame embed, so every one of those findings was a false positive.
+    for text in (
+        'source: ["20230215.mp4"]',
+        "![[frames/20230215-0000.png]]",
+        "- subtitle: 20230215.srt",
+        "20230215 那一場",
+    ):
+        assert not any(c.search(text) for c in compiled), text
+    # A date-shaped run is excused; a malformed one is still an identifier.
+    for text in ("20231345", "19991301"):
+        assert any(c.search(text) for c in compiled), text
 
 
 def test_radiology_does_not_override_settings_it_has_no_opinion_about(

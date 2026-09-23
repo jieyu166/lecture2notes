@@ -22,9 +22,13 @@ patterns = [
   # A medical record or chart number written out with its label.
   '(病歷號|病歷號碼|[Cc]hart [Nn]o\.?|[Cc]hart number)\s*[:：]?\s*\w{6,}',
   # A bare eight-digit chart number, the local format, with no label at all.
-  # Broad on purpose: it also matches a bare yyyymmdd date, so a note that
-  # needs to state a date writes it as 2026-09-21 rather than 20260921.
-  '(?<!\d)\d{8}(?!\d)',
+  #
+  # A yyyymmdd date is not one: a valid date shape (1900-2099, month 01-12, day
+  # 01-31) is excluded. A lecture stem is routinely a date, and `l2n render`
+  # writes the stem into the frontmatter `source:`, the References block and
+  # every `![[frames/<stem>-NNNN.png]]` embed -- fourteen findings on one note,
+  # none of them an identifier. A malformed run such as 20231345 is still one.
+  '(?<!\d)(?!(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?!\d))\d{8}(?!\d)',
   # A patient named after the word for patient.
   '病患\s*[:：]\s*\S+',
   '病人\s*[:：]\s*\S+',
