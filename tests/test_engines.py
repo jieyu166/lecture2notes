@@ -465,6 +465,28 @@ def test_a_cue_never_grows_past_the_duration_cap():
     assert all(c.duration() <= qwen.MAX_CUE_SEC + 1.0 for c in cues)
 
 
+def test_a_zero_width_token_still_gets_a_visible_cue():
+    """The aligner gives lone interjections start == end; `check transcribe`
+    rejects those cues, so the engine has to widen them (real case: cue 348
+    "呃" at 1989.040 to 1989.040)."""
+    cues = qwen.cues_from_alignment(
+        align(("啊", 10.0, 10.0), ("好", 11.0, 11.4), ("。", 11.4, 11.5))
+    )
+    assert [c.text for c in cues] == ["啊", "好。"]
+    assert all(c.end > c.start for c in cues)
+    assert cues[0].end <= cues[1].start
+
+
+def test_a_widened_cue_never_swallows_the_next_one():
+    """Widening stops at the next cue's start; with no room at all the cue is
+    dropped rather than emitted with a zero or negative length."""
+    cues = qwen.cues_from_alignment(
+        align(("啊", 10.0, 10.0), ("。", 10.0, 10.0), ("好", 10.0, 10.4))
+    )
+    assert all(c.end > c.start for c in cues)
+    assert cues[-1].text == "好"
+
+
 def test_latin_words_are_joined_with_spaces_and_cjk_is_not():
     latin = qwen.cues_from_alignment(align(("hello", 0.0, 0.5), ("world", 0.5, 1.0)))
     assert latin[0].text == "hello world"

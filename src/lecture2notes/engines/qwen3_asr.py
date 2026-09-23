@@ -85,6 +85,10 @@ MAX_CUE_SEC = 8.0
 #: A silence longer than this is a cue boundary regardless of punctuation.
 CUE_GAP_SEC = 0.8
 SENTENCE_END = "。！？…!?.;；"
+#: The aligner reports start == end for lone interjections, which `check
+#: transcribe` rejects as a zero-length cue. Widen such a cue to this length,
+#: never past the next cue's start.
+MIN_CUE_SEC = 0.2
 
 
 def language_name(lang: str) -> Optional[str]:
@@ -145,6 +149,7 @@ def cues_from_alignment(
     max_chars: int = MAX_CUE_CHARS,
     max_sec: float = MAX_CUE_SEC,
     gap_sec: float = CUE_GAP_SEC,
+    min_sec: float = MIN_CUE_SEC,
 ) -> List[Cue]:
     """Group per-token alignment items into readable subtitle cues.
 
@@ -184,7 +189,29 @@ def cues_from_alignment(
         if token[-1] in SENTENCE_END or len(body) >= max_chars or (end - start) >= max_sec:
             flush()
     flush()
-    return cues
+    return _widen_zero_length(cues, min_sec)
+
+
+def _widen_zero_length(cues: List[Cue], min_sec: float) -> List[Cue]:
+    """Give every cue a visible duration, or drop it when there is no room.
+
+    A cue the aligner collapsed to a point (start == end, which it does for lone
+    interjections) is stretched up to ``min_sec``, stopping short of the next
+    cue's start so the widened cue never overlaps it. When the next cue starts
+    at the same instant there is nothing to stretch into, so the cue is dropped
+    rather than written out: `check transcribe` rejects zero-length cues and
+    overlapping cues alike.
+    """
+    kept: List[Cue] = []
+    for index, cue in enumerate(cues):
+        if cue.end > cue.start:
+            kept.append(cue)
+            continue
+        limit = cues[index + 1].start if index + 1 < len(cues) else cue.start + min_sec
+        end = round(min(cue.start + min_sec, limit), 3)
+        if end > cue.start:
+            kept.append(Cue(start=cue.start, end=end, text=cue.text))
+    return kept
 
 
 class Qwen3AsrEngine(Engine):
