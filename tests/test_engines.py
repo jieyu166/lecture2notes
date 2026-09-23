@@ -465,6 +465,43 @@ def test_a_cue_never_grows_past_the_duration_cap():
     assert all(c.duration() <= qwen.MAX_CUE_SEC + 1.0 for c in cues)
 
 
+def test_chunk_seams_never_hand_back_overlapping_cues():
+    """A window's last cue can end past the next window's first cue -- a widened
+    zero-length cue does exactly that -- and `check transcribe` calls the
+    overlap an error, so the seam has to be trimmed after the shift.
+
+    Real case: cue 1052 started at 4560.000 while the previous cue ended at
+    4560.080, right on the 38-minute window boundary.
+    """
+    from lecture2notes.engines import pipeline
+
+    stitched = pipeline.trim_seam_overlaps(
+        [
+            Cue(start=4559.5, end=4559.88, text="前一句"),
+            Cue(start=4559.88, end=4560.08, text="啊"),
+            Cue(start=4560.0, end=4563.2, text="下一塊第一句"),
+        ]
+    )
+    assert all(b.start >= a.end for a, b in zip(stitched, stitched[1:]))
+    assert [c.text for c in stitched] == ["前一句", "啊", "下一塊第一句"]
+
+
+def test_a_cue_the_seam_leaves_no_room_for_is_dropped():
+    """Trimming never emits a zero-length cue: with no room the cue goes."""
+    from lecture2notes.engines import pipeline
+
+    stitched = pipeline.trim_seam_overlaps(
+        [
+            Cue(start=100.0, end=100.4, text="前一句"),
+            Cue(start=100.0, end=100.2, text="啊"),
+            Cue(start=100.4, end=101.0, text="後一句"),
+        ]
+    )
+    assert all(c.end > c.start for c in stitched)
+    assert all(b.start >= a.end for a, b in zip(stitched, stitched[1:]))
+    assert [c.text for c in stitched] == ["前一句", "後一句"]
+
+
 def test_a_zero_width_token_still_gets_a_visible_cue():
     """The aligner gives lone interjections start == end; `check transcribe`
     rejects those cues, so the engine has to widen them (real case: cue 348

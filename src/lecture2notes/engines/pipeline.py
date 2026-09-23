@@ -101,7 +101,27 @@ def transcribe_audio(
             _out.say("warn", "could not remove temp file %s: %s" % (window, exc))
         progress.advance()
     progress.finish()
-    return cues
+    return trim_seam_overlaps(cues)
+
+
+def trim_seam_overlaps(cues: Sequence[Cue]) -> List[Cue]:
+    """Make a stitched cue list monotonic: no cue starts before the last one ends.
+
+    Windows are transcribed independently, so a window's last cue can end after
+    the next window's first cue starts -- most easily when that last cue was a
+    zero-length one the engine widened. `check transcribe` reports both an
+    overlap and a zero-length cue as errors.
+
+    The later cue yields: its start moves to where the kept one ends, and it is
+    dropped when that leaves it nothing at all. The cue already on the list is
+    never shortened, so it keeps the span the aligner gave it.
+    """
+    kept: List[Cue] = []
+    for cue in cues:
+        start = kept[-1].end if kept and cue.start < kept[-1].end else cue.start
+        if cue.end > start:
+            kept.append(Cue(start=round(start, 3), end=cue.end, text=cue.text))
+    return kept
 
 
 def apply_table(
