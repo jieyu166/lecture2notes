@@ -143,6 +143,29 @@ def test_an_expanded_note_passes_every_rule(expanded):
     assert report.summary_line() == "note: 0 errors, 0 warnings"
 
 
+def test_an_r_comment_in_a_code_fence_is_not_a_heading(expanded):
+    """A fenced `# comment` used to close the note's sections early.
+
+    The heading scan was fence-unaware, so a code block containing R or shell
+    comments ended the Note region at the first `# ` line: the segment count
+    fell to `0/4` on a 34-segment note and R5/R6/R10 stopped scanning there --
+    a pass that had checked almost nothing.
+    """
+    json_path, note_path = expanded
+    clean = check.check_note_stage(json_path, note_path, style="faithful")
+
+    def insert_fence(lines):
+        at = next(i for i, l in enumerate(lines) if l.startswith("## 1、")) + 2
+        block = ["```r", "# 讀進資料", "df <- read.csv('x.csv')", "```", ""]
+        return lines[:at] + block + lines[at:]
+
+    _edit(note_path, insert_fence)
+    report = check.check_note_stage(json_path, note_path, style="faithful")
+
+    assert report.findings == [], report.lines()
+    assert report.metrics["unexpanded_segments"] == clean.metrics["unexpanded_segments"]
+
+
 # -- R1 ---------------------------------------------------------------------
 def test_r1_passes_when_every_section_is_present(lecture):
     json_path, note_path = lecture

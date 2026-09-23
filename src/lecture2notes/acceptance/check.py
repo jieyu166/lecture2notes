@@ -808,10 +808,46 @@ R5_DEFAULT_SEVERITY = "warn"
 QUESTION_LINE = re.compile(r"^\s*\d+[.)、]\s*\S")
 
 
+#: An opening or closing code fence, indented up to three spaces as CommonMark
+#: allows. A `# ` line inside a fence is a comment in R, Python or a shell, not
+#: a heading, and treating it as one closes the note's sections early.
+FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
 def _heading_depth(line: str) -> int:
     stripped = line.lstrip("#")
     depth = len(line) - len(stripped)
     return depth if depth and stripped[:1] in (" ", "\t") else 0
+
+
+def fence_mask(lines: Sequence[str]) -> List[bool]:
+    """True for every line a fenced code block covers, fences included.
+
+    A block is closed by a fence of the same character, so a ``~~~`` block can
+    quote ```` ``` ```` and an unterminated fence swallows the rest of the file
+    rather than half of it.
+    """
+    mask: List[bool] = []
+    marker = ""
+    for line in lines:
+        found = FENCE_LINE.match(line)
+        if found and not marker:
+            marker = found.group(1)[0]
+            mask.append(True)
+        elif found and found.group(1)[0] == marker:
+            marker = ""
+            mask.append(True)
+        else:
+            mask.append(bool(marker))
+    return mask
+
+
+def _heading_depth_at(
+    lines: Sequence[str], position: int, mask: Optional[Sequence[bool]] = None
+) -> int:
+    """:func:`_heading_depth` for one line of a file, blind inside code fences."""
+    mask = fence_mask(lines) if mask is None else mask
+    return 0 if mask[position] else _heading_depth(lines[position])
 
 
 def note_lines(text: str) -> List[str]:
@@ -830,9 +866,14 @@ def section_bounds(
     lines: Sequence[str], start: int, stop_at_depth: Optional[int] = None
 ) -> int:
     """Where the section opened at *start* ends: the next heading that closes it."""
-    depth = stop_at_depth if stop_at_depth is not None else _heading_depth(lines[start])
+    mask = fence_mask(lines)
+    depth = (
+        stop_at_depth
+        if stop_at_depth is not None
+        else _heading_depth_at(lines, start, mask)
+    )
     for position in range(start + 1, len(lines)):
-        found = _heading_depth(lines[position])
+        found = _heading_depth_at(lines, position, mask)
         if found and found <= depth:
             return position
     return len(lines)
@@ -888,9 +929,10 @@ def segment_sections(
 ) -> List[Tuple[str, int, int]]:
     """Each ``## n、title`` section inside the Note body, as (title, start, end)."""
     start, end = bounds
+    mask = fence_mask(lines)
     heads = [
         position for position in range(start, end)
-        if _heading_depth(lines[position]) == 2
+        if _heading_depth_at(lines, position, mask) == 2
     ]
     out: List[Tuple[str, int, int]] = []
     for number, position in enumerate(heads):
