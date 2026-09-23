@@ -66,6 +66,33 @@ def reset_output_flags():
     _out.reset()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def isolated_home(tmp_path_factory):
+    """Point ``Path.home()`` at an empty directory for every test.
+
+    The user layer is ``~/.lecture2notes/``, read at call time. Without this a
+    developer's own overlay -- ``l2n profile init`` writes one -- sits under the
+    whole suite: a ``profile = "radiology"`` there swaps in that profile's
+    privacy patterns, frontmatter and chapter setting, and tests that assert
+    the generic defaults fail for reasons that are not in the repository.
+
+    Session scope, so the module-scoped fixtures that run the whole pipeline
+    once are covered too. It is done through the environment rather than by
+    patching ``user_dir`` so that the CLI run as a child process sees the same
+    empty home. The cache directory is pinned to the real one first, because
+    model downloads resolve under home too and a test run should not fetch them
+    again. A test that wants a populated home sets ``HOME``/``USERPROFILE``
+    itself with ``monkeypatch``, which wins for that test and is undone after.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        if "XDG_CACHE_HOME" not in os.environ:
+            patch.setenv("XDG_CACHE_HOME", str(Path.home() / ".cache"))
+        home = tmp_path_factory.mktemp("home")
+        patch.setenv("HOME", str(home))
+        patch.setenv("USERPROFILE", str(home))
+        yield home
+
+
 def run_cli(
     args: Sequence[str],
     cwd: Optional[Path] = None,
