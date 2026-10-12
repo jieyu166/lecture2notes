@@ -130,6 +130,7 @@ def merge_frames_into_segments(
     data: Mapping[str, Any],
     frames: Iterable[Mapping[str, Any]],
     keep_existing: bool = True,
+    base_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Assign frames to segments by ``[start_sec, end_sec)`` and pick a lead frame.
 
@@ -139,10 +140,13 @@ def merge_frames_into_segments(
     still tell "nothing changed here" from "capture never ran".
 
     ``keep_existing`` (the default) leaves a segment's ``frame`` alone when it
-    already names one: re-running ``l2n frames`` over a document whose frames a
-    person or a model chose by eye must not undo that choice. Only a ``null``
-    or empty ``frame`` is filled. ``frames`` is still refreshed, because it is
-    the capture's own record. ``l2n frames --force`` passes False.
+    already names one that is still a frame: re-running ``l2n frames`` over a
+    document whose frames a person or a model chose by eye must not undo that
+    choice. "Still a frame" means the new capture lists it, or -- given
+    ``base_dir`` -- the file is on disk; a lead frame an interval re-run
+    deleted is filled again rather than kept pointing at nothing. ``frames``
+    is always refreshed, because it is the capture's own record.
+    ``l2n frames --force`` passes False.
     """
     result = dict(data)
     pairs = sorted(
@@ -150,6 +154,7 @@ def merge_frames_into_segments(
         for frame in frames
         if frame.get("frame") is not None and frame.get("timestamp_sec") is not None
     )
+    known = {path for _sec, path in pairs}
     segments = result.get("segments")
     if not isinstance(segments, list):
         return result
@@ -160,7 +165,11 @@ def merge_frames_into_segments(
         end = float(segment.get("end_sec") or 10 ** 9)
         inside = [path for sec, path in pairs if start <= sec < end]
         segment["frames"] = inside
-        if keep_existing and isinstance(segment.get("frame"), str) and segment["frame"]:
+        chosen = segment.get("frame")
+        if keep_existing and isinstance(chosen, str) and chosen and (
+            chosen in known
+            or (base_dir is not None and (Path(base_dir) / chosen).is_file())
+        ):
             continue
         if inside:
             segment["frame"] = inside[0]

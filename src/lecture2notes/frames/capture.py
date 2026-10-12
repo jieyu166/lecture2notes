@@ -251,7 +251,7 @@ def merge_into_document(
     """
     path = Path(document_path)
     merged = merge_frames_into_segments(
-        read_json(path), records, keep_existing=keep_existing
+        read_json(path), records, keep_existing=keep_existing, base_dir=path.parent
     )
     return write_json_atomic(path, merged)
 

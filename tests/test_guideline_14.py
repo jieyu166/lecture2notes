@@ -211,17 +211,38 @@ def _row(second: float, name: str) -> dict:
     return {"timestamp_sec": float(second), "frame": "frames/%s" % name}
 
 
-def test_a_chosen_frame_survives_a_re_merge():
+def test_a_chosen_frame_survives_a_re_merge(tmp_path):
+    (tmp_path / "frames").mkdir()
+    (tmp_path / "frames" / "picked-by-eye.png").write_bytes(b"png")
     document = {"segments": [
         {"index": 1, "start_sec": 0.0, "end_sec": 60.0,
          "frame": "frames/picked-by-eye.png", "frames": []},
         {"index": 2, "start_sec": 60.0, "end_sec": 120.0, "frame": None, "frames": []},
+        {"index": 3, "start_sec": 120.0, "end_sec": 180.0,
+         "frame": "frames/a.png", "frames": []},
     ]}
-    merged = merge_frames_into_segments(document, [_row(5, "a.png"), _row(70, "b.png")])
+    merged = merge_frames_into_segments(
+        document, [_row(5, "a.png"), _row(70, "b.png"), _row(130, "c.png")],
+        base_dir=tmp_path,
+    )
 
     assert merged["segments"][0]["frame"] == "frames/picked-by-eye.png"
     assert merged["segments"][0]["frames"] == ["frames/a.png"]
     assert merged["segments"][1]["frame"] == "frames/b.png"
+    # still listed by the capture, so still a frame, though not this segment's own
+    assert merged["segments"][2]["frame"] == "frames/a.png"
+
+
+def test_a_kept_frame_that_no_longer_exists_is_filled_again(tmp_path):
+    """An interval re-run may delete the old lead frame; keeping it would point
+    the segment at nothing until R2 noticed."""
+    document = {"segments": [
+        {"index": 1, "start_sec": 0.0, "end_sec": 60.0,
+         "frame": "frames/deleted-by-rerun.png", "frames": []},
+    ]}
+    merged = merge_frames_into_segments(document, [_row(5, "a.png")], base_dir=tmp_path)
+
+    assert merged["segments"][0]["frame"] == "frames/a.png"
 
 
 def test_force_puts_every_lead_frame_back():
