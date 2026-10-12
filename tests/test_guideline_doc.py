@@ -177,8 +177,14 @@ def test_the_segmentation_reference_asks_for_questions_and_the_four_arcs():
 
 def test_the_document_uses_no_console_unsafe_markers(doc_text):
     """The console rule is about `_out`, but these characters are banned here too."""
-    for character in ("→", "≥", "✓", "✗"):
+    for character in ("\u2192", "\u2265", "\u2713", "\u2717", "\u2212"):
         assert character not in doc_text, repr(character)
+
+
+def test_the_part_the_bundle_prints_survives_a_cp950_console():
+    """`render --expand-prompt` prints the whole must-follow part; a character
+    cp950 cannot encode turns into `?` on the console that runs the bundle."""
+    guideline.must_follow_text().encode("cp950")
 
 
 # --------------------------------------------------------------------------

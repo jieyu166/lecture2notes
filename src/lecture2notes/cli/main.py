@@ -734,7 +734,7 @@ def _check_frames(target: Optional[str]) -> int:
 
 
 def _check_note(args: argparse.Namespace) -> int:
-    """`l2n check note <doc> --note <note>`: rules R1 to R8 of the guideline.
+    """`l2n check note <doc> --note <note>`: rules R1 to R14 of the guideline.
 
     The version line comes first so a saved report always says which edition of
     the rules produced it; a report that does not is not evidence of anything.
