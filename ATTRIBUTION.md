@@ -140,7 +140,7 @@ Relation values:
 | `schema/scaffold.py` | original | — | Written for this package: `l2n scaffold` projects a structurally valid, entirely placeholder schema v2 document from a subtitle file. No rad-workflow or upstream counterpart. |
 | `schema/model.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/lecture_model.py`. No upstream canonical-schema module or time-signature validator exists in `drpwchen/lecture-to-notes`. |
 
-Counts: 7 inspired, 15 ported-from-rad-workflow, 37 original — 59 modules total.
+Counts: 7 inspired, 15 ported-from-rad-workflow, 38 original — 60 modules total.
 
 ## ASR default parameters
 

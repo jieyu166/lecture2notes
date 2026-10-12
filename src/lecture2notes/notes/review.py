@@ -141,15 +141,22 @@ def decade_candidates(
 def quotation_sample(lines: Sequence[str]) -> Tuple[int, List[str]]:
     """``(total, sampled lines)``: evenly spaced 「」 quotations from the note.
 
-    References and the frontmatter are left out: the correction table quotes
-    wrong spellings on purpose, and neither is the speaker's words.
+    Drawn from the Note body and the reading section, where the speaker's
+    words are: the outline and the questions put segment titles in 「」, and
+    the correction table quotes wrong spellings on purpose. A file with
+    neither section (a fragment) is read whole, References still left out.
     """
     regions = check.note_regions(lines)
-    skip = set(range(*regions["references"])) if "references" in regions else set()
+    allowed = set()
+    for name in ("note", "reading"):
+        if name in regions:
+            allowed.update(range(*regions[name]))
+    if not allowed:
+        allowed = set(range(check.frontmatter_end(lines), len(lines)))
+        if "references" in regions:
+            allowed -= set(range(*regions["references"]))
     found: List[str] = []
-    for position in range(check.frontmatter_end(lines), len(lines)):
-        if position in skip:
-            continue
+    for position in sorted(allowed):
         for match in QUOTATION.finditer(lines[position]):
             stamp = match.group(2) or "無時間碼"
             found.append("- L%d (%s): 「%s」" % (
