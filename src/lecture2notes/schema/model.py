@@ -905,6 +905,17 @@ def _validate_top_level(data: Mapping[str, Any], findings: List[Finding]) -> Non
 
     _validate_questions(data, findings)
 
+    # Top-level `editorial_notes_zh` is optional: where the four-arc check and
+    # other remarks about the lecture as a whole go. `render` prints it in
+    # Summary. Present and not a list of strings is an error, like questions.
+    if "editorial_notes_zh" in data:
+        notes = data.get("editorial_notes_zh")
+        if not isinstance(notes, list) or not all(isinstance(item, str) for item in notes):
+            findings.append(_error(
+                "editorial_notes_zh", "editorial_notes_zh",
+                "editorial_notes_zh must be an array of strings",
+            ))
+
 
 def _validate_questions(data: Mapping[str, Any], findings: List[Finding]) -> None:
     """`questions_zh` is optional, but a malformed one is an error.

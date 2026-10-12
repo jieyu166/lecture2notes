@@ -82,8 +82,9 @@ EXPANSION_CHECKLIST: Tuple[Tuple[str, str, str], ...] = (
     (
         "# Evergreen Note",
         "takeaways_zh 的第一條，包成一句粗體引文",
-        "**先寫這一個**：換成一句離開這場講座也成立的**可遷移原則**，"
-        "不是本集的單一數據點（正反例見規範 4.1）",
+        "**先寫這一個**：換成**一句話總結本課程內容**，指得回時間碼；"
+        "不是 takeaways_zh[0] 照抄，也不是半句逐字稿。自己做的歸納或排序標"
+        "「（本筆記整理）」（正反例見規範 4.1）",
     ),
     (
         "# Summary",
@@ -129,8 +130,9 @@ EXPANSION_CHECKLIST: Tuple[Tuple[str, str, str], ...] = (
 #: the checklist because writing it first gives the rest of the note an axis;
 #: written last it is only ever the skeleton line with a word changed.
 EVERGREEN_FIRST = (
-    "**第一件事：先寫 Evergreen。** 把時間、人名、這次的數字拿掉之後還成立的，"
-    "才是 Evergreen；拿掉就不成立的，是本集的單一數據點，屬於 Summary。"
+    "**第一件事：先寫 Evergreen。** Evergreen 是一句話總結本課程內容，"
+    "而且指得回時間碼；不是 takeaways_zh[0] 照抄，也不是半句逐字稿。"
+    "講者沒說、你自己做的歸納或排序，一律標「（本筆記整理）」。"
     "正反例見規範 4.1。R10 通過不代表 Evergreen 合格。"
 )
 
@@ -161,6 +163,108 @@ def expansion_checklist(style: str = "concise") -> List[str]:
 #: Rule identifiers, so a typo in a finding fails a test rather than a reader.
 RULES: Tuple[str, ...] = (
     "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11",
+    "R12", "R13", "R14",
+)
+
+#: The one section allowed to hold content the speaker did not give: a short
+#: plain-language explanation of a term. Its heading says so, and it sits just
+#: before ``### References``. Rendered only when ``note.reader`` is not
+#: ``self``; required for ``student`` and ``public`` (R14). R3, R5, R10 and
+#: R11 do not scan it.
+GLOSSARY_HEADING = "## 名詞小辭典（非講者內容）"
+
+#: The radiology reading section. R5, R8 and R13 scan it from this heading to
+#: the next level-one heading, the glossary or ``### References``.
+READING_HEADING = "# 閱片"
+
+#: The one placeholder R8 accepts, and only inside the reading section: "I
+#: looked and the speaker did not cover this", for a fixed callout field. A
+#: Note section with nothing to say is deleted instead, so there it is still
+#: reported.
+NOT_COVERED_NOTE = "N/A（原文未涵蓋）"
+
+#: Words R13 reports in a frame description, outside 「」.
+SPECULATION_WORDS: Tuple[str, ...] = ("推測", "推斷")
+
+#: The two markers an inference in the Note body may carry, at the start of
+#: the sentence or list item. An inference without one is fabrication.
+BODY_INFERENCE_MARKS: Tuple[str, ...] = ("[推論]", "[本筆記整理]")
+
+#: Reader levels, as the guideline's table states them:
+#: (level, who, terms and abbreviations, glossary, question type).
+READER_GUIDANCE: Tuple[Tuple[str, str, str, str, str], ...] = (
+    (
+        "self", "筆記主人",
+        "專有名詞與縮寫保留英文原文（HARD RULE 6），不另加中譯",
+        "不產生",
+        "問理由與邊界，至少一題 [推論]",
+    ),
+    (
+        "clerk", "專業入門者",
+        "首見寫「中文（English, 縮寫）」，之後用縮寫；分級系統名（BI-RADS 等）例外",
+        "選用",
+        "同 self，可加一題「把講者的判準套到另一個案例」",
+    ),
+    (
+        "student", "國高中生",
+        "首見寫「中文（English, 縮寫）」，縮寫一律展開；能用中文說的就用中文",
+        "必須有",
+        "先問「講者說了什麼、為什麼」，再一題 [推論]；不考專業細節的記憶",
+    ),
+    (
+        "public", "一般大眾",
+        "同 student，而且英文只放在首見的括號裡",
+        "必須有",
+        "生活情境題，至少一題 [推論]；不用術語出題",
+    ),
+)
+
+
+def reader_guidance(reader: str) -> List[str]:
+    """The bundle's lines for one reader level."""
+    for level, who, terms, glossary, questions in READER_GUIDANCE:
+        if level != reader:
+            continue
+        lines = [
+            "## 讀者層級：%s（%s）" % (level, who),
+            "",
+            "- 詞彙與縮寫：%s" % terms,
+            "- 名詞小辭典：%s" % glossary,
+            "- 題目型態：%s" % questions,
+        ]
+        if level != "self":
+            lines.extend([
+                "- 小辭典固定標題 `%s`，放在 `### References` 之前；每條 1 到 2 句、"
+                "不寫數值閾值、不附文獻、本文不得引用它。" % GLOSSARY_HEADING,
+                "- 讀者層級不放寬「不可編造」（規範 0.3）：小辭典解釋的是詞，"
+                "不是講者沒講的內容。",
+            ])
+        return lines
+    return []
+
+
+#: The errors no rule can see, as ``l2n review-prompt`` hands them to an
+#: independent reviewer: (name, what to look for). Section 2.5 of the
+#: guideline carries the same names with an example each.
+REVIEW_ERRORS: Tuple[Tuple[str, str], ...] = (
+    ("說過頭", "講者說「通常／可能／我覺得」，筆記寫成「一定／只有／絕不」"),
+    ("夾帶因果", "講者只並列兩件事，筆記寫成「因為 A 所以 B」；推論沒標 [推論]"),
+    ("替講者排順序", "講者沒排的判讀順序或流程，筆記排了，又沒標 [本筆記整理]"),
+    ("單一示範當通則", "講者只示範一個病例或一個例子，筆記寫成一般特徵"),
+    ("比較對象", "講者比的是 A 與 B，筆記寫成 A 與 C，或漏掉比較對象"),
+    ("條件範圍", "講者的條件被放寬或收窄，或多了排他的「才」"),
+    ("數量詞", "「約 10%」「少數」「大多數」被漏掉或改成全有全無"),
+)
+
+#: What `render --expand-prompt` adds for each ``[references]`` switch.
+VERIFY_CITATIONS_STEP = (
+    "講者或講義引用的文獻（作者、期刊、年份、DOI），先用 CrossRef 或 doi.org 查證；"
+    "查得到才寫進 References，查不到就寫進 JSON 的 `unverified_terms`，本文不寫。"
+    "`l2n check note` 不連網，不驗這一步。"
+)
+RECORD_HANDOUT_STEP = (
+    "References 的 source 區塊加一行講義檔名與版本"
+    "（例：`- handout: 講義檔名.pdf（版本或日期）`）；沒有講義就寫「無講義」。"
 )
 
 _HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$")
@@ -231,6 +335,9 @@ def expand_prompt(
     transcript_path: Optional[Path] = None,
     style: str = "concise",
     doc: Optional[Path] = None,
+    reader: str = "self",
+    verify_citations: bool = False,
+    record_handout: bool = False,
 ) -> str:
     """The instruction bundle an agent needs to expand one skeleton.
 
@@ -277,6 +384,15 @@ def expand_prompt(
     rules = must_follow_text(document)
     if rules:
         parts.extend(["", rules.rstrip()])
+    parts.extend(["", *reader_guidance(reader)])
+    steps: List[str] = []
+    if verify_citations:
+        steps.append(VERIFY_CITATIONS_STEP)
+    if record_handout:
+        steps.append(RECORD_HANDOUT_STEP)
+    if steps:
+        parts.extend(["", "## References 的額外步驟（profile 開啟）", ""])
+        parts.extend("- %s" % step for step in steps)
     parts.extend(["", *expansion_checklist(style)])
     parts.extend([
         "",
@@ -290,12 +406,26 @@ def expand_prompt(
         "l2n check note %s --note %s --style %s" % (json_path, note, style),
         "",
         "check 回報任何 error 就回頭修，不要交出去。",
+        "",
+        "check 全過之後，交給沒參與撰寫的人或 agent 做獨立驗收（機器抓不到的錯誤）：",
+        "",
+        "l2n review-prompt %s --note %s" % (json_path, note),
     ])
     return "\n".join(parts) + "\n"
 
 
 __all__ = [
     "ANSWER_CALLOUT",
+    "BODY_INFERENCE_MARKS",
+    "GLOSSARY_HEADING",
+    "NOT_COVERED_NOTE",
+    "READER_GUIDANCE",
+    "READING_HEADING",
+    "RECORD_HANDOUT_STEP",
+    "REVIEW_ERRORS",
+    "SPECULATION_WORDS",
+    "VERIFY_CITATIONS_STEP",
+    "reader_guidance",
     "DUPLICATE_SENTENCE_CHARS",
     "EVERGREEN_FIRST",
     "EXPANSION_CHECKLIST",

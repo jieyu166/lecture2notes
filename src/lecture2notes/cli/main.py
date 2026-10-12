@@ -508,7 +508,12 @@ def cmd_render(args: argparse.Namespace) -> int:
     note_path = path.with_name(path.stem + ".v4.md")
 
     if getattr(args, "expand_prompt", False):
-        _out.line(guideline.expand_prompt(path, note_path, style=style))
+        _out.line(guideline.expand_prompt(
+            path, note_path, style=style,
+            reader=loader.note_reader(profile),
+            verify_citations=loader.verify_citations(profile),
+            record_handout=loader.record_handout(profile),
+        ))
         return exit_codes.OK
 
     if note_path.exists() and not getattr(args, "force", False):
