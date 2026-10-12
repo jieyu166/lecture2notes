@@ -382,6 +382,7 @@ def cmd_ocr(args: argparse.Namespace) -> int:
             min_conf=getattr(args, "min_conf", ocr_mod.DEFAULT_MIN_CONF),
             s2t=not getattr(args, "no_s2t", False),
             force=getattr(args, "force", False),
+            skip_frames=getattr(args, "skip_frames", None),
         )
     except ocr_mod.OcrTargetError as exc:
         # A frames folder that names no lecture, or more than one. Writing an
@@ -1380,6 +1381,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="低於此信心值的辨識結果直接丟棄",
     )
     p.add_argument("--no-s2t", action="store_true", help="不做簡轉繁（預設會轉）")
+    p.add_argument(
+        "--skip-frames",
+        action="append",
+        default=None,
+        dest="skip_frames",
+        metavar="GLOB_OR_RANGE",
+        help="略過不做 OCR 的影格：路徑 glob（frames/x-01*.png）或時間範圍"
+        "（00:52:00-00:58:30）；可重複。參與者面板、聊天室畫面用這個排除",
+    )
     p.set_defaults(func=cmd_ocr)
 
     p = sub.add_parser(

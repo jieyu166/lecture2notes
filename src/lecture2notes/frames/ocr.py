@@ -16,15 +16,17 @@ actually changed.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import unquote
 
 from lecture2notes import _deps, _out
+from lecture2notes.frames.manifest import frame_seconds
 from lecture2notes.schema.io import read_json, write_json_atomic
 
 IMG_EXT = (".png", ".jpg", ".jpeg", ".webp")
@@ -189,6 +191,63 @@ def collect_frames(
     return out
 
 
+#: ``--skip-frames`` value that names a time range rather than a glob:
+#: ``HH:MM:SS-HH:MM:SS``, ``MM:SS-MM:SS`` or plain seconds ``90-300``.
+SKIP_RANGE = re.compile(r"^\s*(\d+(?::\d{1,2}){0,2})\s*-\s*(\d+(?::\d{1,2}){0,2})\s*$")
+
+
+def _clock_seconds(text: str) -> float:
+    total = 0.0
+    for part in text.split(":"):
+        total = total * 60 + int(part)
+    return total
+
+
+class SkipFrames:
+    """Which frames ``l2n ocr --skip-frames`` leaves out.
+
+    A frame that shows the participant panel or the chat carries real names,
+    and OCR copies them into the document. Such frames are excluded before
+    OCR -- by a glob on the frame path (``frames/talk-01*.png``) or by a time
+    range on the time the frame's file name encodes (``00:52:00-00:58:30``).
+    A skipped frame is not OCRed and its cached text, if an earlier run left
+    any, is not merged into ``frame_ocr``.
+    """
+
+    def __init__(self, patterns: Optional[Sequence[str]] = None) -> None:
+        self.globs: List[str] = []
+        self.ranges: List[Tuple[float, float]] = []
+        for raw in patterns or ():
+            pattern = str(raw).strip()
+            if not pattern:
+                continue
+            match = SKIP_RANGE.match(pattern)
+            if match:
+                start, end = (_clock_seconds(group) for group in match.groups())
+                if end < start:
+                    raise OcrTargetError(
+                        "--skip-frames %r: the range ends before it starts" % pattern
+                    )
+                self.ranges.append((start, end))
+            else:
+                self.globs.append(pattern.replace("\\", "/"))
+
+    def __bool__(self) -> bool:
+        return bool(self.globs or self.ranges)
+
+    def matches(self, frame: str) -> bool:
+        name = str(frame).replace("\\", "/")
+        base = name.rsplit("/", 1)[-1]
+        for pattern in self.globs:
+            if fnmatch.fnmatchcase(name, pattern) or fnmatch.fnmatchcase(base, pattern):
+                return True
+        if self.ranges:
+            second = frame_seconds(base, fallback=-1.0)
+            if second >= 0 and any(a <= second <= b for a, b in self.ranges):
+                return True
+        return False
+
+
 def pending_frames(
     frames: Sequence[str],
     cache: Mapping[str, Any],
@@ -234,8 +293,13 @@ def merge_ocr_into_segments(
     min_conf: float = DEFAULT_MIN_CONF,
     s2t: bool = True,
     generated_at: Optional[str] = None,
+    skip: Optional["SkipFrames"] = None,
 ) -> Dict[str, Any]:
-    """Attach ``frame_ocr`` to each segment and stamp ``ocr_meta`` on the document."""
+    """Attach ``frame_ocr`` to each segment and stamp ``ocr_meta`` on the document.
+
+    Frames *skip* matches get no entry, even when the cache holds text for
+    them from a run before they were excluded.
+    """
     result = dict(data)
     merged = 0
     segments = result.get("segments")
@@ -249,6 +313,8 @@ def merge_ocr_into_segments(
             )
             entries = []
             for frame in segment_frames:
+                if skip is not None and skip.matches(str(frame)):
+                    continue
                 frames_seen.append(str(frame))
                 hit = cache.get(str(frame))
                 if hit and hit.get("text"):
@@ -287,6 +353,7 @@ class OcrResult:
     cached: int = 0
     engine_calls: int = 0
     document: Optional[Path] = None
+    skipped: List[str] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -386,6 +453,7 @@ def run_ocr(
     engine_factory: Optional[Callable[[], Any]] = None,
     progress_interval: float = 5.0,
     stem: Optional[str] = None,
+    skip_frames: Optional[Sequence[str]] = None,
 ) -> OcrResult:
     """OCR every frame the target references, using the cache where it can.
 
@@ -448,6 +516,12 @@ def run_ocr(
         base_dir = target.parent
         frames = collect_frames(data, None)
 
+    skip = SkipFrames(skip_frames)
+    skipped = [frame for frame in frames if skip and skip.matches(frame)]
+    if skipped:
+        frames = [frame for frame in frames if frame not in skipped]
+        _out.stage("ocr", "skipped %d frames (--skip-frames)" % len(skipped))
+
     cache_file = cache_path_for(target, stem)
     cache = read_cache(cache_file)
     todo = pending_frames(frames, cache, base_dir, force)
@@ -457,6 +531,7 @@ def run_ocr(
         frames=list(frames),
         cached=len(frames) - len(todo),
         document=document,
+        skipped=skipped,
     )
     _out.stage("ocr", cache_report(len(frames), len(todo)))
 
@@ -485,7 +560,9 @@ def run_ocr(
         ]
 
     if data is not None and document is not None:
-        write_json_atomic(document, merge_ocr_into_segments(data, cache, min_conf, s2t))
+        write_json_atomic(document, merge_ocr_into_segments(
+            data, cache, min_conf, s2t, skip=skip if skip else None
+        ))
     return result
 
 
@@ -505,6 +582,8 @@ __all__ = [
     "MANIFEST_SUFFIX",
     "OcrResult",
     "OcrTargetError",
+    "SKIP_RANGE",
+    "SkipFrames",
     "SIDECAR_SUFFIXES",
     "cache_path_for",
     "folder_stems",
