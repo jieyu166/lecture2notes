@@ -161,8 +161,8 @@ def test_radiology_privacy_adds_patient_identifiers_without_losing_the_generic_o
 def test_radiology_does_not_override_settings_it_has_no_opinion_about(
     clean_home: Path,
 ):
-    # It ships no outputs.toml, so a layer that lacks a file contributes
-    # nothing and the generic answers stand.
+    # Its outputs.toml carries only the translation list, so every output
+    # setting it does not set keeps the generic answer.
     settings = loader.resolve("radiology").settings()
     assert settings["pbf"].value is False
     assert settings["pbf"].source == "builtin"

@@ -150,7 +150,8 @@ def test_the_reference_switches_are_off_by_default(lecture, capsys):
     out = capsys.readouterr().out
 
     assert "CrossRef" not in out
-    assert "講義檔名與版本" not in out
+    assert guideline.RECORD_HANDOUT_STEP not in out
+    assert guideline.VERIFY_CITATIONS_STEP not in out
 
 
 def test_each_switch_adds_its_step(lecture, capsys, monkeypatch):

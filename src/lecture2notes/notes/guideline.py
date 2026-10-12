@@ -17,7 +17,7 @@ from lecture2notes import resources
 
 #: Bump this whenever a rule changes meaning. `l2n check note` prints it, so a
 #: report always says which edition of the rules produced it.
-GUIDELINE_VERSION = "1.3"
+GUIDELINE_VERSION = "1.4"
 
 #: The exact line the document carries and the check prints.
 VERSION_LINE = "guideline_version: %s" % GUIDELINE_VERSION
