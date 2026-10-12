@@ -812,7 +812,7 @@ def check_json(path: Path, require_frames: bool = True) -> StageReport:
 # ==========================================================================
 # stage acceptance: check note
 # ==========================================================================
-# R1 to R10 of the note-writing guideline. Everything here is decided from the
+# R1 to R14 of the note-writing guideline. Everything here is decided from the
 # note's text, the document it came from and the transcript beside it; nothing
 # judges whether the writing is any good, because that is what the other half of
 # the guideline -- the half a person has to follow -- is for.
@@ -837,6 +837,27 @@ PLACEHOLDER_TEXT = (
 
 #: Rendered by `notes.render`; `check note` looks for the same header.
 CORRECTION_HEADER = ("heard", "correct")
+
+#: The name findings use for the radiology reading section.
+READING_REGION = "閱片"
+
+#: Leading blockquote markers, however deeply nested.
+CALLOUT_PREFIX = re.compile(r"^\s*(?:>\s?)+")
+
+#: An HTML comment, which carries markup (`<`, `>`) rather than prose.
+HTML_COMMENT = re.compile(r"<!--.*?-->")
+
+#: A number with a unit, or a comparison sign: what a glossary must not carry
+#: (R14). A definition that names a threshold has stopped explaining a word
+#: and started making a claim nobody in the lecture made.
+GLOSSARY_THRESHOLD = re.compile(
+    r"\d+(?:\.\d+)?\s*(?:%|mm|cm|HU|ms|歲|倍)|[<>\u2264\u2265]"
+)
+
+
+def callout_body(line: str) -> str:
+    """A line with its leading ``>`` markers removed and stripped."""
+    return CALLOUT_PREFIX.sub("", line).strip()
 
 #: What R5 compares against when the profile does not promote it.
 R5_DEFAULT_SEVERITY = "warn"
@@ -940,11 +961,28 @@ def note_regions(lines: Sequence[str]) -> Dict[str, Tuple[int, int]]:
     regions: Dict[str, Tuple[int, int]] = {}
     note_at = heading_index(lines, "# Note (layer 1-3)")
     references_at = heading_index(lines, "### References")
+    glossary_at = heading_index(lines, guideline.GLOSSARY_HEADING)
+    reading_at = heading_index(lines, guideline.READING_HEADING)
+
+    def cut(start: int, end: int) -> int:
+        # The glossary and References both close whatever region they sit in,
+        # although neither is a level-one heading.
+        for stop in (references_at, glossary_at):
+            if start < stop < end:
+                end = stop
+        return end
+
     if note_at >= 0:
-        end = section_bounds(lines, note_at)
-        if 0 <= references_at < end:
+        regions["note"] = (note_at + 1, cut(note_at, section_bounds(lines, note_at)))
+    if reading_at >= 0:
+        regions["reading"] = (
+            reading_at + 1, cut(reading_at, section_bounds(lines, reading_at))
+        )
+    if glossary_at >= 0:
+        end = section_bounds(lines, glossary_at)
+        if glossary_at < references_at < end:
             end = references_at
-        regions["note"] = (note_at + 1, end)
+        regions["glossary"] = (glossary_at + 1, end)
     if references_at >= 0:
         regions["references"] = (references_at + 1,
                                  section_bounds(lines, references_at))
@@ -1074,7 +1112,7 @@ def check_note_stage(
     style: Optional[str] = None,
     profile: Optional[str] = None,
 ) -> StageReport:
-    """`l2n check note`: rules R1 to R10 of the note-writing guideline."""
+    """`l2n check note`: rules R1 to R14 of the note-writing guideline."""
     json_path = Path(json_path)
     note_path = Path(note_path)
     report = StageReport("note", note_path.name)
@@ -1137,6 +1175,14 @@ def check_note_stage(
         effective_style, effective_profile, report,
     )
     _rule_duplicate_sentences(lines, note_path, report)
+    _rule_forbidden_terms(
+        lines, data, json_path, note_path, transcript, effective_profile, report
+    )
+    _rule_frame_speculation(lines, regions, note_path, report)
+    problem = loader.note_reader_problem(effective_profile)
+    if problem:
+        report.add("warn", "reader", "outputs.toml", problem)
+    _rule_glossary(lines, regions, effective_profile, note_path, report)
     report.measure("ai_draft_remaining", count_ai_drafts(lines))
     return report
 
@@ -1394,6 +1440,7 @@ ORDERED_MARKER = re.compile(r"^\d+[.)、]\s*")
 def r11_regions(lines: Sequence[str]) -> Dict[str, Tuple[int, int]]:
     """The sections R11 compares, in reading order, skipping absent ones."""
     found: Dict[str, Tuple[int, int]] = {}
+    glossary_at = heading_index(lines, guideline.GLOSSARY_HEADING)
     for name, heading, stop_heading in R11_REGIONS:
         start = heading_index(lines, heading)
         if start < 0:
@@ -1403,6 +1450,10 @@ def r11_regions(lines: Sequence[str]) -> Dict[str, Tuple[int, int]]:
             stop = heading_index(lines, stop_heading)
             if 0 <= stop < end:
                 end = stop
+        # The glossary is the one section that is not the speaker's; whatever
+        # it repeats is a definition, not a sentence copied between sections.
+        if start < glossary_at < end:
+            end = glossary_at
         found[name] = (start + 1, end)
     return found
 
@@ -1598,12 +1649,26 @@ def _rule_transcript_paste(
     for name, _heading, _stop in R5_EXTRA_REGIONS:
         if name in regions:
             sections.append((name, *regions[name]))
+    # 閱片 is all callout lines, so "a `>` line is a quotation" would exempt
+    # the whole section. There only a 「」 span, or a line that is nothing but
+    # a quotation (`> 「...」`), counts as marked.
+    if "reading" in regions:
+        sections.append((READING_REGION, *regions["reading"]))
     for title, start, end in sections:
         for position in range(start, end):
             line = lines[position]
-            if not line.strip() or line.lstrip().startswith(">"):
+            if not line.strip():
                 continue
-            hit = pasted_run(unquoted_residue(line), runs, size)
+            if title == READING_REGION:
+                body = callout_body(line)
+                if body.startswith("「"):
+                    continue
+                residue = unquoted_residue(body)
+            elif line.lstrip().startswith(">"):
+                continue
+            else:
+                residue = unquoted_residue(line)
+            hit = pasted_run(residue, runs, size)
             if hit:
                 report.add(
                     severity, "R5", title,
@@ -1654,14 +1719,31 @@ def _rule_placeholder(
     note: Path,
     report: StageReport,
 ) -> None:
-    """R8: filler text where a section should simply have been deleted."""
-    if "note" not in regions:
-        return
-    for title, start, end in segment_sections(lines, regions["note"]) or [
-        ("Note (layer 1-3)", *regions["note"])
-    ]:
+    """R8: filler text where a section should simply have been deleted.
+
+    1.4 adds the reading section, which no rule used to see. Its callouts have
+    fixed fields, so there -- and only there -- the one spelling
+    ``N/A（原文未涵蓋）`` ("I checked; the speaker did not cover it") is
+    accepted. A bare ``N/A`` in the same field is still filler.
+    """
+    sections: List[Tuple[str, int, int]] = []
+    if "note" in regions:
+        sections.extend(segment_sections(lines, regions["note"]) or [
+            ("Note (layer 1-3)", *regions["note"])
+        ])
+    if "reading" in regions:
+        sections.append((READING_REGION, *regions["reading"]))
+    for title, start, end in sections:
         for position in range(start, end):
-            hit = next((t for t in PLACEHOLDER_TEXT if t in lines[position]), None)
+            text = lines[position]
+            if title == READING_REGION:
+                text = text.replace(guideline.NOT_COVERED_NOTE, "")
+            hit = next((t for t in PLACEHOLDER_TEXT if t in text), None)
+            if hit and title == READING_REGION:
+                report.add("warn", "R8", title,
+                           "placeholder text %r; write %s exactly, or delete "
+                           "the field" % (hit, guideline.NOT_COVERED_NOTE))
+                break
             if hit:
                 report.add("warn", "R8", title,
                            "placeholder text %r; delete the section instead" % hit)
@@ -1700,6 +1782,242 @@ def _rule_questions(
                    "answered by rereading. Write it as: %s"
                    % (guideline.INFERENCE_MARK,
                       guideline.INFERENCE_PREFIX_HINT % guideline.INFERENCE_MARK))
+    # 1.4: every question carries its own collapsed answer, between its number
+    # and the next one. An answer left open under the question is not a
+    # question any more; one shared answer block for three questions is not
+    # three answers.
+    numbered = [offset for offset, line in enumerate(body) if QUESTION_LINE.match(line)]
+    for order, offset in enumerate(numbered):
+        stop = numbered[order + 1] if order + 1 < len(numbered) else len(body)
+        if not any(guideline.ANSWER_CALLOUT in line for line in body[offset + 1:stop]):
+            report.add("warn", "R9", "%s:%d" % (note.name, start + 2 + offset),
+                       "question %d has no collapsed answer (%s) before the next "
+                       "question" % (order + 1, guideline.ANSWER_CALLOUT))
+
+
+# --------------------------------------------------------------------------
+# R12: Taiwanese translations the profile forbids
+# --------------------------------------------------------------------------
+@dataclass(frozen=True)
+class TermHit:
+    """One forbidden spelling on one line of a note."""
+
+    line: int  # 0-based
+    layer: str
+    wrong: str
+    correct: str
+    english: str
+    cue: str
+
+    def message(self) -> str:
+        english = " (%s)" % self.english if self.english else ""
+        cue = "; cue %r" % self.cue if self.layer == "context" else ""
+        return "「%s」 -> 「%s」%s [%s%s]" % (
+            self.wrong, self.correct, english, self.layer, cue
+        )
+
+
+def frontmatter_end(lines: Sequence[str]) -> int:
+    """The first line after a leading ``---`` fenced frontmatter, else 0."""
+    if lines and lines[0].strip() == "---":
+        for position in range(1, len(lines)):
+            if lines[position].strip() == "---":
+                return position + 1
+    return 0
+
+
+def segment_transcripts(
+    data: Mapping[str, Any], transcript: Optional[Path]
+) -> List[str]:
+    """Each segment's transcript text, in document order ('' when unknown)."""
+    segments = [s for s in (data.get("segments") or []) if isinstance(s, Mapping)]
+    if transcript is None or not Path(transcript).is_file():
+        return ["" for _ in segments]
+    from lecture2notes.engines.base import parse_srt_text, read_subtitle_text
+
+    try:
+        cues = parse_srt_text(read_subtitle_text(Path(transcript)))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return ["" for _ in segments]
+    out: List[str] = []
+    for segment in segments:
+        try:
+            start = float(segment.get("start_sec"))
+            end = float(segment.get("end_sec"))
+        except (TypeError, ValueError):
+            out.append("")
+            continue
+        out.append(" ".join(
+            cue.text for cue in cues if cue.end > start and cue.start < end
+        ))
+    return out
+
+
+#: The matcher is shared with `check json`, which runs it over takeaways and
+#: bullets; it lives in `notes.rules` so both stages read one definition.
+find_term_hits = rules.forbidden_term_matches
+
+
+def forbidden_term_hits(
+    lines: Sequence[str],
+    data: Mapping[str, Any],
+    profile: str,
+    transcript: Optional[Path] = None,
+) -> List[TermHit]:
+    """Every R12 hit in a note, in line order.
+
+    Scans everything after the frontmatter, the reading section included,
+    except References (whose correction table lists wrong spellings on
+    purpose), fenced code, and 「」 spans (the speaker's own words stay as
+    said). A context term needs its English cue on the same line -- the whole
+    line, quotations included, since that is where the English usually sits --
+    or in the transcript of the segment the line belongs to.
+    """
+    terms = loader.forbidden_terms(profile)
+    if not any(terms.values()):
+        return []
+    regions = note_regions(lines)
+    mask = fence_mask(lines)
+    skip = set()
+    if "references" in regions:
+        skip.update(range(*regions["references"]))
+    owner: Dict[int, int] = {}
+    if "note" in regions:
+        for order, (_title, start, end) in enumerate(
+            segment_sections(lines, regions["note"])
+        ):
+            for position in range(start - 1, end):
+                owner[position] = order
+    spoken = segment_transcripts(data, transcript)
+    hits: List[TermHit] = []
+    for position in range(frontmatter_end(lines), len(lines)):
+        if position in skip or mask[position]:
+            continue
+        line = lines[position]
+        text = QUOTED_SPAN.sub("", line)
+        if not text.strip():
+            continue
+        order = owner.get(position)
+        said = spoken[order] if order is not None and order < len(spoken) else ""
+        for layer, wrong, entry in find_term_hits(text, line + "\n" + said, terms):
+            hits.append(TermHit(
+                position, layer, wrong,
+                str(entry.get("correct") or ""),
+                str(entry.get("english") or ""),
+                str(entry.get("cue") or ""),
+            ))
+    return hits
+
+
+def _rule_forbidden_terms(
+    lines: Sequence[str],
+    data: Mapping[str, Any],
+    json_path: Path,
+    note: Path,
+    transcript: Optional[Path],
+    profile: str,
+    report: StageReport,
+) -> None:
+    """R12: a translation the profile's list says is not Taiwanese usage."""
+    path = Path(transcript) if transcript else json_path.with_name(
+        json_path.stem + ".srt"
+    )
+    severity = (
+        "error" if loader.forbidden_terms_severity(profile) == "error" else "warn"
+    )
+    for hit in forbidden_term_hits(lines, data, profile, path):
+        report.add(severity, "R12", "%s:%d" % (note.name, hit.line + 1),
+                   hit.message())
+
+
+# --------------------------------------------------------------------------
+# R13: speculation in a frame description
+# --------------------------------------------------------------------------
+def frame_description_lines(
+    lines: Sequence[str], regions: Mapping[str, Tuple[int, int]]
+) -> List[int]:
+    """Line numbers R13 treats as describing a frame.
+
+    Two places: the whole reading section, and in the Note body the paragraph
+    that follows each ``![[...]]`` embed (up to the next blank line). The
+    second is a heuristic -- l2n has no figure caption of its own -- and the
+    narrowest one that still covers "the sentence right under the picture".
+    """
+    out: List[int] = []
+    if "reading" in regions:
+        out.extend(range(*regions["reading"]))
+    if "note" in regions:
+        start, end = regions["note"]
+        mask = fence_mask(lines)
+        for position in range(start, end):
+            if mask[position] or not NOTE_EMBED.search(lines[position]):
+                continue
+            if NOTE_EMBED.sub("", lines[position]).strip():
+                out.append(position)
+            cursor = position + 1
+            while cursor < end and not lines[cursor].strip():
+                cursor += 1
+            while (
+                cursor < end
+                and lines[cursor].strip()
+                and not _heading_depth_at(lines, cursor, mask)
+                and not NOTE_EMBED.search(lines[cursor])
+            ):
+                out.append(cursor)
+                cursor += 1
+    return sorted(set(out))
+
+
+def _rule_frame_speculation(
+    lines: Sequence[str],
+    regions: Mapping[str, Tuple[int, int]],
+    note: Path,
+    report: StageReport,
+) -> None:
+    """R13: 「推測」 or 「推斷」 in a frame description, outside a quotation.
+
+    A frame description says what the speaker said about that frame or what
+    the handout's caption says. Anything the writer had to guess is not in
+    either, and the word gives the guess away.
+    """
+    for position in frame_description_lines(lines, regions):
+        text = QUOTED_SPAN.sub("", lines[position])
+        word = next((w for w in guideline.SPECULATION_WORDS if w in text), None)
+        if word:
+            report.add("warn", "R13", "%s:%d" % (note.name, position + 1),
+                       "「%s」 in a frame description; write only what the "
+                       "speaker or the handout says about this frame" % word)
+
+
+# --------------------------------------------------------------------------
+# R14: the glossary
+# --------------------------------------------------------------------------
+def _rule_glossary(
+    lines: Sequence[str],
+    regions: Mapping[str, Tuple[int, int]],
+    profile: str,
+    note: Path,
+    report: StageReport,
+) -> None:
+    """R14: a required glossary is missing, or a glossary carries a threshold."""
+    reader = loader.note_reader(profile)
+    if "glossary" not in regions:
+        if reader in loader.GLOSSARY_REQUIRED_READERS:
+            report.add("warn", "R14", note.name,
+                       "note.reader is %s, so the note needs the section %s "
+                       "before ### References" % (reader, guideline.GLOSSARY_HEADING))
+        return
+    mask = fence_mask(lines)
+    for position in range(*regions["glossary"]):
+        if mask[position]:
+            continue
+        text = callout_body(HTML_COMMENT.sub("", lines[position]))
+        found = GLOSSARY_THRESHOLD.search(text)
+        if found:
+            report.add("warn", "R14", "%s:%d" % (note.name, position + 1),
+                       "the glossary carries a threshold or a number with a "
+                       "unit (%s); explain the word, leave the numbers to the "
+                       "speaker" % found.group(0).strip())
 
 
 # ==========================================================================

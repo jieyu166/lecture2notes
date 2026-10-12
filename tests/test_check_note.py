@@ -77,12 +77,23 @@ def _edit(note_path: Path, transform):
     note_path.write_text("\n".join(transform(lines)), encoding="utf-8", newline="\n")
 
 
-def _replace_question_section(note_path: Path, questions):
-    """Swap the whole 題目 body for a handwritten list, R9's only input."""
+def _replace_question_section(note_path: Path, questions, answers: bool = True):
+    """Swap the whole 題目 body for a handwritten list, R9's only input.
+
+    Since 1.4 R9 also wants a collapsed answer under every question, so by
+    default each numbered line gets one; ``answers=False`` leaves them out.
+    """
+    body = []
+    for question in questions:
+        body.append(question)
+        if answers and check.QUESTION_LINE.match(question):
+            body.extend(["   %s 答案" % guideline.ANSWER_CALLOUT,
+                         "   > 佔位答案 (00:00:10)"])
+
     def transform(lines):
         at = lines.index("## 題目")
         stop = lines.index("## 學習驗證")
-        return lines[:at + 1] + ["", *questions, ""] + lines[stop:]
+        return lines[:at + 1] + ["", *body, ""] + lines[stop:]
     _edit(note_path, transform)
 
 
@@ -418,6 +429,39 @@ def test_r9_reports_a_question_section_with_no_inference_question(lecture):
     findings = [f for f in report.findings if f.code == "R9"]
     assert [f.severity for f in findings] == ["warn"]
     assert guideline.INFERENCE_MARK in findings[0].message
+
+
+def test_r9_reports_a_question_without_a_collapsed_answer(lecture):
+    """1.4: each question needs its own `> [!answer]-` before the next one."""
+    json_path, note_path = lecture
+    _replace_question_section(note_path, [
+        "1. [推論] 若某個案例具備 A 但缺少 B，結論還成立嗎？",
+        "   %s 答案" % guideline.ANSWER_CALLOUT,
+        "   > 佔位答案 (00:00:10)",
+        "2. 不看筆記說出第一段的推理鏈。",
+        "   答案直接攤在題目下面。",
+        "3. 不看筆記說出第二段的結論。",
+        "   %s 答案" % guideline.ANSWER_CALLOUT,
+        "   > 佔位答案 (00:01:10)",
+    ], answers=False)
+    report = check.check_note_stage(json_path, note_path)
+
+    findings = [f for f in report.findings if f.code == "R9"]
+    assert len(findings) == 1
+    assert findings[0].severity == "warn"
+    assert "question 2" in findings[0].message
+    assert guideline.ANSWER_CALLOUT in findings[0].message
+
+
+def test_r9_is_quiet_when_every_question_has_its_answer(lecture):
+    json_path, note_path = lecture
+    _replace_question_section(note_path, [
+        "1. [推論] 若某個案例具備 A 但缺少 B，結論還成立嗎？",
+        "2. 不看筆記說出第一段的推理鏈。",
+        "3. 不看筆記說出第二段的結論。",
+    ])
+
+    assert "R9" not in _codes(check.check_note_stage(json_path, note_path))
 
 
 def test_r9_is_silent_when_the_section_is_missing_because_that_is_r1(lecture):
@@ -1087,3 +1131,296 @@ def test_the_r11_excerpt_drops_the_typesetting(lecture):
     assert finding.message.startswith("the same sentence is in 2 sections: 「")
     assert "**" not in finding.message
     assert REPEATED[:10] in finding.message
+
+
+# --------------------------------------------------------------------------
+# guideline 1.4 -- R12 to R14, and R5/R8 reaching the reading section
+# --------------------------------------------------------------------------
+# The radiology profile ships the forbidden-translation list and the 閱片
+# section, so these cases render the same document under it.
+
+from lecture2notes.profiles import loader  # noqa: E402
+
+
+@pytest.fixture()
+def radiology(lecture):
+    """The lecture, re-rendered and re-labelled as a radiology note."""
+    json_path, note_path = lecture
+    document = json.loads(json_path.read_text(encoding="utf-8"))
+    document["profile"] = "radiology"
+    json_path.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    note_path.write_text(
+        render_skeleton(document, style="faithful", stem=STEM, profile="radiology"),
+        encoding="utf-8", newline="\n",
+    )
+    return json_path, note_path
+
+
+def _findings(report, code):
+    return [f for f in report.findings if f.code == code]
+
+
+def _append_after(note_path: Path, heading: str, text: str):
+    def transform(lines):
+        at = lines.index(heading)
+        return lines[:at + 1] + ["", text] + lines[at + 1:]
+    _edit(note_path, transform)
+
+
+# -- R12 ----------------------------------------------------------------------
+def test_r12_reports_an_always_term_in_the_note_body(radiology):
+    json_path, note_path = radiology
+    _insert_into_first_section(note_path, "病灶位於蛛網膜下腔（subarachnoid space）")
+    report = check.check_note_stage(json_path, note_path)
+
+    hits = _findings(report, "R12")
+    assert len(hits) == 1
+    assert hits[0].severity == "warn"
+    assert "「蛛網膜」 -> 「蜘蛛膜」" in hits[0].message
+    assert hits[0].location.startswith(note_path.name + ":")
+
+
+def test_r12_reports_a_context_term_when_its_cue_is_on_the_line(radiology):
+    json_path, note_path = radiology
+    _insert_into_first_section(note_path, "深部靜脈栓塞（deep vein thrombosis）")
+    hits = _findings(check.check_note_stage(json_path, note_path), "R12")
+
+    assert len(hits) == 1
+    assert "「栓塞」 -> 「血栓」" in hits[0].message
+    assert "context" in hits[0].message
+
+
+def test_r12_is_silent_on_a_context_term_without_its_cue(radiology):
+    """栓塞 is the right word for embolism; only a thrombo- cue makes it wrong."""
+    json_path, note_path = radiology
+    _insert_into_first_section(note_path, "肺栓塞（pulmonary embolism）")
+
+    assert _findings(check.check_note_stage(json_path, note_path), "R12") == []
+
+
+def test_r12_reads_the_cue_from_the_segment_transcript(radiology):
+    json_path, note_path = radiology
+    srt = json_path.with_name(STEM + ".srt")
+    srt.write_text(
+        "1\n00:00:00,000 --> 00:00:20,000\nremote history of stroke\n\n",
+        encoding="utf-8",
+    )
+    _insert_into_first_section(note_path, "病人有遠端的中風病史")
+
+    hits = _findings(check.check_note_stage(json_path, note_path), "R12")
+    assert len(hits) == 1 and "「遠端」 -> 「久遠」" in hits[0].message
+
+
+def test_r12_leaves_the_speaker_quotation_alone(radiology):
+    json_path, note_path = radiology
+    _insert_into_first_section(note_path, "> 「這個在蛛網膜下腔」(00:00:12)")
+
+    assert _findings(check.check_note_stage(json_path, note_path), "R12") == []
+
+
+def test_r12_does_not_scan_references(radiology):
+    """The correction table lists wrong spellings on purpose."""
+    json_path, note_path = radiology
+    _append_after(note_path, "### References", "| 蛛網膜 | 蜘蛛膜 | 講義 p.3 |")
+
+    assert _findings(check.check_note_stage(json_path, note_path), "R12") == []
+
+
+def test_r12_counts_a_compound_once(radiology):
+    """遠端轉移 is one mistake, not 遠端轉移 plus 遠端."""
+    json_path, note_path = radiology
+    _insert_into_first_section(note_path, "已有遠端轉移（remote metastasis 是錯的英文）")
+
+    hits = _findings(check.check_note_stage(json_path, note_path), "R12")
+    assert len(hits) == 1
+    assert "遠處轉移" in hits[0].message
+
+
+def test_r12_scans_the_reading_section(radiology):
+    json_path, note_path = radiology
+    _append_after(note_path, "# 閱片", "> **Findings**：下頜骨有一處溶骨性病灶")
+
+    hits = _findings(check.check_note_stage(json_path, note_path), "R12")
+    assert len(hits) == 1 and "「頜」" in hits[0].message
+
+
+def test_r12_is_silent_under_the_generic_profile(lecture):
+    """generic ships no list, so no radiology vocabulary is imposed on it."""
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, "病灶位於蛛網膜下腔")
+
+    assert _findings(check.check_note_stage(json_path, note_path), "R12") == []
+
+
+def test_r12_severity_can_be_promoted_by_the_profile(radiology):
+    json_path, note_path = radiology
+    _insert_into_first_section(note_path, "病灶位於蛛網膜下腔")
+    with loader.cli_layer(guideline__forbidden_terms="error"):
+        hits = _findings(check.check_note_stage(json_path, note_path), "R12")
+
+    assert hits and all(h.severity == "error" for h in hits)
+
+
+def test_a_fresh_radiology_skeleton_reports_no_new_rule(radiology):
+    json_path, note_path = radiology
+    codes = set(_codes(check.check_note_stage(json_path, note_path)))
+
+    assert not codes & {"R12", "R13", "R14", "R8", "R5"}
+
+
+# -- R5 and R8 in 閱片 ----------------------------------------------------------
+def test_r8_now_sees_the_reading_section(radiology):
+    json_path, note_path = radiology
+    _append_after(note_path, "# 閱片", "> **Pitfall**：N/A")
+
+    hits = _findings(check.check_note_stage(json_path, note_path), "R8")
+    assert len(hits) == 1
+    assert hits[0].location == "閱片"
+    assert guideline.NOT_COVERED_NOTE in hits[0].message
+
+
+def test_r8_accepts_the_one_documented_spelling_in_the_reading_section(radiology):
+    json_path, note_path = radiology
+    _append_after(note_path, "# 閱片", "> **Pitfall**：%s" % guideline.NOT_COVERED_NOTE)
+
+    assert _findings(check.check_note_stage(json_path, note_path), "R8") == []
+
+
+def test_r8_still_reports_the_spelling_in_the_note_body(radiology):
+    """A Note section with nothing to say is deleted, not annotated."""
+    json_path, note_path = radiology
+    _insert_into_first_section(note_path, guideline.NOT_COVERED_NOTE)
+
+    hits = _findings(check.check_note_stage(json_path, note_path), "R8")
+    assert len(hits) == 1 and hits[0].location != "閱片"
+
+
+def test_r5_sees_a_paste_in_a_reading_callout(radiology):
+    json_path, note_path = radiology
+    _append_after(note_path, "# 閱片", "> **Findings**：%s" % LONG_RUN[:60])
+
+    hits = _findings(check.check_note_stage(json_path, note_path), "R5")
+    assert len(hits) == 1 and hits[0].location == "閱片"
+
+
+def test_r5_exempts_a_quotation_line_in_the_reading_section(radiology):
+    json_path, note_path = radiology
+    _append_after(note_path, "# 閱片", "> 「%s」(00:00:05)" % LONG_RUN[:60])
+
+    assert _findings(check.check_note_stage(json_path, note_path), "R5") == []
+
+
+# -- R13 ----------------------------------------------------------------------
+def test_r13_reports_speculation_in_the_reading_section(radiology):
+    json_path, note_path = radiology
+    _append_after(note_path, "# 閱片", "> **Findings**：推測為左側肋膜積液")
+
+    hits = _findings(check.check_note_stage(json_path, note_path), "R13")
+    assert len(hits) == 1
+    assert hits[0].severity == "warn"
+    assert "「推測」" in hits[0].message
+
+
+def test_r13_reports_speculation_right_under_an_embed(lecture):
+    json_path, note_path = lecture
+
+    def transform(lines):
+        at = next(i for i, line in enumerate(lines) if line.startswith("![["))
+        return lines[:at + 1] + ["", "影像推斷為右下葉實質化"] + lines[at + 1:]
+    _edit(note_path, transform)
+
+    hits = _findings(check.check_note_stage(json_path, note_path), "R13")
+    assert len(hits) == 1 and "「推斷」" in hits[0].message
+
+
+def test_r13_leaves_quotations_and_later_paragraphs_alone(radiology):
+    json_path, note_path = radiology
+    _append_after(
+        note_path, "# 閱片", "> **Findings**：講者指出「我推測是 effusion」(00:00:14)"
+    )
+    _rewrite_first_section(note_path, ["", "這一段的結論是推測性的，講者自己說了。"])
+
+    assert _findings(check.check_note_stage(json_path, note_path), "R13") == []
+
+
+# -- R14 ----------------------------------------------------------------------
+def test_r14_reports_a_missing_glossary_for_a_student_reader(lecture):
+    json_path, note_path = lecture
+    with loader.cli_layer(note__reader="student"):
+        hits = _findings(check.check_note_stage(json_path, note_path), "R14")
+
+    assert len(hits) == 1
+    assert guideline.GLOSSARY_HEADING in hits[0].message
+
+
+def test_r14_does_not_ask_self_or_clerk_for_a_glossary(lecture):
+    json_path, note_path = lecture
+    for reader in ("self", "clerk"):
+        with loader.cli_layer(note__reader=reader):
+            report = check.check_note_stage(json_path, note_path)
+        assert _findings(report, "R14") == [], reader
+
+
+def test_r14_is_quiet_on_a_rendered_public_skeleton(lecture):
+    json_path, note_path = lecture
+    document = json.loads(json_path.read_text(encoding="utf-8"))
+    with loader.cli_layer(note__reader="public"):
+        note_path.write_text(
+            render_skeleton(document, style="faithful", stem=STEM),
+            encoding="utf-8", newline="\n",
+        )
+        report = check.check_note_stage(json_path, note_path)
+
+    assert guideline.GLOSSARY_HEADING in note_path.read_text(encoding="utf-8")
+    assert _findings(report, "R14") == []
+
+
+@pytest.mark.parametrize("entry, reported", [
+    ("- **ADC**：一般小於 1.0 表示受限 < 1.0", True),
+    ("- **結節**：直徑 6 mm 以上才追蹤", True),
+    ("- **年齡**：多見於 40 歲以後", True),
+    ("- **DWI**：擴散加權影像，看水分子移動受不受限", False),
+    ("- **T2**：一種 MRI 權重影像", False),
+    ("> [!note] 本節每條 1 到 2 句", False),
+])
+def test_r14_reports_a_threshold_inside_the_glossary(lecture, entry, reported):
+    json_path, note_path = lecture
+
+    def transform(lines):
+        at = lines.index("### References")
+        return lines[:at] + [guideline.GLOSSARY_HEADING, "", entry, ""] + lines[at:]
+    _edit(note_path, transform)
+
+    hits = _findings(check.check_note_stage(json_path, note_path), "R14")
+    assert bool(hits) is reported, entry
+
+
+def test_the_glossary_is_out_of_the_note_body_rules(lecture):
+    """R3 and R10 stop at the glossary: it is not the speaker's content."""
+    json_path, note_path = lecture
+    document = json.loads(json_path.read_text(encoding="utf-8"))
+    document["unverified_terms"] = ["Schrodinger sign"]
+    json_path.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    with loader.cli_layer(note__reader="student"):
+        note_path.write_text(
+            render_skeleton(document, style="faithful", stem=STEM),
+            encoding="utf-8", newline="\n",
+        )
+        report = check.check_note_stage(json_path, note_path)
+    text = note_path.read_text(encoding="utf-8")
+    regions = check.note_regions(check.note_lines(text))
+
+    assert "- **Schrodinger sign**：" in text
+    assert "glossary" in regions
+    assert regions["note"][1] < regions["glossary"][0]
+    assert _findings(report, "R3") == []
+    assert len(_findings(report, "R10")) == len(document["segments"]) + 1
+
+
+def test_an_unknown_reader_is_reported_and_treated_as_self(lecture):
+    json_path, note_path = lecture
+    with loader.cli_layer(note__reader="kids"):
+        report = check.check_note_stage(json_path, note_path)
+
+    assert _codes(report).count("reader") == 1
+    assert _findings(report, "R14") == []
