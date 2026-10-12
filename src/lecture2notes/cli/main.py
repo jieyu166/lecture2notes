@@ -299,7 +299,10 @@ def _curate_frames(video: Path, args: argparse.Namespace) -> int:
     write_json_atomic(capture_mod.curation_path_for(base_dir, stem), result.report())
     write_manifest(manifest_path, result.promoted)
     if document is not None and result.promoted:
-        capture_mod.merge_into_document(document_path, result.promoted)
+        capture_mod.merge_into_document(
+            document_path, result.promoted,
+            keep_existing=not getattr(args, "force", False),
+        )
 
     for text in result.lines():
         _out.line(text)
@@ -333,6 +336,9 @@ def cmd_frames(args: argparse.Namespace) -> int:
             diff_min=getattr(args, "diff_min", 4.0),
             width=getattr(args, "width", scene_mod.DEFAULT_WIDTH),
             stage=getattr(args, "stage", False),
+            # A segment whose `frame` was already chosen keeps it; only
+            # --force puts every lead frame back to what the capture found.
+            force=getattr(args, "force", False),
         )
     except capture_mod.DurationUnknown as exc:
         # Nothing was written: an unknown duration is a usage-level error, not

@@ -129,6 +129,7 @@ def verify_manifest(path: Path, base_dir: Path) -> List[Dict[str, Any]]:
 def merge_frames_into_segments(
     data: Mapping[str, Any],
     frames: Iterable[Mapping[str, Any]],
+    keep_existing: bool = True,
 ) -> Dict[str, Any]:
     """Assign frames to segments by ``[start_sec, end_sec)`` and pick a lead frame.
 
@@ -136,6 +137,12 @@ def merge_frames_into_segments(
     frame from before it started, which is literally what was on screen when the
     segment began. Only then does ``frames`` stay empty, so a later check can
     still tell "nothing changed here" from "capture never ran".
+
+    ``keep_existing`` (the default) leaves a segment's ``frame`` alone when it
+    already names one: re-running ``l2n frames`` over a document whose frames a
+    person or a model chose by eye must not undo that choice. Only a ``null``
+    or empty ``frame`` is filled. ``frames`` is still refreshed, because it is
+    the capture's own record. ``l2n frames --force`` passes False.
     """
     result = dict(data)
     pairs = sorted(
@@ -153,6 +160,8 @@ def merge_frames_into_segments(
         end = float(segment.get("end_sec") or 10 ** 9)
         inside = [path for sec, path in pairs if start <= sec < end]
         segment["frames"] = inside
+        if keep_existing and isinstance(segment.get("frame"), str) and segment["frame"]:
+            continue
         if inside:
             segment["frame"] = inside[0]
         else:
