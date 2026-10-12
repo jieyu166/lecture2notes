@@ -806,6 +806,19 @@ def check_json(path: Path, require_frames: bool = True) -> StageReport:
     report.findings.extend(validate_document(data))
     if require_frames:
         check_json_frames(data, target.parent, report)
+    if isinstance(data, Mapping):
+        # R12's upstream half: what the note will quote verbatim is checked
+        # before it is quoted. Same list, same profile resolution as R12.
+        profile = str(data.get("profile") or loader.BUILTIN_PROFILE)
+        if not loader.profile_dir(profile).is_dir():
+            profile = loader.BUILTIN_PROFILE
+        terms = loader.forbidden_terms(profile)
+        if any(terms.values()):
+            transcript = target.with_name(target.stem + ".srt")
+            report.findings.extend(rules.forbidden_term_findings(
+                data, terms, segment_transcripts(data, transcript)
+            ))
+        report.findings.extend(rules.frame_ocr_email_findings(data))
     return report
 
 
