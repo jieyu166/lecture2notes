@@ -65,6 +65,7 @@ SUBCOMMANDS: List[str] = [
     "hub",
     "publish",
     "check",
+    "review-prompt",
     "migrate",
     "run",
     "convert-model",
@@ -810,6 +811,34 @@ def cmd_check(args: argparse.Namespace) -> int:
     return exit_codes.OK
 
 
+def cmd_review_prompt(args: argparse.Namespace) -> int:
+    """`l2n review-prompt <stem>.json`: the independent reviewer's brief.
+
+    The counterpart of ``render --expand-prompt`` for the step after it. Prints
+    and writes nothing else; a missing document or note is a usage error,
+    because a brief that names a file nobody can open reviews nothing.
+    """
+    path, data = _load_document(getattr(args, "json_file", None), "review-prompt")
+    if path is None:
+        return exit_codes.ERROR
+    note = getattr(args, "note", None)
+    note_path = Path(note) if note else path.with_name(path.stem + ".v4.md")
+    if not note_path.is_file():
+        _out.error("review-prompt: no such note: %s (pass --note)" % note_path)
+        return exit_codes.ERROR
+    profile = loader.resolve(str(data.get("profile") or loader.BUILTIN_PROFILE)).profile
+    if not loader.profile_dir(profile).is_dir():
+        profile = loader.BUILTIN_PROFILE
+    from lecture2notes.notes import review as review_mod
+
+    _out.line(review_mod.review_prompt(
+        path, note_path, data,
+        note_path.read_text(encoding="utf-8", errors="replace"),
+        profile,
+    ))
+    return exit_codes.OK
+
+
 def cmd_migrate(args: argparse.Namespace) -> int:
     path = _existing_path(args.json_file, "migrate")
     if path is None:
@@ -1500,6 +1529,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="check note 的風格；faithful 才檢查 R6（預設取 profile）",
     )
     p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser(
+        "review-prompt",
+        parents=[common],
+        help="印出獨立驗收交辦書（機器抓不到的錯誤清單與抽查候選）",
+    )
+    p.add_argument("json_file", nargs="?", help="正式 JSON 路徑（<stem>.json）")
+    p.add_argument(
+        "--note", default=None, help="要驗收的筆記路徑（預設 <stem>.v4.md）"
+    )
+    p.set_defaults(func=cmd_review_prompt)
 
     p = sub.add_parser("migrate", parents=[common], help="把舊版 JSON 原地升級為 schema v2")
     p.add_argument("json_file", nargs="?", help="正式 JSON 路徑")

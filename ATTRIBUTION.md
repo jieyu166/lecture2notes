@@ -117,6 +117,7 @@ Relation values:
 | `notes/__init__.py` | original | — | Package marker. |
 | `notes/guideline.py` | original | — | This package's own note-writing guideline constants (version string, mandatory section order, rule identifiers); no prior script. |
 | `notes/render.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/render_v4_note.py`. Upstream's `render_embeds.py` expands embed placeholders inside an existing note in a different format; different input/output convention, no shared functions. |
+| `notes/review.py` | original | — | The independent-review brief `l2n review-prompt` prints (guideline 1.4): the errors no rule can see, and sampling candidates (numbers by segment time span, decade mentions, quotations, R12 context-layer hits). No prior script; the review practice it encodes comes from the maintainer's own textbook-note workflow. |
 | `notes/rewrite.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/lecture-to-notes/scripts/rewrite_evidence.py` (only the sensitive-data-pattern and text-normalization helpers were kept). No upstream file addresses claims/citations/evidence packets at all. |
 | `notes/rules.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/lecture_content_rules.py`. No upstream equivalent (Traditional/Simplified Chinese content rules are specific to this project's language target). |
 | `outputs/__init__.py` | original | — | Package marker. |
