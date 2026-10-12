@@ -44,6 +44,7 @@ CLI_STAGES = (
     "hub",
     "publish",
     "check",
+    "review-prompt",
 )
 
 #: The description must name each of these areas of work.

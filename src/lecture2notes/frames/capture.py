@@ -160,6 +160,7 @@ def capture(
     base_dir: Optional[Path] = None,
     merge: bool = True,
     document: Optional[Path] = None,
+    force: bool = False,
     extract: Optional[Callable[..., bool]] = None,
     progress_interval: float = 5.0,
 ) -> CaptureResult:
@@ -230,7 +231,9 @@ def capture(
             Path(document) if document is not None else document_path_for(root, stem)
         )
         if target_document.is_file():
-            merge_into_document(target_document, result.records)
+            merge_into_document(
+                target_document, result.records, keep_existing=not force
+            )
             result.merged_into = target_document
     return result
 
@@ -238,6 +241,7 @@ def capture(
 def merge_into_document(
     document_path: Path,
     records: Sequence[Mapping[str, Any]],
+    keep_existing: bool = True,
 ) -> Path:
     """Assign the manifest's frames to the document's segments and rewrite it.
 
@@ -246,7 +250,9 @@ def merge_into_document(
     the whole run.
     """
     path = Path(document_path)
-    merged = merge_frames_into_segments(read_json(path), records)
+    merged = merge_frames_into_segments(
+        read_json(path), records, keep_existing=keep_existing, base_dir=path.parent
+    )
     return write_json_atomic(path, merged)
 
 

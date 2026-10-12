@@ -192,7 +192,9 @@ def test_the_bundle_puts_evergreen_first(lecture, capsys):
 
     assert guideline.EVERGREEN_FIRST in out
     assert out.index(guideline.EVERGREEN_FIRST) < out.index("| 章節 |")
-    assert "單一數據點" in out
+    assert "一句話總結本課程內容" in out
+    assert "[本筆記整理]" in out
+    assert "（本筆記整理）" not in out
     assert "規範 4.1" in out
 
 

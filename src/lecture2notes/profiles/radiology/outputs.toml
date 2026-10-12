@@ -1,0 +1,35 @@
+# Output settings the radiology profile adds on top of generic.
+#
+# Only one table: the Taiwanese translation list `l2n check note` (R12) and
+# `l2n check json` scan for. Everything else -- pbf, hub, viewer, note style --
+# is left to the generic answers, because reading radiology changes none of
+# them, and a layer that does not set a key contributes nothing for it.
+#
+# Keyed on the WRONG spelling, so an overlay adds or replaces one term without
+# restating the list (tables merge key by key). Each value is an inline table:
+#   correct  the Taiwanese term to write instead
+#   english  the source term, shown in the finding
+#   cue      context layer only: an English fragment (case-insensitive) that
+#            must appear on the same line or in that segment's transcript
+#            before the term is reported. Without the cue the Chinese word is
+#            often right: 栓塞 is the correct word for embolism.
+#
+# The human-readable copy of this list is appendix C of
+# docs/note-writing-guideline.md; tests/test_forbidden_terms.py asserts the two
+# carry the same keys.
+
+[check.forbidden_terms.always]
+"蛛網膜" = { correct = "蜘蛛膜", english = "arachnoid", cue = "" }
+"外旋神經" = { correct = "外展神經", english = "abducens nerve", cue = "" }
+"頜" = { correct = "顎", english = "mandible / maxilla / submandibular (下顎骨／上顎骨／顎下)", cue = "" }
+"腭" = { correct = "顎", english = "palate", cue = "" }
+"遠端轉移" = { correct = "遠處轉移", english = "distant metastasis", cue = "" }
+"帶狀核" = { correct = "屏狀核", english = "claustrum", cue = "" }
+
+[check.forbidden_terms.context]
+"栓塞" = { correct = "血栓", english = "thrombosis / thrombus", cue = "thrombo" }
+"遠端" = { correct = "久遠", english = "remote (history)", cue = "remote" }
+"水腦症" = { correct = "積水性無腦症", english = "hydranencephaly", cue = "hydranencephal" }
+"腦脊膜膨出" = { correct = "腦膜腦膨出", english = "meningoencephalocele", cue = "meningoencephalocele" }
+"神經節區" = { correct = "基底核區", english = "ganglionic (region)", cue = "ganglionic" }
+"特徵性" = { correct = "具確診意義", english = "pathognomonic", cue = "pathognomonic" }

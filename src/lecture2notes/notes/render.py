@@ -651,7 +651,7 @@ def render_verification(takeaways: Sequence[str]) -> List[str]:
     agreement while a folded one has to be opened first.
 
     No :data:`AI_DRAFT_MARK` here, and this is the one thing guideline 1.3
-    changed about the marker. The marker means "a model still has to write
+    changed about the marker (guideline 1.4 keeps it). The marker means "a model still has to write
     this", and whoever writes that placeholder deletes it -- which is what
     makes `ai_draft_remaining=0` a reachable definition of done. These
     candidates are not waiting on a model: keeping, deleting or rewriting them
@@ -672,6 +672,107 @@ def render_verification(takeaways: Sequence[str]) -> List[str]:
     ])
     lines.extend("- [ ] %s" % item for item in VERIFICATION_ITEMS)
     return lines
+
+
+#: What the glossary skeleton says under its heading. The section is the one
+#: place a note may carry words the speaker did not say, so it says so first.
+GLOSSARY_NOTE = (
+    "本節不是講者的內容：每條 1 到 2 句白話解釋，不寫數值閾值、不附文獻，"
+    "本文不得引用本節。查不到可靠說明的詞就刪掉那一條；"
+    "列自 unverified_terms 的詞尤其如此。"
+)
+
+#: Each candidate term's placeholder, until the expansion writes it.
+GLOSSARY_ENTRY = "- **%s**：（擴寫時寫 1 到 2 句白話解釋）"
+
+#: Used when the document offers no candidate term at all.
+GLOSSARY_FILLER = "- （擴寫時列出本文用到、讀者可能不懂的詞；沒有就刪掉整節）"
+
+#: How many candidates the skeleton lists at most. More than this is a list
+#: nobody finishes, and the expansion can always add the term it needs.
+GLOSSARY_MAX_TERMS = 15
+
+#: An abbreviation candidate: a capital followed by capitals or digits,
+#: optionally hyphenated (CT, MRI, BI-RADS, T2), not inside a longer word.
+ABBREVIATION = re.compile(
+    r"(?<![A-Za-z0-9])[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)*(?![A-Za-z0-9])"
+)
+
+#: A template that places the glossary itself.
+GLOSSARY_PLACEHOLDER = re.compile(r"\{\{\s*glossary\s*\}\}")
+
+
+def glossary_candidates(data: Mapping[str, Any]) -> List[str]:
+    """Terms the glossary skeleton lists: unverified terms, then abbreviations.
+
+    Abbreviations are read from the text the note is projected from (title,
+    summaries, takeaways, segment titles and bullets) in document order, so two
+    renders list the same terms in the same order.
+    """
+    seen: List[str] = []
+
+    def add(term: str) -> None:
+        term = term.strip()
+        if term and term not in seen:
+            seen.append(term)
+
+    for term in strings_of(data.get("unverified_terms")):
+        add(term)
+    texts: List[str] = [
+        text_of(data.get("title")), text_of(data.get("overall_summary_zh"))
+    ]
+    texts.extend(strings_of(data.get("takeaways_zh")))
+    segments = data.get("segments") if isinstance(data.get("segments"), list) else []
+    for segment in segments:
+        if not isinstance(segment, Mapping):
+            continue
+        texts.append(text_of(segment.get("title")))
+        texts.append(text_of(segment.get("summary_zh")))
+        texts.extend(item["text"] for item in bullet_items(segment))
+    for text in texts:
+        for match in ABBREVIATION.finditer(text):
+            add(match.group(0))
+    return seen[:GLOSSARY_MAX_TERMS]
+
+
+def render_glossary(data: Mapping[str, Any]) -> List[str]:
+    """The glossary skeleton: heading, what the section is, one line per term."""
+    lines = [guideline.GLOSSARY_HEADING, "", GLOSSARY_NOTE, "", AI_DRAFT_MARK, ""]
+    terms = glossary_candidates(data)
+    if terms:
+        lines.extend(GLOSSARY_ENTRY % term for term in terms)
+    else:
+        lines.append(GLOSSARY_FILLER)
+    return lines
+
+
+def insert_glossary(text: str, glossary: str) -> str:
+    """Put the glossary straight before ``### References``.
+
+    A template may place it itself with ``{{glossary}}``; one that does not
+    (every overlay written before 1.4) still gets it, in the position the
+    guideline fixes. Without a References heading there is nowhere defined to
+    put it, and the note is returned as it was.
+    """
+    lines = text.split("\n")
+    for position, line in enumerate(lines):
+        if line.strip() == "### References":
+            return "\n".join(lines[:position] + [glossary, ""] + lines[position:])
+    return text
+
+
+#: The callout that carries the document's top-level ``editorial_notes_zh``
+#: (the four-arc check and similar editorial remarks) inside Summary.
+EDITORIAL_CALLOUT = "> [!note]- 編輯備註（四段弧等，非講者原話）"
+
+
+def render_editorial(data: Mapping[str, Any]) -> List[str]:
+    """Top-level ``editorial_notes_zh`` as a collapsed callout, or nothing."""
+    notes = [item.strip() for item in strings_of(data.get("editorial_notes_zh"))]
+    notes = [item for item in notes if item]
+    if not notes:
+        return []
+    return [EDITORIAL_CALLOUT] + ["> - %s" % item for item in notes]
 
 
 def render_skeleton(
@@ -702,6 +803,11 @@ def render_skeleton(
 
     evergreen = "**「%s」**" % takeaways[0] if takeaways else "**「（待擴寫）」**"
     summary = "\n".join("- %s" % item for item in takeaways) or "- （待擴寫）"
+    editorial = render_editorial(data)
+    if editorial:
+        summary = "\n".join([summary, ""] + editorial)
+    reader = loader.note_reader(profile)
+    glossary = "\n".join(render_glossary(data)) if reader != "self" else ""
 
     section_lines: List[str] = []
     for position, segment in enumerate(segments, 1):
@@ -723,8 +829,13 @@ def render_skeleton(
         "questions": "\n".join(render_questions(data)),
         "verification": "\n".join(render_verification(takeaways)),
         "title": text_of(data.get("title")),
+        "glossary": glossary,
     }
-    text = fill(body.replace("\r\n", "\n"), context)
+    body = body.replace("\r\n", "\n")
+    placed = bool(GLOSSARY_PLACEHOLDER.search(body))
+    text = fill(body, context)
+    if glossary and not placed:
+        text = insert_glossary(text, glossary)
     text = insert_style_marker(text, chosen)
     return text.rstrip("\n") + "\n"
 
@@ -741,6 +852,17 @@ def write_skeleton(path: Path, data: Mapping[str, Any], **kwargs: Any) -> Path:
 
 __all__ = [
     "AI_DRAFT_MARK",
+    "ABBREVIATION",
+    "EDITORIAL_CALLOUT",
+    "GLOSSARY_ENTRY",
+    "GLOSSARY_FILLER",
+    "GLOSSARY_MAX_TERMS",
+    "GLOSSARY_NOTE",
+    "GLOSSARY_PLACEHOLDER",
+    "glossary_candidates",
+    "insert_glossary",
+    "render_editorial",
+    "render_glossary",
     "STYLE_MARKER",
     "STYLE_MARKER_RE",
     "insert_style_marker",

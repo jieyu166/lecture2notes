@@ -65,6 +65,7 @@ SUBCOMMANDS: List[str] = [
     "hub",
     "publish",
     "check",
+    "review-prompt",
     "migrate",
     "run",
     "convert-model",
@@ -299,7 +300,10 @@ def _curate_frames(video: Path, args: argparse.Namespace) -> int:
     write_json_atomic(capture_mod.curation_path_for(base_dir, stem), result.report())
     write_manifest(manifest_path, result.promoted)
     if document is not None and result.promoted:
-        capture_mod.merge_into_document(document_path, result.promoted)
+        capture_mod.merge_into_document(
+            document_path, result.promoted,
+            keep_existing=not getattr(args, "force", False),
+        )
 
     for text in result.lines():
         _out.line(text)
@@ -333,6 +337,9 @@ def cmd_frames(args: argparse.Namespace) -> int:
             diff_min=getattr(args, "diff_min", 4.0),
             width=getattr(args, "width", scene_mod.DEFAULT_WIDTH),
             stage=getattr(args, "stage", False),
+            # A segment whose `frame` was already chosen keeps it; only
+            # --force puts every lead frame back to what the capture found.
+            force=getattr(args, "force", False),
         )
     except capture_mod.DurationUnknown as exc:
         # Nothing was written: an unknown duration is a usage-level error, not
@@ -376,6 +383,7 @@ def cmd_ocr(args: argparse.Namespace) -> int:
             min_conf=getattr(args, "min_conf", ocr_mod.DEFAULT_MIN_CONF),
             s2t=not getattr(args, "no_s2t", False),
             force=getattr(args, "force", False),
+            skip_frames=getattr(args, "skip_frames", None),
         )
     except ocr_mod.OcrTargetError as exc:
         # A frames folder that names no lecture, or more than one. Writing an
@@ -508,7 +516,12 @@ def cmd_render(args: argparse.Namespace) -> int:
     note_path = path.with_name(path.stem + ".v4.md")
 
     if getattr(args, "expand_prompt", False):
-        _out.line(guideline.expand_prompt(path, note_path, style=style))
+        _out.line(guideline.expand_prompt(
+            path, note_path, style=style,
+            reader=loader.note_reader(profile),
+            verify_citations=loader.verify_citations(profile),
+            record_handout=loader.record_handout(profile),
+        ))
         return exit_codes.OK
 
     if note_path.exists() and not getattr(args, "force", False):
@@ -721,7 +734,7 @@ def _check_frames(target: Optional[str]) -> int:
 
 
 def _check_note(args: argparse.Namespace) -> int:
-    """`l2n check note <doc> --note <note>`: rules R1 to R8 of the guideline.
+    """`l2n check note <doc> --note <note>`: rules R1 to R14 of the guideline.
 
     The version line comes first so a saved report always says which edition of
     the rules produced it; a report that does not is not evidence of anything.
@@ -795,6 +808,34 @@ def cmd_check(args: argparse.Namespace) -> int:
     if stage == "note":
         return _check_note(args)
     not_implemented("check %s" % stage)
+    return exit_codes.OK
+
+
+def cmd_review_prompt(args: argparse.Namespace) -> int:
+    """`l2n review-prompt <stem>.json`: the independent reviewer's brief.
+
+    The counterpart of ``render --expand-prompt`` for the step after it. Prints
+    and writes nothing else; a missing document or note is a usage error,
+    because a brief that names a file nobody can open reviews nothing.
+    """
+    path, data = _load_document(getattr(args, "json_file", None), "review-prompt")
+    if path is None:
+        return exit_codes.ERROR
+    note = getattr(args, "note", None)
+    note_path = Path(note) if note else path.with_name(path.stem + ".v4.md")
+    if not note_path.is_file():
+        _out.error("review-prompt: no such note: %s (pass --note)" % note_path)
+        return exit_codes.ERROR
+    profile = loader.resolve(str(data.get("profile") or loader.BUILTIN_PROFILE)).profile
+    if not loader.profile_dir(profile).is_dir():
+        profile = loader.BUILTIN_PROFILE
+    from lecture2notes.notes import review as review_mod
+
+    _out.line(review_mod.review_prompt(
+        path, note_path, data,
+        note_path.read_text(encoding="utf-8", errors="replace"),
+        profile,
+    ))
     return exit_codes.OK
 
 
@@ -1369,6 +1410,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="低於此信心值的辨識結果直接丟棄",
     )
     p.add_argument("--no-s2t", action="store_true", help="不做簡轉繁（預設會轉）")
+    p.add_argument(
+        "--skip-frames",
+        action="append",
+        default=None,
+        dest="skip_frames",
+        metavar="GLOB_OR_RANGE",
+        help="略過不做 OCR 的影格：路徑 glob（frames/x-01*.png）或時間範圍"
+        "（00:52:00-00:58:30）；可重複。參與者面板、聊天室畫面用這個排除",
+    )
     p.set_defaults(func=cmd_ocr)
 
     p = sub.add_parser(
@@ -1479,6 +1529,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="check note 的風格；faithful 才檢查 R6（預設取 profile）",
     )
     p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser(
+        "review-prompt",
+        parents=[common],
+        help="印出獨立驗收交辦書（機器抓不到的錯誤清單與抽查候選）",
+    )
+    p.add_argument("json_file", nargs="?", help="正式 JSON 路徑（<stem>.json）")
+    p.add_argument(
+        "--note", default=None, help="要驗收的筆記路徑（預設 <stem>.v4.md）"
+    )
+    p.set_defaults(func=cmd_review_prompt)
 
     p = sub.add_parser("migrate", parents=[common], help="把舊版 JSON 原地升級為 schema v2")
     p.add_argument("json_file", nargs="?", help="正式 JSON 路徑")

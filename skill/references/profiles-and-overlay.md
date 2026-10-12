@@ -19,7 +19,8 @@
 CLI 參數 > 專案內 .lecture2notes/ > 家目錄 ~/.lecture2notes/ > profiles/<name>/ > 套件內建
 ```
 
-`corrections.json` 是**合併**（高層蓋掉同一筆 `heard`），其餘檔案是整檔覆寫。
+`corrections.json`、`outputs.toml`、`privacy.toml` 是**逐鍵合併**（高層蓋掉同一個鍵；
+清單整串取代），兩個模板（`note.frontmatter.yaml`、`note.template.md`）是整檔覆寫。
 某一層沒有那個檔就跳過該層，不是錯誤。
 
 ## 五個可覆寫的檔名
@@ -29,10 +30,34 @@ CLI 參數 > 專案內 .lecture2notes/ > 家目錄 ~/.lecture2notes/ > profiles/
 | `note.frontmatter.yaml` | 筆記 frontmatter 模板（欄位與順序） |
 | `note.template.md` | 骨架筆記的章節模板 |
 | `corrections.json` | 錯字對照表（合併） |
-| `outputs.toml` | pbf／hub／viewer 開關、`note.style` 預設 |
+| `outputs.toml` | pbf／hub／viewer 開關、`note.style` 預設、`note.reader` 讀者層級、`[references]` 兩個開關、`[check.forbidden_terms]` 禁用譯名 |
 | `privacy.toml` | 個資比對樣式，`check note` 會用 |
 
 檔名是固定的，拼錯不會報錯，只會安靜地不生效——改完一定用 `l2n profile show` 確認。
+
+## 撰寫規範 1.4 的三組設定（都在 `outputs.toml`）
+
+```toml
+[note]
+reader = "self"              # self | clerk | student | public
+
+[references]
+verify_citations = false     # true：expand-prompt 多印文獻查證步驟
+record_handout = false       # true：expand-prompt 要求在 References 記講義檔名與版本
+
+[guideline]
+forbidden_terms = "warning"  # "error" 時 R12 報 error
+
+[check.forbidden_terms.always]
+"錯字" = { correct = "正譯", english = "source term", cue = "" }
+
+[check.forbidden_terms.context]
+"栓塞" = { correct = "血栓", english = "thrombosis", cue = "thrombo" }
+```
+
+- `reader` 不是 `self` 時，`render` 會產出名詞小辭典骨架；`student`／`public` 缺這一節會報 R14。
+- 禁用譯名以錯字為鍵，所以 overlay 只要寫自己要加的那幾個鍵；radiology profile 已帶初始清單，
+  generic 不帶。`context` 層一定要有 `cue`（英文線索），沒有就不生效。
 
 ## 看目前生效值
 

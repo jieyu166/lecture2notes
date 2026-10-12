@@ -386,6 +386,128 @@ def r10_ratio(profile: str = BUILTIN_PROFILE) -> float:
     return DEFAULT_R10_RATIO
 
 
+#: Who the note is written for (``note.reader`` in ``outputs.toml``). ``self``
+#: is the note's owner and the default; the other three widen the audience and
+#: change how terms are introduced and whether a glossary is expected. None of
+#: them relaxes "no fabrication": a glossary explains a word, never a claim the
+#: speaker did not make.
+READER_LEVELS: Tuple[str, ...] = ("self", "clerk", "student", "public")
+DEFAULT_READER = "self"
+
+#: Readers for whom the glossary section is mandatory (R14). ``clerk`` may
+#: carry one; ``self`` never gets one rendered.
+GLOSSARY_REQUIRED_READERS: Tuple[str, ...] = ("student", "public")
+
+#: Severity R12 (forbidden translations) reports at unless a profile promotes it.
+DEFAULT_FORBIDDEN_TERMS = "warning"
+
+#: The two layers of ``[check.forbidden_terms]``. ``always`` is reported
+#: wherever it appears; ``context`` only when its English cue is on the same
+#: line or in that segment's transcript.
+FORBIDDEN_LAYERS: Tuple[str, ...] = ("always", "context")
+
+
+def _raw_note_reader(profile: str) -> Optional[str]:
+    table = outputs(profile).get("note")
+    if isinstance(table, Mapping):
+        value = table.get("reader")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def note_reader(profile: str = BUILTIN_PROFILE) -> str:
+    """``note.reader`` when it is one of :data:`READER_LEVELS`, else ``self``.
+
+    An unknown value falls back rather than raising, because the reader only
+    shapes guidance; :func:`note_reader_problem` is what `check note` uses to
+    say the configured value was not understood.
+    """
+    value = _raw_note_reader(profile)
+    return value if value in READER_LEVELS else DEFAULT_READER
+
+
+def note_reader_problem(profile: str = BUILTIN_PROFILE) -> Optional[str]:
+    """A message when ``note.reader`` is set to something unknown, else None."""
+    value = _raw_note_reader(profile)
+    if value is None or value in READER_LEVELS:
+        return None
+    return "note.reader %r is not one of %s; using %s" % (
+        value, "/".join(READER_LEVELS), DEFAULT_READER
+    )
+
+
+def _flag(table_name: str, key: str, profile: str) -> bool:
+    table = outputs(profile).get(table_name)
+    if isinstance(table, Mapping):
+        value = table.get(key)
+        if isinstance(value, bool):
+            return value
+    return False
+
+
+def verify_citations(profile: str = BUILTIN_PROFILE) -> bool:
+    """``references.verify_citations``: ask the expansion to look citations up."""
+    return _flag("references", "verify_citations", profile)
+
+
+def record_handout(profile: str = BUILTIN_PROFILE) -> bool:
+    """``references.record_handout``: ask for the handout's file name and version."""
+    return _flag("references", "record_handout", profile)
+
+
+def forbidden_terms_severity(profile: str = BUILTIN_PROFILE) -> str:
+    """Severity R12 reports at: ``warning`` by default, ``error`` if set."""
+    table = outputs(profile).get("guideline")
+    if isinstance(table, Mapping):
+        value = table.get("forbidden_terms")
+        if isinstance(value, str) and value:
+            return value
+    return DEFAULT_FORBIDDEN_TERMS
+
+
+def forbidden_terms(
+    profile: str = BUILTIN_PROFILE,
+) -> Dict[str, Dict[str, Dict[str, str]]]:
+    """``{"always": {wrong: entry}, "context": {wrong: entry}}`` for R12.
+
+    Each entry is ``{"correct", "english", "cue"}`` as strings. The table is
+    keyed on the wrong spelling so an overlay adds or replaces one term without
+    restating the rest (tables merge key by key; a list would be replaced
+    whole). A context entry without a cue could never be reported and is
+    dropped rather than silently promoted to ``always``.
+    """
+    out: Dict[str, Dict[str, Dict[str, str]]] = {
+        layer: {} for layer in FORBIDDEN_LAYERS
+    }
+    check_table = outputs(profile).get("check")
+    if not isinstance(check_table, Mapping):
+        return out
+    table = check_table.get("forbidden_terms")
+    if not isinstance(table, Mapping):
+        return out
+    for layer in FORBIDDEN_LAYERS:
+        entries = table.get(layer)
+        if not isinstance(entries, Mapping):
+            continue
+        for wrong, raw in entries.items():
+            if not isinstance(wrong, str) or not wrong or wrong.startswith("_"):
+                continue
+            if isinstance(raw, Mapping):
+                entry = {
+                    key: str(raw.get(key) or "")
+                    for key in ("correct", "english", "cue")
+                }
+            elif isinstance(raw, str):
+                entry = {"correct": raw, "english": "", "cue": ""}
+            else:
+                continue
+            if layer == "context" and not entry["cue"]:
+                continue
+            out[layer][wrong] = entry
+    return out
+
+
 def privacy_patterns(profile: str = BUILTIN_PROFILE) -> List[str]:
     """Regular expressions a note line must not match (R7)."""
     raw = privacy(profile).get("patterns")
@@ -410,6 +532,17 @@ __all__ = [
     "DEFAULT_TRANSCRIPT_PASTE",
     "DEFAULT_R10_RATIO",
     "DEFAULT_UNEXPANDED",
+    "DEFAULT_FORBIDDEN_TERMS",
+    "DEFAULT_READER",
+    "FORBIDDEN_LAYERS",
+    "GLOSSARY_REQUIRED_READERS",
+    "READER_LEVELS",
+    "forbidden_terms",
+    "forbidden_terms_severity",
+    "note_reader",
+    "note_reader_problem",
+    "record_handout",
+    "verify_citations",
     "r10_ratio",
     "unexpanded_severity",
     "FRONTMATTER_TEMPLATE",

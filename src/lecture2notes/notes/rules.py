@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from functools import lru_cache
-from typing import Any, List, Mapping, Optional
+from typing import Any, List, Mapping, Optional, Tuple
 
 from lecture2notes.schema.model import Finding
 
@@ -246,7 +246,126 @@ def transcript_copy_findings(
     return findings
 
 
+def forbidden_term_matches(
+    text: str,
+    context: str,
+    terms: Mapping[str, Mapping[str, Mapping[str, str]]],
+) -> List[Tuple[str, str, Mapping[str, str]]]:
+    """``(layer, wrong, entry)`` for every forbidden spelling in *text*.
+
+    *terms* is the profile's ``[check.forbidden_terms]`` as
+    :func:`lecture2notes.profiles.loader.forbidden_terms` returns it. *text*
+    is what is judged (quotations already removed); *context* is where a
+    context-layer cue may appear (the same line, that segment's transcript).
+    A context term inside an always-layer hit is not counted twice:
+    遠端轉移 is one mistake, not two.
+    """
+    hits: List[Tuple[str, str, Mapping[str, str]]] = []
+    always = terms.get("always") or {}
+    masked = text
+    for wrong, entry in always.items():
+        if wrong in masked:
+            hits.append(("always", wrong, entry))
+    for wrong in always:
+        masked = masked.replace(wrong, "　" * len(wrong))
+    folded = context.casefold()
+    for wrong, entry in (terms.get("context") or {}).items():
+        cue = str(entry.get("cue") or "").casefold()
+        if cue and wrong in masked and cue in folded:
+            hits.append(("context", wrong, entry))
+    return hits
+
+
+def forbidden_term_findings(
+    data: Mapping[str, Any],
+    terms: Mapping[str, Mapping[str, Mapping[str, str]]],
+    transcripts: Optional[List[str]] = None,
+) -> List[Finding]:
+    """`check json`'s half of R12: the JSON fields a note quotes verbatim.
+
+    ``takeaways_zh`` becomes the note's Summary word for word and
+    ``summary_zh`` / ``bullets_zh[].text`` become each section's draft, so a
+    wrong translation caught here never reaches the note. Warnings, like R12.
+    A context term needs its cue in the same string or in that segment's
+    transcript (*transcripts*, one string per segment, may be omitted).
+    """
+    findings: List[Finding] = []
+    if not any(terms.values()):
+        return findings
+
+    def scan(text: Any, where: str, said: str = "",
+             index: Optional[int] = None) -> None:
+        if not isinstance(text, str) or not text:
+            return
+        judged = re.sub(r"「[^」]*」", "", text)
+        for layer, wrong, entry in forbidden_term_matches(
+            judged, text + "\n" + said, terms
+        ):
+            english = entry.get("english") or ""
+            findings.append(Finding(
+                "warn", "forbidden_term",
+                "「%s」 -> 「%s」%s [%s]" % (
+                    wrong, entry.get("correct") or "",
+                    " (%s)" % english if english else "", layer,
+                ),
+                index, None, where,
+            ))
+
+    for position, item in enumerate(data.get("takeaways_zh") or []):
+        scan(item, "takeaways_zh[%d]" % position)
+    segments = data.get("segments")
+    for number, segment in enumerate(segments if isinstance(segments, list) else [], 1):
+        if not isinstance(segment, Mapping):
+            continue
+        said = ""
+        if transcripts and number - 1 < len(transcripts):
+            said = transcripts[number - 1]
+        scan(segment.get("summary_zh"), "segments[%d].summary_zh" % number,
+             said, number)
+        for position, bullet in enumerate(segment.get("bullets_zh") or []):
+            text = bullet.get("text") if isinstance(bullet, Mapping) else bullet
+            scan(text, "segments[%d].bullets_zh[%d].text" % (number, position),
+                 said, number)
+    return findings
+
+
+#: An e-mail address, the one personal identifier a participant panel or a
+#: chat window reliably puts on screen, and so into ``frame_ocr``.
+EMAIL_PATTERN = re.compile(r"\S+@\S+\.\w+")
+
+
+def frame_ocr_email_findings(data: Mapping[str, Any]) -> List[Finding]:
+    """Warn on ``frame_ocr`` text that carries an e-mail address.
+
+    A frame showing the participant panel or the chat hands its names and
+    addresses to OCR, and from there into the document. Names cannot be
+    matched mechanically; addresses can, and where there is one the rest of
+    the panel is usually beside it.
+    """
+    findings: List[Finding] = []
+    segments = data.get("segments")
+    for number, segment in enumerate(segments if isinstance(segments, list) else [], 1):
+        if not isinstance(segment, Mapping):
+            continue
+        for position, entry in enumerate(segment.get("frame_ocr") or []):
+            text = entry.get("text") if isinstance(entry, Mapping) else None
+            if isinstance(text, str) and EMAIL_PATTERN.search(text):
+                findings.append(Finding(
+                    "warn", "frame_ocr_email",
+                    "frame_ocr text looks like it carries an e-mail address; "
+                    "exclude participant-panel and chat frames (l2n ocr "
+                    "--skip-frames) or clear this frame_ocr entry",
+                    number, None,
+                    "segments[%d].frame_ocr[%d]" % (number, position),
+                ))
+    return findings
+
+
 __all__ = [
+    "EMAIL_PATTERN",
+    "forbidden_term_findings",
+    "forbidden_term_matches",
+    "frame_ocr_email_findings",
     "GENERIC_TITLE",
     "MAX_SUMMARY_HAN",
     "MAX_TAKEAWAY_HAN",

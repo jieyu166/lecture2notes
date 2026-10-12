@@ -177,15 +177,21 @@ def test_the_segmentation_reference_asks_for_questions_and_the_four_arcs():
 
 def test_the_document_uses_no_console_unsafe_markers(doc_text):
     """The console rule is about `_out`, but these characters are banned here too."""
-    for character in ("→", "≥", "✓", "✗"):
+    for character in ("\u2192", "\u2265", "\u2713", "\u2717", "\u2212"):
         assert character not in doc_text, repr(character)
+
+
+def test_the_part_the_bundle_prints_survives_a_cp950_console():
+    """`render --expand-prompt` prints the whole must-follow part; a character
+    cp950 cannot encode turns into `?` on the console that runs the bundle."""
+    guideline.must_follow_text().encode("cp950")
 
 
 # --------------------------------------------------------------------------
 # 16.4 -- the contradiction Codex found, and the distinction the review needed
 # --------------------------------------------------------------------------
 def test_the_document_is_at_the_version_that_resolved_the_contradiction(doc_text):
-    assert guideline.GUIDELINE_VERSION == "1.3"
+    assert guideline.GUIDELINE_VERSION == "1.4"
     assert doc_text.count(guideline.VERSION_LINE) >= 2  # header and appendix B
 
 
@@ -204,21 +210,28 @@ def test_zero_six_no_longer_says_the_marker_stays_in_the_file(doc_text):
     assert "ai_draft_remaining=0" in section
 
 
-def test_the_document_separates_a_principle_from_a_data_point(doc_text):
-    """Two independent expansions left Evergreen as one week's number."""
-    section = guideline.section_text(doc_text, "可遷移原則 vs 單一數據點")
+def test_the_document_defines_evergreen_as_a_one_sentence_summary(doc_text):
+    """1.4 (B9): Evergreen sums up the lecture; own synthesis is marked.
+
+    Two independent expansions left Evergreen as one week's number, and the
+    1.3 answer -- "a transferable principle" -- pushed writers into saying one
+    sentence more than the speaker did.
+    """
+    section = guideline.section_text(doc_text, "一句話總結本課程內容")
 
     assert section, "the guideline has no 4.1"
     assert "先寫 Evergreen" in doc_text
-    assert "反例（單一數據點）" in section
-    assert "正例（可遷移原則）" in section
+    assert "反例（半句逐字稿）" in section
+    assert "正例（一句話總結）" in section
+    assert "[本筆記整理]" in section
+    assert "反例（單一數據點）" not in doc_text
     # The one machine-checkable claim the section makes about itself.
     assert "R10 通過不代表 Evergreen 合格" in section
 
 
 def test_the_examples_are_invented_rather_than_quoted(doc_text):
     """The worked examples must not reproduce anybody's actual note."""
-    section = guideline.section_text(doc_text, "可遷移原則 vs 單一數據點")
+    section = guideline.section_text(doc_text, "一句話總結本課程內容")
 
     assert "為說明用途自擬" in section
 
@@ -226,5 +239,71 @@ def test_the_examples_are_invented_rather_than_quoted(doc_text):
 def test_every_documented_rule_id_is_one_the_code_reports(doc_text):
     machine = guideline.section_text(doc_text, guideline.MACHINE_CHECKABLE_HEADING)
 
-    assert "**R11**" in machine
-    assert "**R12**" not in machine, "the table has a rule the code does not have"
+    assert "**R14**" in machine
+    assert "**R15**" not in machine, "the table has a rule the code does not have"
+
+
+# --------------------------------------------------------------------------
+# 1.4 -- the rules ported from the textbook-note workflow
+# --------------------------------------------------------------------------
+def test_the_version_information_says_the_two_rule_sets_are_kept_apart(doc_text):
+    head = doc_text.split("## %s" % guideline.MUST_FOLLOW_HEADING, 1)[0]
+
+    assert "與 obsidian-v4-cleanup task5 規則各自維護；本版對應 task5 2026-10 版" in head
+
+
+def test_the_correctness_list_carries_every_review_error(doc_text):
+    section = guideline.section_text(doc_text, "2.5 正確性清單")
+
+    assert section, "the guideline has no 2.5"
+    for name, _what in guideline.REVIEW_ERRORS:
+        assert name in section, name
+    assert section.count("| ") > 13 * 5  # thirteen rows, five cells each
+    for header in ("反例", "正例"):
+        assert header in section
+
+
+def test_the_exceptions_to_no_fabrication_are_written_down(doc_text):
+    part = guideline.must_follow_text()
+
+    assert guideline.GLOSSARY_HEADING in part
+    assert guideline.NOT_COVERED_NOTE in part
+    for mark in guideline.BODY_INFERENCE_MARKS:
+        assert mark in part, mark
+    assert "沒有記號的推論就是編造" in part
+    assert "讀者層級不放寬" in part
+
+
+def test_section_one_decides_the_main_statement_not_a_winner(doc_text):
+    part = guideline.must_follow_text()
+
+    assert "排在前面的贏" not in part
+    assert "決定本文的主說法" in part
+    assert "講者口述如此，講義為 X" in part
+
+
+def test_the_reading_section_is_kept_only_for_image_lectures(doc_text):
+    part = guideline.must_follow_text()
+
+    assert "只在講座含影像判讀時保留，否則刪掉整節" in part
+
+
+def test_the_two_failure_patterns_1_4_adds_are_in_appendix_a(doc_text):
+    # Not section_text: the appendix quotes whole notes in code fences, and
+    # their `# Evergreen Note` lines would end the section early.
+    appendix = doc_text.split("## 附錄 A", 1)[1].split("## 附錄 B", 1)[0]
+
+    assert "樣態二：說過頭" in appendix
+    assert "樣態三：夾帶因果" in appendix
+
+
+def test_the_machine_table_names_scope_and_message_for_each_new_rule(doc_text):
+    machine = guideline.section_text(doc_text, guideline.MACHINE_CHECKABLE_HEADING)
+
+    for rule in ("R12", "R13", "R14"):
+        row = next(line for line in machine.splitlines()
+                   if line.startswith("| **%s**" % rule))
+        assert "warning" in row
+        assert "範圍" in row or "不存在" in row, rule
+    assert "frame_ocr_email" in machine and "forbidden_term" in machine
+    assert "l2n review-prompt" in machine

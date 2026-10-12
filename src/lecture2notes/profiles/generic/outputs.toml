@@ -19,6 +19,20 @@ viewer = true
 [note]
 # faithful keeps every quote; concise keeps at most one per section.
 style = "concise"
+# Who the note is written for: self | clerk | student | public (the note's
+# owner, a professional beginner, a secondary-school student, the general
+# public). Anything but self renders a glossary skeleton; student and public
+# must keep one (R14). No level relaxes "do not fabricate".
+reader = "self"
+
+[references]
+# When true, `render --expand-prompt` adds a step: look up every citation the
+# speaker or the handout gives (CrossRef / doi.org) and move what cannot be
+# found to unverified_terms. `check note` stays offline and does not verify.
+verify_citations = false
+# When true, the bundle asks for the handout's file name and version in
+# References.
+record_handout = false
 
 [guideline]
 # Severity `l2n check note` reports R5 (transcript paste) at: "warning" or
