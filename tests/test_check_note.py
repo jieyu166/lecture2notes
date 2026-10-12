@@ -1303,6 +1303,15 @@ def test_r5_sees_a_paste_in_a_reading_callout(radiology):
     assert len(hits) == 1 and hits[0].location == "閱片"
 
 
+def test_r5_judges_what_follows_a_quoted_prefix_in_the_reading_section(radiology):
+    """Only the 「」 span is exempt, not the rest of a line that starts with one."""
+    json_path, note_path = radiology
+    _append_after(note_path, "# 閱片", "> 「短」%s" % LONG_RUN[:60])
+
+    hits = _findings(check.check_note_stage(json_path, note_path), "R5")
+    assert len(hits) == 1 and hits[0].location == "閱片"
+
+
 def test_r5_exempts_a_quotation_line_in_the_reading_section(radiology):
     json_path, note_path = radiology
     _append_after(note_path, "# 閱片", "> 「%s」(00:00:05)" % LONG_RUN[:60])
@@ -1382,6 +1391,8 @@ def test_r14_is_quiet_on_a_rendered_public_skeleton(lecture):
     ("- **DWI**：擴散加權影像，看水分子移動受不受限", False),
     ("- **T2**：一種 MRI 權重影像", False),
     ("> [!note] 本節每條 1 到 2 句", False),
+    ("- **CT -> MRI**：先做電腦斷層，需要時再做磁振造影<br>", False),
+    ("- **ADC**：數值 => 受限程度", False),
 ])
 def test_r14_reports_a_threshold_inside_the_glossary(lecture, entry, reported):
     json_path, note_path = lecture

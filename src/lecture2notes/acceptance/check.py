@@ -868,6 +868,12 @@ GLOSSARY_THRESHOLD = re.compile(
 )
 
 
+#: Removed before R14 looks for a comparison sign: the console's ASCII arrows
+#: (``->``, ``<-``, ``=>``) and HTML tags such as ``<br>`` carry ``<`` and
+#: ``>`` without comparing anything.
+GLOSSARY_NOT_A_SIGN = re.compile(r"<-+|-+>|=>|</?[A-Za-z][^<>]*>")
+
+
 def callout_body(line: str) -> str:
     """A line with its leading ``>`` markers removed and stripped."""
     return CALLOUT_PREFIX.sub("", line).strip()
@@ -1673,10 +1679,10 @@ def _rule_transcript_paste(
             if not line.strip():
                 continue
             if title == READING_REGION:
-                body = callout_body(line)
-                if body.startswith("「"):
-                    continue
-                residue = unquoted_residue(body)
+                # A `> 「...」(00:01:02)` line leaves only its timecode once
+                # the span is subtracted; a 「」 prefix in front of a paste
+                # leaves the paste.
+                residue = unquoted_residue(callout_body(line))
             elif line.lstrip().startswith(">"):
                 continue
             else:
@@ -2025,6 +2031,7 @@ def _rule_glossary(
         if mask[position]:
             continue
         text = callout_body(HTML_COMMENT.sub("", lines[position]))
+        text = GLOSSARY_NOT_A_SIGN.sub(" ", text)
         found = GLOSSARY_THRESHOLD.search(text)
         if found:
             report.add("warn", "R14", "%s:%d" % (note.name, position + 1),
