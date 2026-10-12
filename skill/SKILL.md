@@ -19,7 +19,7 @@ SRT／JSON 就從缺少的階段接續，不重跑已完成的階段。
 | 轉錄成字幕（`l2n transcribe`）、套用錯字對照表、校正官方字幕時間偏移（`l2n calibrate-subs`） | [references/transcription.md](references/transcription.md) |
 | 已有字幕，要切分段、建立或升級正規 JSON v2（`l2n condense`、`l2n scaffold`、`l2n migrate`） | [references/segmentation.md](references/segmentation.md) |
 | 抓投影片影格（`l2n frames`）、對影格做 OCR（`l2n ocr`）、產骨架筆記（`l2n render`） | [references/frames-and-notes.md](references/frames-and-notes.md) |
-| 把骨架筆記擴寫成完整筆記 | [references/note-writing.md](references/note-writing.md) |
+| 把骨架筆記擴寫成完整筆記、交付前的獨立驗收（`l2n review-prompt`） | [references/note-writing.md](references/note-writing.md) |
 | 產 viewer（`l2n viewer`）、PotPlayer 章節檔（`l2n pbf`）、課程首頁（`l2n hub`）、整份搬到輸出目錄（`l2n publish`）、批次整課，以及用 `l2n check` 驗收任一階段 | [references/outputs-and-batch.md](references/outputs-and-batch.md) |
 | 選 profile、疊 overlay、改詞庫或輸出設定（`l2n profile`） | [references/profiles-and-overlay.md](references/profiles-and-overlay.md) |
 
@@ -40,7 +40,9 @@ SRT／JSON 就從缺少的階段接續，不重跑已完成的階段。
 5. **院內或病患相關素材一律本機轉錄**，不得送雲端 ASR；不確定就當作是。本機 ASR 不等於
    後續 LLM 擴寫也獲准接收這些內容，不要超出使用者授權的資料處理範圍。
 6. **介面文字用繁體中文台灣用語，專有名詞保留英文原文**（Lung-RADS、BI-RADS、
-   forced aligner 不翻）。程式碼與註解用英文；主控台輸出只用 ASCII 標記。
+   forced aligner 不翻）。這是讀者層級 `self`（預設）的寫法；`note.reader` 不是 `self` 時，
+   首見寫「中文（English, 縮寫）」，分級系統名例外（規範 0.10）。程式碼與註解用英文；
+   主控台輸出只用 ASCII 標記。
 
 ## 完成條件
 
@@ -51,6 +53,7 @@ SRT／JSON 就從缺少的階段接續，不重跑已完成的階段。
   l2n check frames <stem>.json        # 抓圖或 OCR 後
   l2n check json <stem>.json          # JSON 建立或改動後
   l2n check note <stem>.json --note <stem>.v4.md   # 筆記擴寫後
+  l2n review-prompt <stem>.json                    # 再交給沒參與撰寫的人獨立驗收
   ```
 
   exit code：0 全過、1 只有 warning、2 有 error。**有 error 就回頭修，不要交出去。**

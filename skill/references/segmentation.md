@@ -132,6 +132,19 @@ l2n check json <stem>.json                 # 4. 驗收
 
 `quotes_zh` 是講者原話（附時間），`kind: "synthesis"` 表示是你整理過的話。
 
+## 寫 takeaways、摘要與條列時就要對的三件事
+
+`takeaways_zh` 會被筆記的 Summary **逐字引用**（規範 7.1），`summary_zh` 與 `bullets_zh` 是每一段的草稿。
+錯在這裡，就會錯在筆記裡，而筆記那一層不准改寫它們——所以在 JSON 階段就要對：
+
+1. **語氣詞照講者**：講者說「通常／可能／大多／少數／我覺得」，就寫「通常／可能／大多／少數」，
+   不改成「一定／只有／絕不」；「約一成」這類數量詞不可漏（規範 2.5）。
+2. **縮寫展開看讀者層級**：`note.reader` 是 `self`（預設）時，專有名詞與縮寫保留英文原文；
+   不是 `self` 時，首見寫「中文（English, 縮寫）」，分級系統名（BI-RADS 等）例外（規範 0.10）。
+3. **台灣譯名**：thrombosis＝血栓（不是栓塞）、arachnoid＝蜘蛛膜、palate＝顎、distant metastasis＝遠處轉移……
+   完整對照見規範附錄 C。radiology profile 下，`l2n check json` 會對 `takeaways_zh`、各段 `summary_zh`、
+   `bullets_zh[].text` 跑同一份清單（warning `forbidden_term`）。
+
 ## 影格數不決定段數
 
 **段數由主題轉折決定，不由抓到幾張圖決定。** 一個區間裡沒有換投影片時，
@@ -180,7 +193,15 @@ l2n frames <video> --mode interval --every 45
 `overall_summary_zh` 寫完之後，逐段指認一次：四段各對應到哪幾個 `segments`。
 
 **缺哪一段就照實寫，不要補。** 最常缺的是昇華，通常表示結尾被 Q&A 吃掉了——那是事實，
-寫進 `editorial_notes_zh`，不要自己補一段結論。
+寫進**頂層**的 `editorial_notes_zh`，不要自己補一段結論。
+
+頂層 `editorial_notes_zh` 是選填的字串陣列，放關於整場講座的編輯備註（四段弧的指認結果就寫這裡）；
+`l2n check json` 接受它，`l2n render` 會把它印在 Summary 的摺疊 callout 裡。各段自己的
+`segments[].editorial_notes_zh` 照舊是那一段的備註。
+
+```json
+"editorial_notes_zh": ["四段弧：坡道 段 1、背景 段 2、正文 段 3-5；缺昇華，結尾被 Q&A 吃掉"]
+```
 
 ## 驗收
 

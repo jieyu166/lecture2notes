@@ -18,6 +18,10 @@ l2n frames <video> --mode interval --every 45
 建議流程：先 `--stage` 產候選，再 `--curate --max-per-segment 4` 晉升。
 使用者已經自己截好圖時**沿用他的圖**，不要重抓。只有音檔時整個階段跳過。
 
+**先 `l2n frames`，再用眼睛挑影格。** `l2n frames` 對已有的 `<stem>.json` 重新併入時，
+只填 `frame` 是 `null` 的段落，已經有值的 `frame`（人或模型挑過的）一律保留；
+`frames` 陣列照樣更新。要讓每一段的 `frame` 回到抓圖結果，才加 `--force`。
+
 ### 抓到幾張，不決定切幾段
 
 **scene 抓到的張數少於你預計的段數時，改用 interval，不要為了湊圖去改分段。**
@@ -43,7 +47,14 @@ l2n ocr <stem>.frames.json   # 還沒有 <stem>.json 時；只 OCR 這場講座�
 l2n ocr <frames 資料夾>       # 只有在同層剛好一場講座時才可用
 ```
 
-旗標：`--min-conf`（低於此信心值直接丟棄）、`--no-s2t`（預設會簡轉繁）。
+旗標：`--min-conf`（低於此信心值直接丟棄）、`--no-s2t`（預設會簡轉繁）、
+`--skip-frames <glob 或時間範圍>`（略過不做 OCR，可重複給）。
+
+**畫面含參與者面板或聊天室的影格，OCR 前先排除**，例如
+`l2n ocr <stem>.json --skip-frames 00:52:00-00:58:30 --skip-frames "frames/<stem>-01*.png"`；
+那些畫面上是與會者的真名與電子郵件，OCR 會把它們抄進 `frame_ocr`。已經做過 OCR 的，
+併入後清空該影格的 `frame_ocr`。被略過的影格，快取裡舊的文字也不會再併入。
+`l2n check json` 看到 `frame_ocr` 有電子郵件樣式會報 warning（`frame_ocr_email`）。
 
 傳資料夾時，stem 取自**同層唯一**的 `<stem>.json` 或 `<stem>.frames.json`；
 找不到或不只一個就 exit 2 並說明，不會自己拿資料夾名當 stem。
