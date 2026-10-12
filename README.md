@@ -78,8 +78,9 @@ l2n render lecture.json --expand-prompt
 l2n viewer lecture.json
 l2n hub ./course-folder --title "課程名稱"
 
-# 5. 每個產物都要驗收
+# 5. 每個產物都要驗收，筆記再交給沒參與撰寫的人獨立驗收
 l2n check note lecture.json --note lecture.v4.md
+l2n review-prompt lecture.json
 ```
 
 機械階段可以一次串起來：
@@ -96,13 +97,44 @@ l2n run lecture.mp4 --lang zh
 ## 子命令
 
 `transcribe`、`calibrate-subs`、`frames`、`ocr`、`condense`、`scaffold`、`render`、
-`viewer`、`pbf`、`hub`、`publish`、`check`、`migrate`、`run`、`convert-model`、`profile`、
-`install-skill`。
+`viewer`、`pbf`、`hub`、`publish`、`check`、`review-prompt`、`migrate`、`run`、`convert-model`、
+`profile`、`install-skill`（共 18 個）。
 
 每個子命令可獨立重跑且冪等（已有產物即跳過，`--force` 重做）。共用旗標：`--quiet`、
 `--json-progress`（每行一個 JSON 物件，給 agent 追蹤進度）、`--force`。
 
 Exit code 約定：0 成功、1 有警告、2 合約或參數錯誤、3 缺外部相依、4 該階段尚未實作。
+
+## 撰寫規範 1.4
+
+筆記的撰寫規範在 [`docs/note-writing-guideline.md`](docs/note-writing-guideline.md)，目前是
+`guideline_version: 1.4`；`l2n check note` 的報告第一行會印出它。1.4 把 L3 教科書筆記累積的
+正確性規則改寫成講座用語移植進來（與 obsidian-v4-cleanup 的 task5 規則各自維護）：
+
+- **讀者層級**：`outputs.toml` 的 `[note] reader = "self"`，可設 `self`（筆記主人）、`clerk`
+  （專業入門者）、`student`（國高中生）、`public`（一般大眾）。層級決定縮寫與專有名詞怎麼寫、
+  要不要名詞小辭典、題目長什麼樣子；`render --expand-prompt` 會印出生效那一級的指引，
+  `l2n profile show` 看得到它來自哪一層。**任何層級都不放寬「不可編造」。**
+- **名詞小辭典**：`reader` 不是 `self` 時，`render` 在 References 前產出
+  `## 名詞小辭典（非講者內容）` 骨架；每條 1 到 2 句、不寫數值閾值、不附文獻、本文不得引用。
+- **正確性清單**（規範 2.5）：說過頭、數量詞、夾帶因果、替講者排順序、單一示範當通則等 13 類，
+  各附正反例。本文的推論只認 `[推論]` 與 `[本筆記整理]` 兩種記號。
+- **新的機器規則**（皆為 warning）：
+  - **R12** 禁用譯名：清單在 radiology profile 的 `outputs.toml`（`[check.forbidden_terms.always]`
+    與 `.context`，以錯字為鍵、值為 `{correct, english, cue}`；context 層要有英文線索才報），
+    overlay 可逐鍵加詞；`guideline.forbidden_terms = "error"` 可升級。generic 不帶清單。
+    `check json` 對 `takeaways_zh`、`summary_zh`、`bullets_zh[].text` 跑同一份清單。
+  - **R13** 影格說明（`# 閱片` 與每張嵌入影格下方那一段）裡出現「推測」「推斷」。
+  - **R14** `student`／`public` 讀者缺名詞小辭典，或小辭典裡寫了數值閾值。
+  - 另外 R5、R8 開始掃 `# 閱片`（R8 在那裡只接受一字不差的 `N/A（原文未涵蓋）`），
+    R9 要求每一題都有自己的 `> [!answer]-`。
+- **`l2n review-prompt <stem>.json [--note <v4.md>]`**：印出獨立驗收交辦書——機器抓不到的錯誤清單、
+  抽查候選（本文數字與所屬段落時間區間、含 decade 的段落、至少 8 句附時間碼的「」引文、R12 context
+  層命中）與回報格式。交給沒參與撰寫的人或 agent，唯讀、自己抽來源。
+- **References 的兩個開關**（`outputs.toml` 的 `[references]`，預設皆為 `false`）：
+  `verify_citations = true` 時 `render --expand-prompt` 多印「講者引用的文獻用 CrossRef／doi.org
+  查證，查不到進 `unverified_terms`」；`record_handout = true` 時要求 References 記講義檔名與版本。
+  `check note` 維持離線，不驗這兩件事。
 
 ## 隱私邊界 / Privacy boundary
 
@@ -410,7 +442,7 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
 - **檢查規則 R9 到 R11**：題目與 `[推論]`（R9）、骨架殘留比例（R10）、
   同一句跨章節重複（R11），外加 `unexpanded_segments` 與 `ai_draft_remaining` 兩個數字。
 - **`condense`／`scaffold`**：逐字稿壓成一分鐘一行；產出待填的 JSON 骨架。
-- **撰寫規範升到 1.3**。
+- **撰寫規範升到 1.3**（main 已再升到 1.4，見「未發版（main）」）。
 
 - **Qwen3-ASR 真機實測**：0.6B＋ForcedAligner 已在 RTX 4060 Laptop 8 GB（Windows 11）實跑，
   數據見上方引擎相容表；實跑修掉四個缺陷（尾端極短分塊使整場失敗、未給對照表時簡轉繁
@@ -444,6 +476,18 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
 
 行為沒有其他改變：`render` 仍是確定性的，`install-skill --check` 的 drift hash 算法與
 既有的 `.installed.json` 相容。
+
+### 未發版（main）
+
+- **撰寫規範 1.4**：讀者層級、名詞小辭典、正確性清單、台灣譯名對照表（附錄 C），
+  機器規則 R12 到 R14，R5／R8 擴到 `# 閱片`，R9 檢查每題的收合答案（見上方「撰寫規範 1.4」）。
+- **`l2n review-prompt`**：獨立驗收交辦書，子命令由 17 個變成 18 個。
+- **`check json`**：多兩條 warning——禁用譯名（`forbidden_term`）與 `frame_ocr` 裡的電子郵件
+  樣式（`frame_ocr_email`）。
+- **`l2n ocr --skip-frames <glob 或時間範圍>`**：參與者面板、聊天室的影格不做 OCR，
+  快取裡舊的文字也不再併入。
+- **`l2n frames` 重新併入時保留已挑好的 `frame`**：只填 `null` 的；要全部重設才加 `--force`。
+- **schema**：頂層選填 `editorial_notes_zh`（四段弧寫這裡），`render` 印在 Summary 的摺疊 callout。
 
 ## 開發與測試
 
