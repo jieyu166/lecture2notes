@@ -1424,3 +1424,19 @@ def test_an_unknown_reader_is_reported_and_treated_as_self(lecture):
 
     assert _codes(report).count("reader") == 1
     assert _findings(report, "R14") == []
+
+
+def test_check_all_and_its_report_carry_the_new_rules(radiology, tmp_path):
+    """`check --all --report` lists R12 to R14 in its note stage like any rule."""
+    from lecture2notes.acceptance import audit
+
+    json_path, note_path = radiology
+    _insert_into_first_section(note_path, "病灶位於蛛網膜下腔")
+    _append_after(note_path, "# 閱片", "> **Findings**：推測為積液")
+    reports = check.check_all(json_path)
+    note_report = next(r for r in reports if r.stage == "note")
+    payload = audit.stage_report_payload(reports, stem="x")
+    codes = [f["rule"] for f in payload["stages"]["note"]["findings"]]
+
+    assert {"R12", "R13"} <= set(_codes(note_report))
+    assert "R12" in codes and "R13" in codes
