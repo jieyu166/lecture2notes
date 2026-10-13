@@ -354,7 +354,9 @@ def frame_ocr_email_findings(data: Mapping[str, Any]) -> List[Finding]:
                     "warn", "frame_ocr_email",
                     "frame_ocr text looks like it carries an e-mail address; "
                     "exclude participant-panel and chat frames (l2n ocr "
-                    "--skip-frames) or clear this frame_ocr entry",
+                    "--skip-frames, which also purges the frame from "
+                    "<stem>.frames_ocr.json) or clear this frame_ocr entry "
+                    "and its entry in the OCR cache",
                     number, None,
                     "segments[%d].frame_ocr[%d]" % (number, position),
                 ))

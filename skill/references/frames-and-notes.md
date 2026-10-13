@@ -53,7 +53,8 @@ l2n ocr <frames 資料夾>       # 只有在同層剛好一場講座時才可用
 **畫面含參與者面板或聊天室的影格，OCR 前先排除**，例如
 `l2n ocr <stem>.json --skip-frames 00:52:00-00:58:30 --skip-frames "frames/<stem>-01*.png"`；
 那些畫面上是與會者的真名與電子郵件，OCR 會把它們抄進 `frame_ocr`。已經做過 OCR 的，
-併入後清空該影格的 `frame_ocr`。被略過的影格，快取裡舊的文字也不會再併入。
+用同樣的 `--skip-frames` 再跑一次：被略過的影格會從 `frame_ocr` 與快取
+`<stem>.frames_ocr.json` 一起刪掉（只清 JSON 不夠，下次 scaffold 會從快取併回來）。
 `l2n check json` 看到 `frame_ocr` 有電子郵件樣式會報 warning（`frame_ocr_email`）。
 
 傳資料夾時，stem 取自**同層唯一**的 `<stem>.json` 或 `<stem>.frames.json`；

@@ -490,7 +490,10 @@ schema 2.1、雙語字幕、播放網頁改版、Obsidian 筆記的時間碼連�
 - **`check json`**：多兩條 warning——禁用譯名（`forbidden_term`）與 `frame_ocr` 裡的電子郵件
   樣式（`frame_ocr_email`）。
 - **`l2n ocr --skip-frames <glob 或時間範圍>`**：參與者面板、聊天室的影格不做 OCR，
-  快取裡舊的文字也不再併入。
+  快取 `<stem>.frames_ocr.json` 裡舊的文字也一併刪除。
+- **`l2n scaffold` 的 `source.video` 用字幕旁實際存在的影片**（.mkv、.webm、.mov、.ts 等），
+  不再一律寫成 `<stem>.mp4`。
+- **R7 病歷號樣式只認英數字**：「假病歷號與生日」不再誤報。
 - **`l2n frames` 重新併入時保留已挑好的 `frame`**：只填 `null` 的；要全部重設才加 `--force`。
 - **schema**：頂層選填 `editorial_notes_zh`（四段弧寫這裡），`render` 印在 Summary 的摺疊 callout。
 - **schema 2.1**：新增選填欄位 `lines`（逐句字幕，可帶 `zh`）、`segments[].question`
