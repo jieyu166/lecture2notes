@@ -335,6 +335,20 @@ def test_r5_only_judges_the_part_of_a_line_that_is_not_quoted(lecture):
     assert "R5" in _codes(check.check_note_stage(json_path, note_path))
 
 
+@pytest.mark.parametrize(
+    "embed",
+    ["![[frames/%s-0001.png]]", "![[%s-0001.png|400]]", "![](frames/%s-0001.png)"],
+    ids=["wikilink", "wikilink-sized", "markdown"],
+)
+def test_r5_ignores_an_image_embed_whose_filename_repeats_the_transcript(lecture, embed):
+    # A lecture's stem is often its title, which the speaker reads aloud, so a
+    # frame's filename can be a 40-character transcript run. A path is not prose.
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, embed % LONG_RUN[:60])
+
+    assert "R5" not in _codes(check.check_note_stage(json_path, note_path))
+
+
 # -- R6 ---------------------------------------------------------------------
 def test_r6_passes_when_every_section_quotes_the_speaker(lecture):
     json_path, note_path = lecture

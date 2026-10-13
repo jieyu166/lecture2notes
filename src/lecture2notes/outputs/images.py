@@ -30,8 +30,14 @@ def referenced_images(markdown: str) -> List[str]:
     """Image basenames embedded in the note, de-duplicated, in document order."""
     out: List[str] = []
     for match in EMBED.finditer(markdown):
-        raw = match.group(1) or match.group(2) or ""
-        raw = urllib.parse.unquote(raw.strip().split(" ")[0].strip("<>"))
+        if match.group(1) is not None:
+            # Markdown: `(<path with spaces>)` or `(path "title")`.
+            raw = match.group(1).strip()
+            raw = raw[1:].split(">", 1)[0] if raw.startswith("<") else raw.split(" ")[0]
+        else:
+            # A wikilink target is the whole name, spaces included.
+            raw = match.group(2).strip()
+        raw = urllib.parse.unquote(raw)
         if "://" in raw:
             continue
         if raw.lower().endswith(IMG_EXT):

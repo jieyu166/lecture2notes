@@ -841,6 +841,11 @@ NOTE_EMBED = re.compile(r"!\[\[([^\]|]+?)(?:\|[^\]]*)?\]\]")
 #: that marks half of itself as a quotation is judged only on the other half.
 QUOTED_SPAN = re.compile(r"「[^」]*」")
 
+#: An image embed in either spelling. R5 subtracts these too: a frame is named
+#: after the lecture stem, which is often the title the speaker reads aloud, and
+#: a path is not prose that could have been pasted from the transcript.
+IMAGE_EMBED = re.compile(r"!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)")
+
 #: Filler a section gets when there was nothing to say. The guideline's answer is
 #: to delete the section instead, so this is a warning rather than an error.
 PLACEHOLDER_TEXT = (
@@ -1048,7 +1053,7 @@ def is_marked_quote(line: str) -> bool:
 
 def unquoted_residue(line: str) -> str:
     """The part of a line that is not inside 「」, normalised for comparison."""
-    return rules.comparison_text(QUOTED_SPAN.sub("", line))
+    return rules.comparison_text(QUOTED_SPAN.sub("", IMAGE_EMBED.sub("", line)))
 
 
 def transcript_text(path: Path) -> str:
