@@ -210,8 +210,10 @@ class SkipFrames:
     and OCR copies them into the document. Such frames are excluded before
     OCR -- by a glob on the frame path (``frames/talk-01*.png``) or by a time
     range on the time the frame's file name encodes (``00:52:00-00:58:30``).
-    A skipped frame is not OCRed and its cached text, if an earlier run left
-    any, is not merged into ``frame_ocr``.
+    A skipped frame is not OCRed, and its cached text, if an earlier run left
+    any, is dropped from ``<stem>.frames_ocr.json`` as well as from
+    ``frame_ocr``: a cache that kept it would hand it back to the next
+    `l2n scaffold`, and it sits beside the notes as one more copy of the names.
     """
 
     def __init__(self, patterns: Optional[Sequence[str]] = None) -> None:
@@ -354,6 +356,8 @@ class OcrResult:
     engine_calls: int = 0
     document: Optional[Path] = None
     skipped: List[str] = field(default_factory=list)
+    #: Cache entries removed because ``--skip-frames`` matched them.
+    purged: List[str] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -524,6 +528,13 @@ def run_ocr(
 
     cache_file = cache_path_for(target, stem)
     cache = read_cache(cache_file)
+    # Every cached frame the patterns match goes, not only the ones this target
+    # lists: the text is what is being removed, wherever it was recorded from.
+    purged = [frame for frame in list(cache) if skip and skip.matches(frame)]
+    for frame in purged:
+        del cache[frame]
+    if purged:
+        _out.stage("ocr", "purged %d cached frames (--skip-frames)" % len(purged))
     todo = pending_frames(frames, cache, base_dir, force)
     result = OcrResult(
         target=target,
@@ -532,6 +543,7 @@ def run_ocr(
         cached=len(frames) - len(todo),
         document=document,
         skipped=skipped,
+        purged=purged,
     )
     _out.stage("ocr", cache_report(len(frames), len(todo)))
 
@@ -555,6 +567,8 @@ def run_ocr(
             progress.advance()
         write_cache(cache_file, cache)
     else:
+        if purged:
+            write_cache(cache_file, cache)
         result.recognised = [
             frame for frame in frames if (cache.get(frame) or {}).get("text")
         ]
