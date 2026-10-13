@@ -19,9 +19,10 @@
 patterns = [
   # Taiwan national identification number: a letter, 1 or 2, then eight digits.
   '\b[A-Za-z][12]\d{8}\b',
-  # A medical record or chart number written out with its label.
-  # The value must be an ASCII code: "病歷號或是生日" is a sentence about one.
-  '(病歷號|病歷號碼|[Cc]hart [Nn]o\.?|[Cc]hart number)\s*[:：]?\s*[A-Za-z0-9][A-Za-z0-9-]{5,}',
+  # A medical record or chart number written out with its label. The number
+  # is ASCII letters and digits with at least one digit: `\w` also matches CJK,
+  # so 「假病歷號與生日」 and 「病歷號或是生日」 used to read the words as the number.
+  '(病歷號|病歷號碼|[Cc]hart [Nn]o\.?|[Cc]hart number)\s*[:：]?\s*(?=[A-Za-z0-9-]*\d)[A-Za-z0-9-]{6,}',
   # A bare eight-digit chart number, the local format, with no label at all.
   #
   # A yyyymmdd date is not one: a valid date shape (1900-2099, month 01-12, day
