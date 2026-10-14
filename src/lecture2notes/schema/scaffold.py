@@ -129,8 +129,16 @@ def build_scaffold(
     bucket_sec: int = condense.DEFAULT_BUCKET_SEC,
     subtitle_name: Optional[str] = None,
     profile: str = "generic",
+    video_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """The draft document, as a plain dict. Pure: same input, same bytes."""
+    """The draft document, as a plain dict. Pure: same input, same bytes.
+
+    ``video_name`` is the recording actually beside the subtitle. Left out, the
+    schema's ``<stem>.mp4`` guess stands -- which is wrong for an .mkv.
+    """
+    source: Dict[str, Any] = {"subtitle": {"path": subtitle_name or "%s.srt" % stem}}
+    if video_name:
+        source["video"] = video_name
     starts = segment_starts(duration_sec, segments)
     document = build_document(
         stem=stem,
@@ -143,7 +151,7 @@ def build_scaffold(
         duration_sec=float(int(duration_sec)),
         frames=list(frames or []),
         title="%s %s" % (AI_DRAFT_MARK, stem),
-        source={"subtitle": {"path": subtitle_name or "%s.srt" % stem}},
+        source=source,
         profile=profile,
     )
     # Written after `build_document` rather than through it: `draft` and the
@@ -218,6 +226,7 @@ def scaffold_file(
     profile: str = "generic",
 ) -> ScaffoldResult:
     """Write ``<stem>.json`` and ``<stem>.condensed.txt`` beside ``subtitle``."""
+    from lecture2notes.frames.scene import find_video
     from lecture2notes.schema.io import write_json_atomic
 
     subtitle = Path(subtitle)
@@ -233,6 +242,7 @@ def scaffold_file(
         subtitle, folder / (stem + CONDENSED_SUFFIX), bucket_sec
     )
     frames = manifest_frames(folder, stem)
+    video = find_video(subtitle)
     document = build_scaffold(
         stem=stem,
         duration_sec=math.ceil(duration),
@@ -241,6 +251,9 @@ def scaffold_file(
         bucket_sec=bucket_sec,
         subtitle_name=subtitle.name,
         profile=profile,
+        # The real container, not a guess from the stem: a recording saved as
+        # .mkv was written into the note's frontmatter as <stem>.mp4.
+        video_name=video.name if video is not None else None,
     )
     document, ocr_segments = merge_cached_ocr(document, folder, stem)
     target = Path(destination) if destination else folder / ("%s.json" % stem)

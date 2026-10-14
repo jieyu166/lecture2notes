@@ -143,6 +143,10 @@ def test_radiology_privacy_adds_patient_identifiers_without_losing_the_generic_o
     # An ordinary sentence of a lecture note is not an identifier.
     for text in ("左側腎臟可見水腎", "日期 2026-09-21"):
         assert not any(c.search(text) for c in compiled), text
+    # The chart-number label followed by more prose is not a chart number: `\w`
+    # matched CJK, so 「假病歷號與生日」 ("fake chart numbers and birthdays") was R7.
+    for text in ("用假病歷號與生日做示範資料", "病歷號碼欄位要先去識別化", "chart number field"):
+        assert not any(c.search(text) for c in compiled), text
     # Neither is a yyyymmdd date. A lecture stem is routinely one, and
     # `l2n render` writes it into the frontmatter, the References block and
     # every frame embed, so every one of those findings was a false positive.
