@@ -418,7 +418,13 @@ var POS_KEY='l2n:pos:'+location.pathname;
 /* Links are relative in the page and made absolute here, so the text the
    page copies works wherever the folder is served from. */
 var abs=function(rel){if(!rel)return '';try{return new URL(rel,location.href).href;}catch(e){return rel;}};
-var duration=function(){var d=V.duration;if(isFinite(d)&&d>0)return d;return DATA.duration||(S.length?S[S.length-1].end:0)||1;};
+/* A file whose container starts after zero (start_time 3.8 s) plays in the
+   browser from 3.8, while every time l2n writes -- transcript, segments,
+   frames -- counts from the first sample. OFF is that start, measured at build
+   time; the page adds it when seeking and subtracts it when reading. */
+var OFF=Number(DATA.media_offset)||0;
+var now=function(){return Math.max(0,(V.currentTime||0)-OFF);};
+var duration=function(){if(DATA.duration>0)return DATA.duration;var d=V.duration;if(isFinite(d)&&d>0)return d-OFF;return (S.length?S[S.length-1].end:0)||1;};
 function segAt(t){for(var i=S.length-1;i>=0;i--){if(t>=S[i].start)return i;}return 0;}
 function lineAt(t,strict){var lo=0,hi=T.length-1,hit=-1;
   while(lo<=hi){var mid=(lo+hi)>>1;if(T[mid].start<=t){hit=mid;lo=mid+1;}else hi=mid-1;}
@@ -437,13 +443,13 @@ function flash(msg){var el=$('#flash');el.textContent=msg;el.hidden=false;clearT
    loadedmetadata instead of assuming it took. */
 function seek(t,play){
   t=Math.max(0,t);
-  var go=function(){ try{V.currentTime=t;}catch(e){}
+  var go=function(){ try{V.currentTime=t+OFF;}catch(e){}
     if(play!==false){ var p=V.play(); if(p&&p.catch){p.catch(function(){});} } };
   if(V.readyState===0){ V.addEventListener('loadedmetadata',go,{once:true}); try{V.load();}catch(e){} }
   else { go(); }
   sync(t,true);
 }
-function skipBy(d){seek((V.currentTime||0)+d,!V.paused);}
+function skipBy(d){seek((now())+d,!V.paused);}
 
 function sync(t,force){
   paintTimeline(t); renderSubs(t);
@@ -523,7 +529,7 @@ function renderSubs(t){ var box=$('#subs');
     else if(subMode==='zh'){ html='<div class="s-zh">'+esc(b.zh||b.text)+'</div>'; }
     else html='<div class="s-or">'+esc(b.text)+'</div>'; }
   if(html!==subsHtml){box.innerHTML=html;subsHtml=html;} box.hidden=!html; }
-function setSub(m){ subMode=m; store.set('l2n:pref:sub',m); $('#subbtn').textContent='字幕：'+SUB_LABEL[m]; renderSubs(V.currentTime||0); }
+function setSub(m){ subMode=m; store.set('l2n:pref:sub',m); $('#subbtn').textContent='字幕：'+SUB_LABEL[m]; renderSubs(now()); }
 function cycleSub(){ var order=HAS_ZH?['bi','zh','orig','off']:['orig','off'];
   var next=order[(order.indexOf(subMode)+1)%order.length]; setSub(next);
   toast('字幕：'+SUB_LABEL[next]+(HAS_ZH?'':'（這支沒有中文字幕）')); }
@@ -535,9 +541,9 @@ function stepRate(d){ var i=RATES.indexOf(V.playbackRate); if(i<0) i=2; i=Math.m
 
 /* -- A-B repeat ------------------------------------------------------------- */
 var abA=null, abB=null;
-function abTag(){ $('#abtag').textContent=abA==null?'':(abB==null?'A '+fmt(abA)+'，待按 B':'重播 '+fmt(abA)+'–'+fmt(abB)); paintTimeline(V.currentTime||0); }
-function pressA(){ if(abA!=null&&abB!=null){abA=abB=null;toast('已清除區段重播');} else {abA=V.currentTime||0;abB=null;toast('A 點 '+fmt(abA)+'，再按 B 設終點');} abTag(); }
-function pressB(){ if(abB!=null){abA=abB=null;toast('已清除區段重播');} else if(abA==null){toast('先按 A 設起點');} else {abB=Math.max(V.currentTime||0,abA+0.5);toast('區段重播 '+fmt(abA)+'–'+fmt(abB));seek(abA,true);} abTag(); }
+function abTag(){ $('#abtag').textContent=abA==null?'':(abB==null?'A '+fmt(abA)+'，待按 B':'重播 '+fmt(abA)+'–'+fmt(abB)); paintTimeline(now()); }
+function pressA(){ if(abA!=null&&abB!=null){abA=abB=null;toast('已清除區段重播');} else {abA=now();abB=null;toast('A 點 '+fmt(abA)+'，再按 B 設終點');} abTag(); }
+function pressB(){ if(abB!=null){abA=abB=null;toast('已清除區段重播');} else if(abA==null){toast('先按 A 設起點');} else {abB=Math.max(now(),abA+0.5);toast('區段重播 '+fmt(abA)+'–'+fmt(abB));seek(abA,true);} abTag(); }
 
 /* -- question mode ---------------------------------------------------------- */
 var quizOn=store.get('l2n:pref:quiz',true), quizShown={};
@@ -546,7 +552,7 @@ var quizOn=store.get('l2n:pref:quiz',true), quizShown={};
    must-watch mode never asks. */
 var QUIZ_WINDOW=15;
 function maybeQuiz(seg){ if(!quizOn||!seg||!seg.question||quizShown[seg.id]||V.paused) return;
-  if((V.currentTime||0)-seg.start>QUIZ_WINDOW) return;
+  if((now())-seg.start>QUIZ_WINDOW) return;
   if(skipOn&&MUST.indexOf(seg.index)<0) return;
   quizShown[seg.id]=1; showQ(seg); }
 function showQ(seg){ var q=seg.question, card=$('#qcard'); V.pause();
@@ -573,7 +579,7 @@ function enforceSkip(t){ if(!skipOn||V.paused) return; var seg=S[segAt(t)]; if(!
 
 /* -- resume ----------------------------------------------------------------- */
 var lastSave=0;
-function savePos(force){ var t=V.currentTime||0, now=Date.now(); if(!force&&now-lastSave<3000) return; lastSave=now;
+function savePos(force){ var t=now(), ms=Date.now(); if(!force&&ms-lastSave<3000) return; lastSave=ms;
   if(t>5&&t<duration()-10) store.set(POS_KEY,Math.floor(t)); else if(t>=duration()-10) store.del(POS_KEY); }
 window.addEventListener('pagehide',function(){savePos(true);});
 
@@ -582,10 +588,10 @@ var CTX_OPTIONS=[30,60,120,'seg'];
 var ctxLen=store.get('l2n:pref:ctx',60); if(CTX_OPTIONS.indexOf(ctxLen)<0) ctxLen=60;
 function lineText(b){ return '['+fmt(b.start)+'] '+b.text+(b.zh?' ／ '+b.zh:''); }
 function askText(){
-  var t=V.currentTime||0, seg=S[segAt(t)]||{index:'',title:'',start:0,end:duration()}, from, to;
+  var t=now(), seg=S[segAt(t)]||{index:'',title:'',start:0,end:duration()}, from, to;
   if(ctxLen==='seg'){ from=seg.start; to=seg.end; } else { from=Math.max(0,t-ctxLen); to=t+Math.round(ctxLen/2); }
   var lines=T.filter(function(b){return b.start>=from&&b.start<to;}).map(lineText);
-  var out=['影片：'+abs(LINKS.video)+'#t='+Math.floor(t)];
+  var out=['影片：'+abs(LINKS.video)+'#t='+Math.floor(t+OFF)];
   if(LINKS.subtitle) out.push('字幕：'+abs(LINKS.subtitle)+(LINKS.bilingual?'（雙語：'+abs(LINKS.bilingual)+'）':''));
   else if(LINKS.bilingual) out.push('字幕：'+abs(LINKS.bilingual));
   if(LINKS.json) out.push('分段 JSON：'+abs(LINKS.json));
@@ -605,8 +611,8 @@ function copyText(text,done){
   else fallback();
 }
 function askAI(){ copyText(askText(),'已複製，貼到任一 AI 後接著打你的問題'); }
-function capture(){ var t=V.currentTime||0, b=lineAt(t,false);
-  copyText('[▶ '+fmt(t)+']('+abs(LINKS.video)+'#t='+Math.floor(t)+')'+(b?' '+b.text+(b.zh?' ／ '+b.zh:''):''),'已擷取 '+fmt(t)); }
+function capture(){ var t=now(), b=lineAt(t,false);
+  copyText('[▶ '+fmt(t)+']('+abs(LINKS.video)+'#t='+Math.floor(t+OFF)+')'+(b?' '+b.text+(b.zh?' ／ '+b.zh:''):''),'已擷取 '+fmt(t)); }
 
 /* -- modal: help, settings, copy fallback ----------------------------------- */
 function openModal(html){ var m=$('#modal'); $('.box',m).innerHTML=html; m.hidden=false; }
@@ -659,14 +665,14 @@ function setMode(m){ if(!mobile()&&m==='chap') m='split'; if(mobile()&&m==='spli
   MODES.forEach(function(x){document.body.classList.toggle('mode-'+x,x===m);});
   $$('[data-mode]').forEach(function(b){b.classList.toggle('active',b.dataset.mode===m);});
   store.set('l2n:pref:mode:'+(mobile()?'m':'d'),m);
-  if(m==='tr'||m==='chap'||m==='split') sync(V.currentTime||0,true); }
+  if(m==='tr'||m==='chap'||m==='split') sync(now(),true); }
 window.matchMedia('(max-width: 760px)').addEventListener('change',function(){ setMode(store.get('l2n:pref:mode:'+(mobile()?'m':'d'),mobile()?'chap':'split')); });
 
 /* -- events ----------------------------------------------------------------- */
 var raf=0;
-function loop(){ var t=V.currentTime||0; renderSubs(t); paintTimeline(t); raf=V.paused?0:requestAnimationFrame(loop); }
-V.addEventListener('play',function(){ if(!raf) raf=requestAnimationFrame(loop); enforceSkip(V.currentTime||0); maybeQuiz(S[segAt(V.currentTime||0)]); });
-V.addEventListener('timeupdate',function(){ var t=V.currentTime||0;
+function loop(){ var t=now(); renderSubs(t); paintTimeline(t); raf=V.paused?0:requestAnimationFrame(loop); }
+V.addEventListener('play',function(){ if(!raf) raf=requestAnimationFrame(loop); enforceSkip(now()); maybeQuiz(S[segAt(now())]); });
+V.addEventListener('timeupdate',function(){ var t=now();
   if(abB!=null&&t>=abB){ seek(abA,true); return; }
   enforceSkip(t); if(!V.paused) sync(t,false); savePos(false); });
 V.addEventListener('loadedmetadata',function(){ buildTimeline(); setRate(store.get('l2n:pref:rate',1)); });
@@ -678,7 +684,7 @@ document.addEventListener('click',function(e){
   if(act&&!act.closest('#qcard')&&!act.closest('#modal')){ var a=act.dataset.act;
     if(a==='jump'){ seek(Number(act.dataset.t)); if(mobile()) {} return; }
     if(a==='reveal'){ var p=act.closest('.card').querySelector('.a'); if(p) p.hidden=false; act.remove(); return; }
-    if(a==='skip'){ setSkip(!skipOn); if(skipOn) enforceSkip(V.currentTime||0); return; } }
+    if(a==='skip'){ setSkip(!skipOn); if(skipOn) enforceSkip(now()); return; } }
   var img=e.target.closest('.thumbs img'); if(img){ window.open(img.src,'_blank'); return; }
   if(!e.target.closest('.search')) $('#results').classList.remove('open');
 });
@@ -704,10 +710,10 @@ $('#resume').addEventListener('click',function(){ seek(Number($('#resume').datas
 (function(){ var last=0,lastX=0,w=$('#vwrap');
   w.addEventListener('touchend',function(e){ var r=w.getBoundingClientRect(), touch=e.changedTouches[0];
     if(touch.clientY>r.bottom-48||e.target.closest('#qcard')) return;
-    var now=Date.now();
-    if(now-last<320&&Math.abs(touch.clientX-lastX)<90){ e.preventDefault(); var left=touch.clientX<r.left+r.width/2;
+    var ms=Date.now();
+    if(ms-last<320&&Math.abs(touch.clientX-lastX)<90){ e.preventDefault(); var left=touch.clientX<r.left+r.width/2;
       skipBy(left?-10:10); flash(left?'« 10 秒':'10 秒 »'); last=0; }
-    else { last=now; lastX=touch.clientX; } },{passive:false}); })();
+    else { last=ms; lastX=touch.clientX; } },{passive:false}); })();
 
 /* One search box over every layer: summary, quotes, slide text, transcript
    and its translation. */
@@ -734,7 +740,7 @@ document.addEventListener('keydown',function(e){
   var tag=e.target.tagName;
   if(e.key==='Escape'){ $('#results').classList.remove('open'); closeModal(); $('#qcard').hidden=true; if(/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) e.target.blur(); return; }
   if(/^(INPUT|TEXTAREA|SELECT)$/.test(tag)||e.ctrlKey||e.metaKey||e.altKey) return;
-  var k=e.key, handled=true, t=V.currentTime||0, i=segAt(t);
+  var k=e.key, handled=true, t=now(), i=segAt(t);
   if(k==='/') $('#q').focus();
   else if(k===' '&&tag!=='BUTTON'){ if(V.paused){var p=V.play();if(p&&p.catch)p.catch(function(){});} else V.pause(); }
   else if(k==='ArrowLeft') skipBy(-5);
@@ -770,7 +776,7 @@ setMode(store.get('l2n:pref:mode:'+(mobile()?'m':'d'),mobile()?'chap':'split'));
 (function(){ var q=new URLSearchParams(location.search).get('t');
   var h=(location.hash.match(/t=(\d+(?:\.\d+)?)/)||[])[1]; var t=Number(q||h);
   if(!isNaN(t)&&t>0){
-    var go=function(){try{V.currentTime=t;}catch(e){} sync(t,true);};
+    var go=function(){try{V.currentTime=t+OFF;}catch(e){} sync(t,true);};
     V.addEventListener('loadedmetadata',go,{once:true});
     if(V.readyState) go();
   } else { var pos=store.get(POS_KEY,0);
@@ -843,6 +849,7 @@ def render(
     video_rel: str,
     media_dir: str = "",
     links: Optional[Mapping[str, str]] = None,
+    media_offset: float = 0.0,
 ) -> str:
     """The whole page as one string. Pure: nothing is read or written here.
 
@@ -926,6 +933,7 @@ def render(
         "duration": data.get("duration_sec") or 0,
         "links": all_links,
         "triage_overall": triage_overall if isinstance(triage_overall, Mapping) else None,
+    "media_offset": media_offset,
         "questions_zh": [
             q for q in (data.get("questions_zh") or []) if isinstance(q, Mapping)
         ],
@@ -1103,6 +1111,29 @@ def frame_times(json_path: Path) -> Dict[str, float]:
     return out
 
 
+#: A container start below this is the encoder's usual few frames and is left
+#: alone; above it, a browser's clock visibly disagrees with l2n's.
+MEDIA_OFFSET_MIN_SEC = 0.05
+
+
+def media_offset(video: Path) -> float:
+    """Where the browser's clock starts for this file: its container start_time.
+
+    Measured with ffprobe (0 without ffprobe or the file). A browser plays a
+    file whose container starts at 3.8 s from 3.8 s, while ASR, scene
+    detection and frame extraction all count from the first sample, so every
+    time in the document is that much early against the player.
+    """
+    from lecture2notes.frames import scene
+
+    if not Path(video).is_file():
+        return 0.0
+    start = scene.stream_timing(Path(video)).get("format_start")
+    if start is None or abs(start) < MEDIA_OFFSET_MIN_SEC:
+        return 0.0
+    return round(float(start), 3)
+
+
 def page_links(json_path: Path, subtitle: Optional[Path]) -> Dict[str, str]:
     """Relative paths of the files the ask-AI text names, when they exist."""
     json_path = Path(json_path)
@@ -1135,11 +1166,13 @@ def build(
     cues, zh, source = transcript_source(json_path, data, subtitle_path)
     segments, blocks = build_blocks(data, cues, zh, frame_times(json_path))
     video_rel = video or resolve_video(json_path, data) or ""
+    offset = media_offset(json_path.parent / video_rel) if video_rel else 0.0
     page = render(
         data, segments, blocks,
         title or str(data.get("title") or json_path.stem),
         video_rel,
         links=page_links(json_path, subtitle_path),
+        media_offset=offset,
     )
     destination = Path(out) if out else viewer_path(json_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1154,6 +1187,7 @@ def build(
         "transcript": source,
         "video": video_rel,
         "subtitle": str(subtitle_path) if subtitle_path else "",
+        "media_offset": offset,
     }
 
 
@@ -1172,6 +1206,7 @@ __all__ = [
     "estimated_block_count",
     "find_sibling",
     "frame_times",
+    "media_offset",
     "page_links",
     "parse_srt",
     "parse_srt_text",

@@ -395,6 +395,75 @@ def frame_ocr_url_id_findings(data: Mapping[str, Any]) -> List[Finding]:
 #: A number worth checking against what was said: two or more digits, or a
 #: decimal. A lone digit is too often a list position or a count in prose.
 SEGMENT_NUMBER = re.compile(r"(?<![\d.])(\d+(?:[.,]\d+)+|\d{2,})(?![\d])")
+#: Removed from a claim before numbers are read from it: a timecode
+#: (``00:11:21`` is not the numbers 11 and 21) and a timecode link's URL.
+CLAIM_NOISE = re.compile(r"\[▶[^\]]*\]\([^)]*\)|\d{1,2}:\d{2}(?::\d{2})?")
+#: A clause that says its value comes from a slide; its numbers are the
+#: writer's own declaration and are not reported.
+SLIDE_DECLARED = re.compile(r"投影片|簡報|[Ss]lide")
+#: Where one clause ends and the next begins.
+CLAUSE_BREAK = re.compile(r"[。；;！？!?\n]")
+#: A four-digit year (a citation's year, not a measurement).
+YEAR = re.compile(r"^(?:19|20)\d{2}$")
+
+_ZH_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "兩": 2, "三": 3, "四": 4, "五": 5,
+              "六": 6, "七": 7, "八": 8, "九": 9}
+_ZH_UNITS = {"十": 10, "百": 100, "千": 1000, "萬": 10000}
+ZH_NUMBER = re.compile(r"[零〇一二兩三四五六七八九十百千萬]+(?:點[零〇一二三四五六七八九]+)?")
+_EN_UNITS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+    "fourteen fifteen sixteen seventeen eighteen nineteen".split())}
+_EN_TENS = {w: 10 * i for i, w in enumerate(
+    "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()) if w != "_"}
+EN_NUMBER = re.compile(
+    r"\b(?:(%s)(?:[\s-]+(%s))?|(%s))(?:\s+hundred)?\b" % (
+        "|".join(_EN_TENS), "|".join(w for w in _EN_UNITS if _EN_UNITS[w] < 10),
+        "|".join(_EN_UNITS)),
+    re.IGNORECASE,
+)
+
+
+def _zh_integer(text: str) -> Optional[int]:
+    total, section, number = 0, 0, 0
+    for char in text:
+        if char in _ZH_DIGITS:
+            number = _ZH_DIGITS[char]
+        elif char in _ZH_UNITS:
+            unit = _ZH_UNITS[char]
+            if unit == 10000:
+                total += (section + number) * unit
+                section, number = 0, 0
+            else:
+                section += (number or 1) * unit
+                number = 0
+        else:
+            return None
+    return total + section + number
+
+
+def _zh_to_digits(match: "re.Match[str]") -> str:
+    whole, _, frac = match.group(0).partition("點")
+    value = _zh_integer(whole) if whole else 0
+    if value is None:
+        return match.group(0)
+    if frac:
+        return "%d.%s" % (value, "".join(str(_ZH_DIGITS[c]) for c in frac))
+    return str(value)
+
+
+def _en_to_digits(match: "re.Match[str]") -> str:
+    tens, unit, single = match.group(1), match.group(2), match.group(3)
+    value = (_EN_TENS[tens.lower()] + (_EN_UNITS[unit.lower()] if unit else 0)) if tens else _EN_UNITS[single.lower()]
+    if match.group(0).lower().endswith("hundred"):
+        value *= 100
+    return str(value)
+
+
+def spoken_numbers_text(text: str) -> str:
+    """Spoken numbers written as digits: 十五 -> 15, 三點四 -> 3.4,
+    twenty five -> 25, two hundred -> 200. Digits already there are kept."""
+    text = ZH_NUMBER.sub(_zh_to_digits, text or "")
+    return EN_NUMBER.sub(_en_to_digits, text)
 
 
 def _numbers(text: str) -> List[str]:
@@ -405,6 +474,17 @@ def _numbers(text: str) -> List[str]:
         value = match.group(1).replace(",", "")
         if not (value.startswith("0") and len(value) > 1 and not value.startswith("0.")):
             out.append(value)
+    return out
+
+
+def claimed_numbers(text: str) -> List[str]:
+    """The numbers a summary or bullet states as said: timecodes, years and
+    clauses that name a slide as their source are left out."""
+    out: List[str] = []
+    for clause in CLAUSE_BREAK.split(CLAIM_NOISE.sub(" ", text or "")):
+        if SLIDE_DECLARED.search(clause):
+            continue
+        out.extend(v for v in _numbers(clause) if not YEAR.match(v))
     return out
 
 
@@ -420,13 +500,14 @@ def segment_number_findings(
     summary written against the wrong stretch of the lecture looks like.
     """
     segments = [s for s in (data.get("segments") or []) if isinstance(s, Mapping)]
-    spoken = [set(_numbers(t)) for t in transcripts] + [set()] * (len(segments) - len(transcripts))
+    spoken = [set(_numbers(spoken_numbers_text(t))) for t in transcripts]
+    spoken += [set()] * (len(segments) - len(transcripts))
     findings: List[Finding] = []
     for number, segment in enumerate(segments, 1):
         if not transcripts or number > len(transcripts) or not transcripts[number - 1].strip():
             continue
         bullets = [b.get("text") if isinstance(b, Mapping) else b for b in segment.get("bullets_zh") or []]
-        claimed = _numbers(" ".join([str(segment.get("summary_zh") or "")] + [str(b or "") for b in bullets]))
+        claimed = claimed_numbers("\n".join([str(segment.get("summary_zh") or "")] + [str(b or "") for b in bullets]))
         slides = set()
         for entry in segment.get("frame_ocr") or []:
             if isinstance(entry, Mapping):

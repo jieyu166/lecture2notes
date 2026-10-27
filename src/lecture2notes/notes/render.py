@@ -393,7 +393,25 @@ def short_clock(seconds: Any) -> str:
     return "%02d:%02d" % (rest // 60, rest % 60)
 
 
-def video_url(data: Mapping[str, Any], base: Optional[str]) -> Optional[str]:
+class MediaLink(str):
+    """A video URL that also knows where the browser's clock starts for it.
+
+    A file whose container starts at 3.8 s plays from 3.8 s in a browser, so a
+    ``#t=`` fragment needs that much added to the document's time. Being a
+    ``str`` keeps every caller that only wants the URL unchanged.
+    """
+
+    offset: float = 0.0
+
+    def __new__(cls, url: str, offset: float = 0.0) -> "MediaLink":
+        link = super().__new__(cls, url)
+        link.offset = float(offset or 0.0)
+        return link
+
+
+def video_url(
+    data: Mapping[str, Any], base: Optional[str], offset: float = 0.0
+) -> Optional[str]:
     """``<base>/<source.video>``, URL-quoted; None without a base or a video."""
     from urllib.parse import quote
 
@@ -401,7 +419,7 @@ def video_url(data: Mapping[str, Any], base: Optional[str]) -> Optional[str]:
         return None
     source = data.get("source") if isinstance(data.get("source"), Mapping) else {}
     name = text_of(source.get("video")) or ("%s.mp4" % text_of(data.get("stem")))
-    return "%s/%s" % (base.rstrip("/"), quote(Path(name).name))
+    return MediaLink("%s/%s" % (base.rstrip("/"), quote(Path(name).name)), offset)
 
 
 def time_link(seconds: Any, url: Optional[str], label: str = "") -> str:
@@ -413,7 +431,9 @@ def time_link(seconds: Any, url: Optional[str], label: str = "") -> str:
     if not stamp:
         return ""
     text = ("%s %s" % (label, stamp)).strip()
-    return "[▶ %s](%s#t=%d)" % (text, url, int(float(seconds)))
+    return "[▶ %s](%s#t=%d)" % (
+        text, url, int(float(seconds) + float(getattr(url, "offset", 0.0)))
+    )
 
 
 def _timestamp_suffix(value: Any, url: Optional[str] = None) -> str:
@@ -1052,6 +1072,7 @@ def render_skeleton(
     template: Optional[str] = None,
     frontmatter: Optional[str] = None,
     media_base_url: Optional[str] = None,
+    media_offset: float = 0.0,
 ) -> str:
     """The deterministic skeleton note, projected only from *data*.
 
@@ -1075,7 +1096,7 @@ def render_skeleton(
     segments = data.get("segments") if isinstance(data.get("segments"), list) else []
     takeaways = strings_of(data.get("takeaways_zh"))
 
-    url = video_url(data, media_base_url)
+    url = video_url(data, media_base_url, media_offset)
     evergreen = "**「%s」**" % takeaways[0] if takeaways else "**「（待擴寫）」**"
     summary_items = []
     for item in takeaways:
@@ -1280,6 +1301,7 @@ __all__ = [
     "takeaway_anchor",
     "time_link",
     "video_url",
+    "MediaLink",
     "TIME_LINK",
     "TRIAGE_HEADING",
     "SEGMENT_QUESTION_MIN",

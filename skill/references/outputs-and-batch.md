@@ -17,6 +17,10 @@ l2n viewer <stem>.json --preflight
 頁面自己的網址算出，所以整個資料夾放到哪台主機都能用，repo 與頁面都不寫死任何網址。
 `--preflight` 只列出將建立或覆蓋哪些檔案，不寫入任何東西——覆蓋使用者既有檔案前先跑它。
 
+影片的 container start_time 不是 0 時（例如 3.8 秒），瀏覽器會從 3.8 秒開始計時，而 l2n 記錄的
+所有時間（字幕、分段、影格）都從第一個畫面起算；viewer 產生時用 ffprobe 量出這個偏移寫進頁面，
+跳轉時加上、讀取時扣掉，`#t=` 連結也會加上。`l2n render --media-base-url` 產生的筆記連結同樣處理。
+
 逐字稿層優先用 JSON 的 `lines`（含 `zh`），沒有才讀字幕；字幕旁有 cue 完全相同的
 `<stem>.zh.srt` 時也會帶上中文。投影片時間優先取 `<stem>.frames.json` 的 `timestamp_sec`。
 

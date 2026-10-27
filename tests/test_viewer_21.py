@@ -130,3 +130,43 @@ def test_frame_manifest_time_beats_the_filename(tmp_path):
     _, page = build(path)
     slide = [b for b in payload(page)["blocks"] if b["kind"] == "slide" and "second capture" in b["text"]]
     assert slide[0]["start"] == 811.4
+
+
+def _offset_video(path: Path, offset: float) -> bool:
+    import shutil
+    import subprocess
+
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        return False
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x36:d=2:r=10",
+         "-c:v", "mpeg4", "-output_ts_offset", str(offset), str(path)],
+        check=True,
+    )
+    return True
+
+
+def test_a_late_starting_file_carries_its_offset_into_the_page(tmp_path):
+    import pytest
+
+    if not _offset_video(tmp_path / ("%s.mp4" % STEM), 2.0):
+        pytest.skip("ffmpeg not installed")
+    result, page = build(folder(tmp_path))
+    assert abs(result["media_offset"] - 2.0) < 0.1
+    assert abs(payload(page)["media_offset"] - 2.0) < 0.1
+    assert "V.currentTime=t+OFF" in page
+
+
+def test_a_normal_file_has_no_offset(tmp_path):
+    import pytest
+
+    if not _offset_video(tmp_path / ("%s.mp4" % STEM), 0.0):
+        pytest.skip("ffmpeg not installed")
+    result, _ = build(folder(tmp_path))
+    assert result["media_offset"] == 0.0
+
+
+def test_no_local_variable_shadows_the_clock_function():
+    import re as _re
+
+    assert not _re.search(r"\bvar\s+now\s*=\s*Date|,\s*now\s*=\s*Date", viewer.JS)

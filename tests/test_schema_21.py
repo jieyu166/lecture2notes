@@ -366,3 +366,20 @@ def test_numbers_in_a_summary_are_checked_against_the_segment(tmp_path):
     assert "segment 3: 12 is said in segment 2, not in this one" in messages
     assert "segment 3: 400 is on the segment's slide but the speaker does not say it" in messages
     assert "segment 3: 20 is not in this segment's transcript or slides" in messages
+
+
+def test_number_check_ignores_timecodes_years_and_declared_slide_values():
+    from lecture2notes.notes import rules
+
+    assert rules.claimed_numbers(
+        "講者口述 AFP 正常（00:11:21）；投影片列 AFP 3.4（投影片）；Radiology 2018 指出 15 cm；"
+        "[▶ 01:02](http://media.example/a.mp4#t=62) 腫瘤 20 mm"
+    ) == ["15", "20"]
+
+
+def test_spoken_numbers_in_words_count_as_said():
+    from lecture2notes.notes import rules
+
+    text = rules.spoken_numbers_text("大概十五公分，三點四倍，一百二十秒；twenty five patients, two hundred cases")
+    for value in ("15", "3.4", "120", "25", "200"):
+        assert value in rules._numbers(text), value

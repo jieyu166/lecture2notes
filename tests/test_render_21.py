@@ -157,3 +157,9 @@ def test_refresh_on_an_unfenced_note_updates_references_and_adds_triage():
     assert replaced == ["triage", "references"] and skipped == ["summary"]
     assert "新術語" in text and "舊的內容" not in text
     assert text.index(render.TRIAGE_HEADING) < text.index("# Note (layer 1-3)")
+
+
+def test_links_add_the_media_offset_but_labels_keep_document_time():
+    text = render.render_skeleton(document(), stem="sample-talk", profile="generic",
+                                  media_base_url=BASE, media_offset=3.8)
+    assert "([▶ 01:00](%s/sample-talk.mp4#t=63) - 02:00)" % BASE in text

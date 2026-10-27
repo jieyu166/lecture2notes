@@ -171,11 +171,18 @@ def timing_warnings(timing: Mapping[str, Optional[float]]) -> List[str]:
     """
     warnings: List[str] = []
     video_start, format_start = timing.get("video_start"), timing.get("format_start")
-    if video_start is not None and abs(video_start) > START_OFFSET_WARN_SEC:
+    if format_start is not None and abs(format_start) > START_OFFSET_WARN_SEC:
         warnings.append(
-            "video stream start_time is %.2f s (container %.2f s): scene times may be "
-            "offset from what a player shows; spot-check a few frames against the video"
-            % (video_start, format_start or 0.0)
+            "the file starts at %.2f s: a browser shows every moment %.2f s later than "
+            "the times l2n records (transcript, segments and frames agree with each "
+            "other); l2n viewer and render --media-base-url add it automatically, "
+            "hand-written #t= links must add it too" % (format_start, format_start)
+        )
+    elif video_start is not None and abs(video_start - (format_start or 0.0)) > START_OFFSET_WARN_SEC:
+        warnings.append(
+            "the video stream starts %.2f s after the audio: frames and speech may "
+            "disagree by that much; spot-check a few frames against the video"
+            % (video_start - (format_start or 0.0))
         )
     nominal, average = timing.get("nominal_fps"), timing.get("average_fps")
     if nominal and average and abs(nominal - average) / nominal > VFR_WARN_RATIO:

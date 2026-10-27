@@ -545,13 +545,22 @@ def cmd_render(args: argparse.Namespace) -> int:
         or os.environ.get("L2N_MEDIA_BASE_URL")
         or (note_settings.get("media_base_url") if isinstance(note_settings, dict) else None)
     )
+    offset = 0.0
+    if base:
+        source = data.get("source") if isinstance(data.get("source"), dict) else {}
+        video = source.get("video") if isinstance(source, dict) else None
+        if isinstance(video, str) and video:
+            offset = viewer_mod.media_offset(path.parent / video)
+            if offset:
+                _out.say("info", "render: %s starts at %.3f s; links add it" % (video, offset))
     if getattr(args, "refresh", False):
         if not note_path.is_file():
             _out.error("render --refresh: %s does not exist; render it first" % note_path.name)
             return exit_codes.ERROR
         existing = note_path.read_text(encoding="utf-8")
         fresh = render.render_skeleton(
-            data, style=style, stem=path.stem, profile=profile, media_base_url=base
+            data, style=style, stem=path.stem, profile=profile, media_base_url=base,
+            media_offset=offset,
         )
         text, replaced, skipped = render.refresh_note(existing, fresh)
         if text == existing:
@@ -572,7 +581,8 @@ def cmd_render(args: argparse.Namespace) -> int:
                    "only the JSON-derived blocks)" % note_path.name)
         return exit_codes.OK
     render.write_skeleton(
-        note_path, data, style=style, stem=path.stem, profile=profile, media_base_url=base
+        note_path, data, style=style, stem=path.stem, profile=profile, media_base_url=base,
+        media_offset=offset,
     )
     _out.ok("render -> %s (style %s, profile %s%s)" % (
         note_path, style, profile, ", timecode links" if base else ""
