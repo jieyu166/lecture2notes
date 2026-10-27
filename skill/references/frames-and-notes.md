@@ -115,6 +115,11 @@ l2n render <stem>.json --expand-prompt
   用跨段的 `questions_zh` 補，再不夠才用草稿題（帶 ai-draft 標記），並保證有一題 `[推論]`。
 - **`## 分流`**：放在 `# Note (layer 1-3)` 之前：結論、必看段（附連結）、省下的分鐘數、
   理由，以及每段的判斷表。
+- **舊版筆記（早期 v4.md）**：`l2n render <stem>.json --upgrade` 補上缺的必要章節（講者骨架、
+  References 與錯字對照表、題目、學習驗證）、`## 分流` 與風格標記，放在規定的位置，既有內容
+  一字不動，舊檔留 `.bak`。沒標過風格的舊筆記標 concise（它不是照 faithful 每段一句引文寫的）；
+  要照 faithful 驗收就加 `--style faithful`。補進來的章節帶 `<!-- ai-draft -->`，擴寫完再跑
+  `check note`。順序錯的章節只回報不搬動；早期 `Q:`／`A:` 題目不改寫，R9 會提醒改成編號加摺疊答案。
 - **JSON 改了以後**：`l2n render <stem>.json --refresh` 只替換 Summary 重點、`## 分流`、References
   這三塊（骨架裡用 `<!-- l2n:begin ... -->` 標記），擴寫內容不動，舊檔留 `.bak`。不要用 `--force`，
   那會把整份擴寫蓋回骨架。

@@ -1214,6 +1214,94 @@ def refresh_note(existing: str, fresh: str) -> Tuple[str, List[str], List[str]]:
     return text, replaced, skipped
 
 
+# -- --upgrade: a note written before the current skeleton -------------------------
+
+def _heading_line(lines: Sequence[str], heading: str) -> int:
+    for position, line in enumerate(lines):
+        if line.strip() == heading:
+            return position
+    return -1
+
+
+def _fresh_section(fresh_lines: Sequence[str], heading: str) -> List[str]:
+    """One mandatory section of a fresh skeleton: its heading up to the next
+    mandatory heading (or the 分流 block, which has its own way in)."""
+    start = _heading_line(fresh_lines, heading)
+    if start < 0:
+        return []
+    others = {h for h, _ in guideline.MANDATORY_SECTIONS if h != heading}
+    stop = len(fresh_lines)
+    for position in range(start + 1, len(fresh_lines)):
+        line = fresh_lines[position].strip()
+        if line in others or line == MANAGED_BEGIN % "triage":
+            stop = position
+            break
+    section = list(fresh_lines[start:stop])
+    while section and not section[-1].strip():
+        section.pop()
+    return section
+
+
+def upgrade_note(existing: str, fresh: str, style: str) -> Tuple[str, List[str], List[str]]:
+    """Bring a note written to an older skeleton up to the current one.
+
+    Returns ``(text, added, notes)``. Nothing already in the note is removed or
+    rewritten: a missing mandatory section is taken from ``fresh`` and put
+    where the order says it goes; a References section without the
+    correction table gets the fenced table at its top, above what it already
+    holds; the style marker is added (``style``); 分流 is added when the
+    document has it. Sections that exist but sit out of order are reported,
+    not moved -- moving prose is an edit, and edits are the writer's.
+    """
+    lines = existing.replace("\r\n", "\n").split("\n")
+    fresh_lines = fresh.split("\n")
+    added: List[str] = []
+    notes: List[str] = []
+    order = [h for h, _ in guideline.MANDATORY_SECTIONS]
+    for index, heading in enumerate(order):
+        if _heading_line(lines, heading) >= 0:
+            continue
+        section = _fresh_section(fresh_lines, heading)
+        if not section:
+            continue
+        following = [_heading_line(lines, h) for h in order[index + 1:]]
+        following = [p for p in following if p >= 0]
+        at = min(following) if following else len(lines)
+        while at == len(lines) and lines and not lines[-1].strip():
+            lines.pop()
+            at = len(lines)
+        block = ([""] if at and lines[at - 1].strip() else []) + section + [""]
+        lines[at:at] = block
+        added.append(heading)
+
+    seen = [_heading_line(lines, h) for h in order]
+    present = [p for p in seen if p >= 0]
+    if present != sorted(present):
+        notes.append("mandatory sections are out of order; left in place for the writer to move")
+
+    text = "\n".join(lines)
+    references_at = _heading_line(lines, "### References")
+    if references_at >= 0 and _block_span(text, "references") is None:
+        span = _references_span(text)
+        body = text[span[0]:span[1]] if span else ""
+        if not re.search(r"\|\s*heard\s*\|\s*correct\s*\|", body):
+            source = _block_span(fresh, "references")
+            if source:
+                block = fresh[source[0]:source[1]]
+                text = text[:span[0]] + "\n" + block + "\n" + text[span[0]:]
+                added.append("References correction table")
+
+    triage = _block_span(fresh, "triage")
+    if triage and _block_span(text, "triage") is None and TRIAGE_HEADING not in text:
+        text = insert_triage(text, fresh[triage[0]:triage[1]])
+        added.append(TRIAGE_HEADING)
+
+    if read_style_marker(text) is None:
+        text = insert_style_marker(text, style)
+        added.append("style marker (%s)" % style)
+    return text.rstrip("\n") + "\n", added, notes
+
+
 def insert_triage(text: str, triage: str) -> str:
     """Put ``## 分流`` right before ``# Note (layer 1-3)``, or at the end.
 
@@ -1291,6 +1379,7 @@ __all__ = [
     "render_skeleton",
     "render_triage",
     "refresh_note",
+    "upgrade_note",
     "managed",
     "MANAGED_BEGIN",
     "MANAGED_END",

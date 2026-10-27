@@ -553,6 +553,33 @@ def cmd_render(args: argparse.Namespace) -> int:
             offset = viewer_mod.media_offset(path.parent / video)
             if offset:
                 _out.say("info", "render: %s starts at %.3f s; links add it" % (video, offset))
+    if getattr(args, "upgrade", False):
+        if not note_path.is_file():
+            _out.error("render --upgrade: %s does not exist; render it first" % note_path.name)
+            return exit_codes.ERROR
+        existing = note_path.read_text(encoding="utf-8")
+        marker_style = getattr(args, "style", None) or render.read_style_marker(existing) or "concise"
+        fresh = render.render_skeleton(
+            data, style=marker_style, stem=path.stem, profile=profile, media_base_url=base,
+            media_offset=offset,
+        )
+        text, added, notes = render.upgrade_note(existing, fresh, marker_style)
+        if text == existing:
+            _out.skip("render --upgrade: %s already has every section" % note_path.name)
+        else:
+            backup = note_path.with_name(note_path.name + ".bak")
+            backup.write_text(existing, encoding="utf-8", newline="\n")
+            note_path.write_text(text, encoding="utf-8", newline="\n")
+            _out.ok("render --upgrade -> %s (added: %s; backup %s)" % (
+                note_path.name, ", ".join(added), backup.name
+            ))
+            if not getattr(args, "style", None) and "style marker (concise)" in added:
+                _out.say("info", "marked concise: an older note was not written to faithful's "
+                         "one-quote-per-section rule (R6); pass --style faithful to hold it to that")
+        for note in notes:
+            _out.warn("render --upgrade: %s" % note)
+        _out.line("next: fill the <!-- ai-draft --> sections, then l2n check note %s" % path.name)
+        return exit_codes.OK
     if getattr(args, "refresh", False):
         if not note_path.is_file():
             _out.error("render --refresh: %s does not exist; render it first" % note_path.name)
@@ -1751,6 +1778,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("json_file", nargs="?", help="正式 JSON 路徑")
     p.add_argument(
         "--style", choices=["faithful", "concise"], default=None, help="引用密度風格"
+    )
+    p.add_argument(
+        "--upgrade", action="store_true",
+        help="把舊版筆記補到目前的骨架：補缺的章節、對照表、分流與風格標記，既有內容不動",
     )
     p.add_argument(
         "--refresh", action="store_true",

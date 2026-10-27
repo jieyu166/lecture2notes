@@ -163,3 +163,76 @@ def test_links_add_the_media_offset_but_labels_keep_document_time():
     text = render.render_skeleton(document(), stem="sample-talk", profile="generic",
                                   media_base_url=BASE, media_offset=3.8)
     assert "([▶ 01:00](%s/sample-talk.mp4#t=63) - 02:00)" % BASE in text
+
+
+EARLY_NOTE = """---
+title: 早期筆記
+noteVer: v4
+---
+Topics :: [[Topic]] <br>
+
+---
+# Evergreen Note
+「**我自己寫的核心觀念**」
+
+# Summary
+- **我自己寫的重點一**
+- 易混淆觀念：我自己寫的
+
+# Note (layer 1-3)
+## 1、段落 01 佔位標題
+我自己擴寫的第一段。
+
+## 2、段落 02 佔位標題
+我自己擴寫的第二段。
+
+## 3、段落 03 佔位標題
+我自己擴寫的第三段。
+
+### 參考來源
+[^1]: 我自己的來源
+
+## 題目
+Q: 我自己的題目
+A: 我自己的答案
+
+## 閱片
+"""
+
+
+def _check_codes(tmp_path: Path, json_path: Path, note: Path) -> set:
+    report = check_note_stage(json_path, note, profile="generic")
+    return {f.code for f in report.findings if f.severity == "error"}
+
+
+def test_upgrade_adds_missing_sections_and_keeps_every_line(tmp_path):
+    data = json.loads((FIXTURES / "lecture_v2_valid.json").read_text(encoding="utf-8"))
+    path = write_json_atomic(tmp_path / "sample-talk.json", data)
+    note = tmp_path / "sample-talk.v4.md"
+    note.write_text(EARLY_NOTE, encoding="utf-8")
+    assert {"R1", "R4"} <= _check_codes(tmp_path, path, note)
+
+    result = run_cli(["render", str(path), "--upgrade"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = note.read_text(encoding="utf-8")
+    remaining = iter(text.splitlines())
+    assert all(any(line == other for other in remaining) for line in EARLY_NOTE.splitlines()), \
+        "an existing line moved or vanished"
+    for heading in ("## 講者骨架", "### References", "## 學習驗證"):
+        assert heading in text
+    assert text.index("## 講者骨架") < text.index("# Note (layer 1-3)")
+    assert text.index("### References") < text.index("## 題目") < text.index("## 學習驗證")
+    assert render.read_style_marker(text) == "concise"
+    assert not {"R1", "R4", "R6"} & _check_codes(tmp_path, path, note)
+    assert (tmp_path / "sample-talk.v4.md.bak").read_text(encoding="utf-8") == EARLY_NOTE
+    assert "already has every section" in run_cli(["render", str(path), "--upgrade"]).stdout
+
+
+def test_upgrade_puts_the_correction_table_above_existing_references():
+    data = json.loads((FIXTURES / "lecture_v2_valid.json").read_text(encoding="utf-8"))
+    early = EARLY_NOTE.replace("### 參考來源", "### References")
+    fresh = render.render_skeleton(data, stem="sample-talk", profile="generic")
+    text, added, _ = render.upgrade_note(early, fresh, "concise")
+    assert "References correction table" in added
+    section = text.split("### References")[1].split("## 題目")[0]
+    assert section.index("| heard | correct | source |") < section.index("[^1]: 我自己的來源")
