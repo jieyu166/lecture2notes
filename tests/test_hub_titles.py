@@ -109,6 +109,33 @@ def test_stems_absent_from_the_mapping_keep_derived_values(course: Path) -> None
     assert cards[UNNAMED]["topic"] == "佔位課程第二場"
 
 
+#: A course numbered ``<chapter>-<section>-<part>``: the numbered pattern reads
+#: it, but the "topic" it pulls out is just the part number.
+NUMERIC_STEM = "5-1-1"
+
+
+def test_a_numeric_topic_falls_back_to_the_document_title(tmp_path: Path) -> None:
+    # A field run showed a card titled "1 1" for 5-1-1.
+    _install(tmp_path, "hub_lecture_a.json", NUMERIC_STEM)
+    card = hub.collect(tmp_path)[0]
+    assert card["topic"] == "佔位課程第一場"
+
+
+def test_an_override_still_beats_the_title_for_a_numeric_topic(tmp_path: Path) -> None:
+    _install(tmp_path, "hub_lecture_a.json", NUMERIC_STEM)
+    write_titles(tmp_path, {NUMERIC_STEM: {"topic": OVERRIDE_TOPIC}})
+    assert hub.collect(tmp_path)[0]["topic"] == OVERRIDE_TOPIC
+
+
+def test_a_numeric_topic_stays_when_the_document_has_no_title(tmp_path: Path) -> None:
+    _install(tmp_path, "hub_lecture_a.json", NUMERIC_STEM)
+    path = tmp_path / ("%s.json" % NUMERIC_STEM)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["title"] = ""
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert hub.collect(tmp_path)[0]["topic"] == "1"
+
+
 def test_a_broken_titles_file_is_ignored_not_fatal(course: Path) -> None:
     """A typo in an optional file must not take the whole course page down."""
     (course / hub.TITLES_FILE).write_text("{not json", encoding="utf-8")
