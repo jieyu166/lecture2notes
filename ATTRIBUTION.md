@@ -98,6 +98,7 @@ Relation values:
 | `engines/base.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/whisper-srt-zh/scripts/transcribe.py` (timestamp formatting, cue-writing loop) and `skills/lecture-to-notes/scripts/build_lecture_viewer.py` (`parse_srt`); defines this package's own `Engine`/`Cue` interface, not present upstream. |
 | `engines/breeze_ct2.py` | inspired | `scripts/transcribe_video.py` | Shares the faster-whisper wrapper shape and CLI-flag surface inherent to the faster-whisper API itself (`beam_size`, `compute_type`, `vad_filter`, …), not copied prose; adds the CTranslate2 Breeze-ASR-25 model-directory checks, which upstream does not have. |
 | `engines/calibrate.py` | original | — | Session-written subtitle-offset measurement and drift-fit code (`offset3.py`/`vtt_fix.py` in `rad-workflow`, never itself a port of an upstream or rad-workflow *package* file — see `docs/group2.md`). No upstream analog. |
+| `engines/bilingual.py` | original | — | Written for this package: `l2n bilingual` cuts a subtitle into translation batches with a brief and a glossary (handout terms, near misses, correction-table pairs) and merges the translations back only when every cue has exactly one and no timecode moved. No upstream analog. |
 | `engines/corrections.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/whisper-srt-zh/scripts/correct_srt.py`. Upstream's equivalent (`flag_asr_suspects.py`) is deliberately flag-only by design (never rewrites); this module does the opposite on purpose (deterministic find/replace with an audit sidecar) — an independently-designed third approach, not derived from either of upstream's two rejected auto-rewrite attempts. |
 | `engines/convert.py` | original | — | `l2n convert-model`: one-time Hugging Face to CTranslate2 conversion with a disk estimate and an overwrite refusal. No upstream or rad-workflow prior script. |
 | `engines/faster_whisper.py` | inspired | `scripts/transcribe_video.py` | Same reasoning as `breeze_ct2.py`: shared flag surface is inherent to the faster-whisper API, not copied; `--engine` selects something different in each project (cloud-vs-GPU upstream vs. local-engine-choice here). |
@@ -142,7 +143,7 @@ Relation values:
 | `schema/scaffold.py` | original | — | Written for this package: `l2n scaffold` projects a structurally valid, entirely placeholder schema v2 document from a subtitle file. No rad-workflow or upstream counterpart. |
 | `schema/model.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/lecture_model.py`. No upstream canonical-schema module or time-signature validator exists in `drpwchen/lecture-to-notes`. |
 
-Counts: 7 inspired, 15 ported-from-rad-workflow, 40 original — 62 modules total.
+Counts: 7 inspired, 15 ported-from-rad-workflow, 41 original — 63 modules total.
 
 ## ASR default parameters
 

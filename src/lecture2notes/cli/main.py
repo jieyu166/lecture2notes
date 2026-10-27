@@ -60,6 +60,7 @@ SUBCOMMANDS: List[str] = [
     "condense",
     "scaffold",
     "lines",
+    "bilingual",
     "triage-prompt",
     "render",
     "viewer",
@@ -235,9 +236,20 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
         # --chunk-sec overrides that, and no engine forces chunking on the rest.
         chunk_sec=getattr(args, "chunk_sec", None) or getattr(engine, "chunk_sec", None),
     )
-    if result.skipped:
-        return exit_codes.OK
-    _out.ok("transcribe: %s" % ", ".join(p.name for p in result.outputs()))
+    if not result.skipped:
+        _out.ok("transcribe: %s" % ", ".join(p.name for p in result.outputs()))
+    if getattr(args, "bilingual", False) and result.srt:
+        if lang in ("zh", "auto"):
+            _out.warn("--bilingual：原文語言是 %s，沒有要翻成中文的內容，略過" % lang)
+            return exit_codes.OK
+        from lecture2notes.engines import bilingual as bilingual_mod
+
+        try:
+            return _bilingual_export(bilingual_mod.resolve(Path(result.srt)), lang, args)
+        except bilingual_mod.BilingualError as exc:
+            for problem in exc.problems:
+                _out.error("bilingual: %s" % problem)
+            return exit_codes.ERROR
     return exit_codes.OK
 
 
@@ -623,6 +635,84 @@ def cmd_lines(args: argparse.Namespace) -> int:
     _out.ok("lines: %s <- %s (%d lines, %d with zh)" % (
         path.name, subtitle.name, len(fresh), translated
     ))
+    return exit_codes.OK
+
+
+def _bilingual_export(target, lang: Optional[str], args: argparse.Namespace) -> int:
+    from lecture2notes.engines import bilingual as bilingual_mod
+
+    lang = lang or bilingual_mod.document_lang(target)
+    if not lang:
+        _out.error(LANG_REQUIRED_MESSAGE + "（字幕的原文語言；JSON 沒有記錄時必填）")
+        return exit_codes.ERROR
+    profile = loader.BUILTIN_PROFILE
+    if target.document is not None:
+        data = read_json(target.document)
+        if isinstance(data, dict) and data.get("profile"):
+            profile = str(data["profile"])
+    resolved = loader.resolve(profile)
+    handout = Path(args.handout) if getattr(args, "handout", None) else None
+    result = bilingual_mod.export(
+        target, lang,
+        batch_size=getattr(args, "batch_size", None) or bilingual_mod.DEFAULT_BATCH_SIZE,
+        handout=handout,
+        table=resolved.corrections,
+        force=getattr(args, "force", False),
+    )
+    work = result["work"]
+    if result["skipped"]:
+        _out.skip("bilingual export: %s 已匯出（%d 批）；字幕改過才需要 --force" % (work.name, result["batches"]))
+    else:
+        _out.ok("bilingual export: %s (%d cues, %d batches)" % (work.name, result["cues"], result["batches"]))
+        if result.get("handout"):
+            _out.say("info", result["handout"])
+    _out.line("next: translate per %s/brief.md, then: l2n bilingual merge %s"
+              % (work.name, target.subtitle.name))
+    return exit_codes.OK
+
+
+def cmd_bilingual(args: argparse.Namespace) -> int:
+    """`l2n bilingual export|status|merge <stem>.json|<stem>.srt`.
+
+    export cuts the subtitle into batches with a brief for the model; merge
+    writes the three subtitles and lines[].zh after checking that every cue has
+    exactly one translation and that no timecode moved.
+    """
+    from lecture2notes.engines import bilingual as bilingual_mod
+
+    path = _existing_path(getattr(args, "target", None), "bilingual")
+    if path is None:
+        return exit_codes.ERROR
+    try:
+        target = bilingual_mod.resolve(path)
+        if args.action == "export":
+            return _bilingual_export(target, getattr(args, "lang", None), args)
+        if args.action == "status":
+            info = bilingual_mod.status(target)
+            _out.line("bilingual: %d/%d batches translated%s" % (
+                len(info["done"]), info["batches"],
+                "; SOURCE CHANGED since export" if info["stale"] else "",
+            ))
+            if info["missing"]:
+                _out.line("missing: %s" % ", ".join("batch-%03d" % n for n in info["missing"]))
+            return exit_codes.OK
+        result = bilingual_mod.merge(target)
+    except bilingual_mod.BilingualError as exc:
+        for problem in exc.problems:
+            _out.error("bilingual: %s" % problem)
+        return exit_codes.ERROR
+    _out.ok("bilingual merge: %s (%d cues, timecodes unchanged)" % (
+        ", ".join(p.name for p in result.outputs), result.cues
+    ))
+    if result.lines:
+        _out.say("info", "%s: lines[].zh written (%d lines)" % (result.target.document.name, result.lines))
+    elif result.target.document is None:
+        _out.say("info", "no lecture JSON beside the subtitle; lines[].zh not written")
+    for item in result.corrections:
+        _out.warn("ASR 疑似誤聽（原文未改，已記入 corrections）：%s -> %s（cue %s）"
+                  % (item["heard"], item["correct"], item.get("cue")))
+    for term in result.unverified:
+        _out.warn("待確認術語：%s" % term)
     return exit_codes.OK
 
 
@@ -1408,6 +1498,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-s2t", action="store_true", help="不做簡轉繁（預設會轉）"
     )
     p.add_argument(
+        "--bilingual",
+        action="store_true",
+        help="轉錄後接著匯出雙語翻譯批次（等同 l2n bilingual export）",
+    )
+    p.add_argument("--batch-size", type=int, default=None, help="--bilingual 的每批 cue 數")
+    p.add_argument("--handout", default=None, help="--bilingual 用來校正術語的講義")
+    p.add_argument(
         "--chunk-sec",
         type=float,
         default=None,
@@ -1539,6 +1636,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("json_file", nargs="?", help="正式 JSON 路徑")
     p.add_argument("--subtitle", default=None, help="字幕路徑（預設 source.subtitle.path 或 <stem>.srt）")
     p.set_defaults(func=cmd_lines)
+
+    p = sub.add_parser(
+        "bilingual",
+        parents=[common],
+        help="雙語字幕：export 分批交給 LLM 翻譯、status 看進度、merge 產出 .zh/.bi.srt 與 lines[].zh",
+    )
+    p.add_argument("action", nargs="?", choices=["export", "status", "merge"], help="export / status / merge")
+    p.add_argument("target", nargs="?", help="<stem>.json 或 <stem>.srt")
+    p.add_argument("--lang", default=None, help="字幕原文語言（JSON 有記錄時可省略）")
+    p.add_argument("--batch-size", type=int, default=None, help="每批 cue 數（預設 120）")
+    p.add_argument("--handout", default=None, help="講義 PDF 或文字檔（預設同名 .pdf），用來校正術語")
+    p.set_defaults(func=cmd_bilingual)
 
     p = sub.add_parser(
         "triage-prompt",

@@ -39,6 +39,7 @@ CLI_STAGES = (
     "condense",
     "scaffold",
     "lines",
+    "bilingual",
     "triage-prompt",
     "render",
     "viewer",

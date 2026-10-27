@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 #: One cue timing line. The hour field is optional because WebVTT writes
 #: ``01:02.500`` for a cue under an hour; groups are (h, m, s, frac) twice, with
@@ -271,19 +271,33 @@ def dedupe_cues(cues: Sequence[Cue]) -> List[Cue]:
       (joined as spaces) on both sides, so a cue that merely starts with the
       same word is left alone.
     """
-    out: List[Cue] = []
+    return [cue for cue, _ in dedupe_cue_groups(cues)]
+
+
+def dedupe_cue_groups(cues: Sequence[Cue]) -> List[Tuple[Cue, List[int]]]:
+    """:func:`dedupe_cues`, with the positions of the input cues behind each output.
+
+    The positions are what lets a per-cue translation follow the merge: a line
+    built from cues 4 and 5 takes the translation of cues 4 and 5.
+    """
+    out: List[Tuple[Cue, List[int]]] = []
     previous = ""
-    for cue in cues:
+    for position, cue in enumerate(cues):
         text = cue.text
         if out and text == previous:
-            last = out[-1]
-            out[-1] = Cue(start=last.start, end=max(last.end, cue.end), text=last.text)
+            last, members = out[-1]
+            out[-1] = (
+                Cue(start=last.start, end=max(last.end, cue.end), text=last.text),
+                members + [position],
+            )
             continue
         overlap = _rolling_overlap(previous, text)
         previous = text
         text = text[overlap:].strip()
         if text:
-            out.append(Cue(start=cue.start, end=cue.end, text=text))
+            out.append((Cue(start=cue.start, end=cue.end, text=text), [position]))
+        elif out:
+            out[-1][1].append(position)
     return out
 
 
@@ -331,6 +345,7 @@ __all__ = [
     "SRT_TIME",
     "clean_cue_text",
     "cues_to_srt",
+    "dedupe_cue_groups",
     "dedupe_cues",
     "format_timestamp",
     "parse_srt",

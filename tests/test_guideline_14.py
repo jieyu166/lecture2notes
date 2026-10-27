@@ -284,7 +284,7 @@ def test_the_frames_command_passes_force_through(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------
 def test_review_prompt_is_a_subcommand():
     assert "review-prompt" in SUBCOMMANDS
-    assert len(SUBCOMMANDS) == 20
+    assert len(SUBCOMMANDS) == 21
 
 
 def _write_body(note_path: Path, line: str) -> None:

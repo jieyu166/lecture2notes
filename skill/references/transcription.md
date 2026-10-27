@@ -2,7 +2,7 @@
 
 # 參考：轉錄與字幕校正
 
-任務是「把影片轉成字幕」或「把官方字幕的時間對回影片」時，讀這一份。
+任務是「把影片轉成字幕」「把官方字幕的時間對回影片」或「做雙語字幕」時，讀這一份。
 
 ## 先問語言
 
@@ -45,6 +45,34 @@ l2n calibrate-subs <video> <subs.vtt> --lang zh --probes 4
 `--probes` 可給數量（至少 3）或明確秒數（`300,1800,4200`）；`--out-dir` 可改輸出位置。
 它會在數個探針位置用 ASR 轉一小段、量測偏移、擬合線性模型後寫出校正過的字幕，
 並把 `offset_model` 記進 JSON 的 `source.subtitle`。
+
+## 雙語字幕
+
+翻譯是你（語言模型）的工作；切批、術語表、合併與驗證由 `l2n bilingual` 做。
+新轉錄時加 `--bilingual`（轉完直接匯出），既有單語字幕直接從 `export` 開始：
+
+```bash
+l2n transcribe <video> --lang en --bilingual   # 或：l2n bilingual export <stem>.json
+#    逐批翻譯：讀 <stem>.bilingual/brief.md 與 batch-NNN.json，寫 batch-NNN.zh.json
+l2n bilingual status <stem>.json               # 還差哪幾批
+l2n bilingual merge <stem>.json                # 產 <stem>.en.srt、.zh.srt、.bi.srt 與 lines[].zh
+l2n check json <stem>.json
+```
+
+- `export` 以 cue 為單位分批（`--batch-size`，預設 120），每批附上一批結尾 3 句當上下文；
+  與前一句完全相同的 cue 標 `same_as`，不用翻。原文語言取 JSON 的 `source.subtitle.lang`，
+  沒有就必須給 `--lang`。
+- 術語表來自同名講義（`--handout`，PDF 需要 `pdftotext`）與 profile 的錯字對照表：
+  講義與字幕都出現的術語照寫英文；字幕裡長得像講義術語的字列為疑似誤聽。
+- `merge` 只在**每個 cue 剛好一句譯文、字幕自匯出後沒改過、寫出的檔案重新解析後
+  cue 數與時間碼完全相同**時才寫檔；任何一項不符就列出問題、什麼都不寫。
+- `.bi.srt` 每個 cue 兩行：中文在上、原文在下。
+- 原文字幕**不改**。譯者判定的誤聽寫進 `batch-NNN.zh.json` 的 `corrections`，合併後記入
+  JSON 的 `corrections`（source `bilingual`）；要套用到字幕，照上一節把它加進錯字對照表再跑，
+  才會留下 raw 與 sidecar。不確定的術語寫「（可能為XXX）」並列進 `unverified`，合併後進
+  `unverified_terms`。
+- 字幕改過（例如套了對照表）之後要重新 `export --force`：已寫的譯文會改名為
+  `*.zh.stale.json` 保留，不會被刪。
 
 ## 驗收
 

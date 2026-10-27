@@ -96,9 +96,9 @@ l2n run lecture.mp4 --lang zh
 
 ## 子命令
 
-`transcribe`、`calibrate-subs`、`frames`、`ocr`、`condense`、`scaffold`、`lines`、
+`transcribe`、`calibrate-subs`、`frames`、`ocr`、`condense`、`scaffold`、`lines`、`bilingual`、
 `triage-prompt`、`render`、`viewer`、`pbf`、`hub`、`publish`、`check`、`review-prompt`、`migrate`、
-`run`、`convert-model`、`profile`、`install-skill`（共 20 個）。
+`run`、`convert-model`、`profile`、`install-skill`（共 21 個）。
 
 每個子命令可獨立重跑且冪等（已有產物即跳過，`--force` 重做）。共用旗標：`--quiet`、
 `--json-progress`（每行一個 JSON 物件，給 agent 追蹤進度）、`--force`。
@@ -496,6 +496,9 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
   筆記，印出分流交辦書。子命令由 18 個變成 20 個。
 - **字幕解析**：接受沒補零或沒有小時的時間碼、WebVTT 檔頭／cue 識別碼／NOTE 區塊／行內標籤；
   新增 `dedupe_cues` 合併重複與捲動式字幕。
+- **雙語字幕 `l2n bilingual export|status|merge`**（與 `transcribe --bilingual`）：分批交給 LLM
+  翻譯，合併時驗證每個 cue 剛好一句譯文、時間碼不變，產出 `.en.srt`／`.zh.srt`／`.bi.srt`
+  （中上原下）並寫入 `lines[].zh`。術語用同名講義與錯字對照表校正；原文字幕不改。子命令變成 21 個。
 - **`l2n migrate` 拒絕非講座 JSON**：沒有 `segments` 的檔案（例如其他工具的 `*.timing-fixes.json`）
   不再被包成空的講座骨架，回報後原檔不動（exit 2）。版本號改為 `0.3.0.dev0`，從分支
   `pip install -U` 才會真的重裝。

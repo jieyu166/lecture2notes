@@ -60,8 +60,8 @@ def test_root_help_lists_every_subcommand():
     # stage-acceptance specification requires as `l2n publish <stem> --dest`,
     # plus `condense`, which existed as a module with no way to run it, plus
     # `review-prompt`, the independent-review brief guideline 1.4 added, plus
-    # `lines` and `triage-prompt`, which schema 2.1 added.
-    assert len(SUBCOMMANDS) == 20
+    # `lines`, `bilingual` and `triage-prompt`, which schema 2.1 added.
+    assert len(SUBCOMMANDS) == 21
 
 
 def test_fake_progress_loop_survives_cp950():

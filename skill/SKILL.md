@@ -16,7 +16,7 @@ SRT／JSON 就從缺少的階段接續，不重跑已完成的階段。
 
 | 本次工作 | 只讀這一份 |
 |---|---|
-| 轉錄成字幕（`l2n transcribe`）、套用錯字對照表、校正官方字幕時間偏移（`l2n calibrate-subs`） | [references/transcription.md](references/transcription.md) |
+| 轉錄成字幕（`l2n transcribe`）、套用錯字對照表、校正官方字幕時間偏移（`l2n calibrate-subs`）、雙語字幕（`l2n bilingual`、`transcribe --bilingual`） | [references/transcription.md](references/transcription.md) |
 | 已有字幕，要切分段、建立或升級正規 JSON（`l2n condense`、`l2n scaffold`、`l2n migrate`）；寫逐句 `lines`、每段題目與分流（`l2n lines`、`l2n triage-prompt`） | [references/segmentation.md](references/segmentation.md) |
 | 抓投影片影格（`l2n frames`）、對影格做 OCR（`l2n ocr`）、產骨架筆記（`l2n render`） | [references/frames-and-notes.md](references/frames-and-notes.md) |
 | 把骨架筆記擴寫成完整筆記、交付前的獨立驗收（`l2n review-prompt`） | [references/note-writing.md](references/note-writing.md) |

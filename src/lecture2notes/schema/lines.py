@@ -17,7 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from lecture2notes.engines.base import Cue, dedupe_cues, parse_srt_text, read_subtitle_text
+from lecture2notes.engines.base import Cue, dedupe_cue_groups, parse_srt_text, read_subtitle_text
 from lecture2notes.schema.model import Finding
 
 #: Line times are kept to the centisecond; finer than that is noise from the
@@ -25,12 +25,31 @@ from lecture2notes.schema.model import Finding
 TIME_DIGITS = 2
 
 
-def lines_from_cues(cues: Sequence[Cue]) -> List[Dict[str, Any]]:
-    """One ``{t, end, text}`` per cue, after merging repeats."""
-    return [
-        {"t": round(cue.start, TIME_DIGITS), "end": round(cue.end, TIME_DIGITS), "text": cue.text}
-        for cue in dedupe_cues(cues)
-    ]
+def lines_from_cues(
+    cues: Sequence[Cue], translations: Optional[Sequence[str]] = None
+) -> List[Dict[str, Any]]:
+    """One ``{t, end, text}`` per cue, after merging repeats.
+
+    ``translations`` runs parallel to ``cues`` (one per input cue). A line made
+    of several cues gets their distinct translations, in order; a rolling
+    caption keeps the translation of its whole cue, because the translator saw
+    the whole cue and not the remainder left after the overlap was dropped.
+    """
+    out: List[Dict[str, Any]] = []
+    for cue, members in dedupe_cue_groups(cues):
+        line: Dict[str, Any] = {
+            "t": round(cue.start, TIME_DIGITS), "end": round(cue.end, TIME_DIGITS), "text": cue.text,
+        }
+        if translations is not None:
+            parts: List[str] = []
+            for position in members:
+                zh = translations[position].strip() if position < len(translations) else ""
+                if zh and zh not in parts:
+                    parts.append(zh)
+            if parts:
+                line["zh"] = " ".join(parts)
+        out.append(line)
+    return out
 
 
 def _key(line: Mapping[str, Any]) -> Tuple[float, str]:
