@@ -15,9 +15,30 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+#: One cue timing line. The hour field is optional because WebVTT writes
+#: ``01:02.500`` for a cue under an hour; groups are (h, m, s, frac) twice, with
+#: a missing hour reported as None.
 SRT_TIME = re.compile(
-    r"(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})"
+    r"(?:(\d+):)?(\d{1,2}):(\d{2})[,.](\d{1,3})\s*-->\s*"
+    r"(?:(\d+):)?(\d{1,2}):(\d{2})[,.](\d{1,3})"
 )
+
+#: WebVTT inline markup: class, voice, styling and karaoke timestamp tags. Kept
+#: to the tag names the format defines, because a bare ``<`` is ordinary text
+#: in a medical transcript ("<5 mm") and must survive.
+VTT_TAG = re.compile(
+    r"</?(?:c|i|b|u|v|lang|ruby|rt)(?:[.\s][^<>]*)?>"
+    r"|<(?:\d+:)?\d{1,2}:\d{2}[.,]\d{1,3}>"
+)
+#: ASS override blocks some SRT exporters leave in, e.g. ``{\an8}``.
+ASS_TAG = re.compile(r"\{\\[^{}]*\}")
+#: The escapes WebVTT requires for its own markup characters.
+VTT_ENTITIES = (
+    ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " "),
+    ("&lrm;", ""), ("&rlm;", ""), ("&amp;", "&"),
+)
+#: A WebVTT block that is not a cue and has no place in a transcript.
+VTT_META_BLOCK = re.compile(r"^(?:NOTE|STYLE|REGION)(?:\s|$)")
 
 # A cue shorter than this after time calibration is widened instead of being
 # emitted with a zero or negative duration, which some players drop silently.
@@ -170,36 +191,112 @@ def read_subtitle_text(path: Path) -> str:
     return raw.decode("utf-8", "replace")
 
 
+def _clock_seconds(hours: Optional[str], minutes: str, seconds: str, frac: str) -> float:
+    # "1" after the comma is a tenth of a second, not a millisecond.
+    return (
+        int(hours or 0) * 3600 + int(minutes) * 60 + int(seconds)
+        + int(frac.ljust(3, "0")[:3]) / 1000
+    )
+
+
+def clean_cue_text(text: str, vtt: bool = False) -> str:
+    """Remove subtitle markup from one cue's text and collapse its whitespace."""
+    text = ASS_TAG.sub("", VTT_TAG.sub("", text))
+    if vtt:
+        for entity, plain in VTT_ENTITIES:
+            text = text.replace(entity, plain)
+    return " ".join(text.split())
+
+
 def parse_srt_text(text: str) -> List[Cue]:
     """Parse SRT or VTT cue text into :class:`Cue` objects.
 
-    Index lines are recognised by "the next line is a timecode", because a bare
-    number can also be part of the subtitle text.
+    Accepts CRLF, a BOM that survived decoding, an unpadded or missing hour,
+    WebVTT headers, cue identifiers, NOTE/STYLE/REGION blocks and inline tags.
+    A line directly above a timing line is that cue's index or identifier,
+    which is how a bare number inside the subtitle text is told apart from one.
+    Every cue is kept, in order: merging repeats is :func:`dedupe_cues`' job,
+    because the translation and calibration steps need the cue count intact.
     """
-    lines = text.replace("\r", "").split("\n")
+    text = text.lstrip("\ufeff")
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    vtt = bool(lines) and lines[0].strip().startswith("WEBVTT")
     cues: List[Cue] = []
     buckets: List[List[str]] = []
+    in_meta = False
+    previous_blank = True
     for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            in_meta = False
+            previous_blank = True
+            continue
+        was_blank, previous_blank = previous_blank, False
+        if in_meta:
+            continue
         match = SRT_TIME.search(line)
         if match:
-            groups = [int(x) for x in match.groups()]
-            start = groups[0] * 3600 + groups[1] * 60 + groups[2] + groups[3] / 1000
-            end = groups[4] * 3600 + groups[5] * 60 + groups[6] + groups[7] / 1000
-            cues.append(Cue(start=start, end=end, text=""))
+            g = match.groups()
+            cues.append(Cue(
+                start=_clock_seconds(*g[0:4]), end=_clock_seconds(*g[4:8]), text=""
+            ))
             buckets.append([])
             continue
-        stripped = line.strip()
-        if not cues or not stripped:
+        if was_blank and vtt and VTT_META_BLOCK.match(stripped):
+            in_meta = True
             continue
-        if stripped.isdigit() and any(SRT_TIME.search(nxt) for nxt in lines[i + 1:i + 2]):
-            continue  # index line
+        if any(SRT_TIME.search(nxt) for nxt in lines[i + 1:i + 2]):
+            continue  # index or cue identifier
+        if not cues:
+            continue  # WEBVTT header and anything else before the first cue
         buckets[-1].append(stripped)
     out: List[Cue] = []
     for cue, body in zip(cues, buckets):
-        joined = " ".join(body).strip()
+        joined = clean_cue_text(" ".join(body), vtt)
         if joined:
             out.append(Cue(start=round(cue.start, 3), end=round(cue.end, 3), text=joined))
     return out
+
+
+def dedupe_cues(cues: Sequence[Cue]) -> List[Cue]:
+    """Merge repeated and rolling captions into one cue per thing said.
+
+    Two patterns, both common in exported and auto-generated subtitles:
+
+    * the same text in consecutive cues (a caption re-emitted to extend it) --
+      merged into one cue spanning both;
+    * a rolling caption that repeats the end of the previous cue before adding
+      to it ("a b" then "b c") -- the repeated part is dropped, so "c" is all
+      that remains of the second cue. The overlap must fall on line breaks
+      (joined as spaces) on both sides, so a cue that merely starts with the
+      same word is left alone.
+    """
+    out: List[Cue] = []
+    previous = ""
+    for cue in cues:
+        text = cue.text
+        if out and text == previous:
+            last = out[-1]
+            out[-1] = Cue(start=last.start, end=max(last.end, cue.end), text=last.text)
+            continue
+        overlap = _rolling_overlap(previous, text)
+        previous = text
+        text = text[overlap:].strip()
+        if text:
+            out.append(Cue(start=cue.start, end=cue.end, text=text))
+    return out
+
+
+def _rolling_overlap(previous: str, text: str) -> int:
+    """Length of the longest end of ``previous`` that ``text`` starts with."""
+    for size in range(min(len(previous), len(text) - 1), 0, -1):
+        if (
+            text[size] == " "
+            and previous.endswith(text[:size])
+            and (size == len(previous) or previous[-size - 1] == " ")
+        ):
+            return size
+    return 0
 
 
 def parse_srt(path: Path) -> List[Cue]:
@@ -232,7 +329,9 @@ __all__ = [
     "EngineMeta",
     "MIN_CUE_DURATION",
     "SRT_TIME",
+    "clean_cue_text",
     "cues_to_srt",
+    "dedupe_cues",
     "format_timestamp",
     "parse_srt",
     "parse_srt_text",
