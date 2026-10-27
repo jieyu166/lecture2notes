@@ -823,6 +823,7 @@ def check_json(path: Path, require_frames: bool = True) -> StageReport:
                 data, terms, segment_transcripts(data, transcript)
             ))
         report.findings.extend(rules.frame_ocr_email_findings(data))
+        report.findings.extend(rules.frame_ocr_url_id_findings(data))
     return report
 
 
@@ -1199,6 +1200,7 @@ def check_note_stage(
         lines, regions, json_path, note_path, transcript, effective_profile, report
     )
     _rule_faithful_quotes(lines, regions, effective_style, note_path, report)
+    _rule_quote_source(lines, data, json_path, note_path, transcript, report)
     _rule_privacy(lines, effective_profile, note_path, report)
     _rule_placeholder(lines, regions, note_path, report)
     _rule_questions(lines, note_path, report)
@@ -1649,6 +1651,95 @@ def _rule_corrections(
             if not value or value == "-":
                 report.add("error", "R4", "%s:%d" % (note.name, position + 1),
                            "correction row has an empty %s cell" % column)
+
+
+# --------------------------------------------------------------------------
+# R15: a 「」 quotation the sources do not contain
+# --------------------------------------------------------------------------
+#: Quotations shorter than this (normalised) are not judged: a two-word quote
+#: matches anything and a short one is usually a term, not a sentence.
+R15_MIN_CHARS = 8
+#: Character n-gram size, and the share of a quotation's n-grams the sources
+#: must contain for it to count as found. Loose enough for an ASR typo or a
+#: dropped particle, tight enough that a paraphrase in quotation marks fails.
+R15_GRAM = 4
+R15_MIN_SHARE = 0.6
+
+
+def _grams(text: str, size: int = R15_GRAM) -> set:
+    return {text[i:i + size] for i in range(len(text) - size + 1)}
+
+
+def quote_sources(data: Mapping[str, Any], transcript: Optional[Path]) -> str:
+    """Everything a quotation may come from, normalised: transcript, its
+    translation in ``lines``, and slide OCR."""
+    parts: List[str] = []
+    if transcript is not None and Path(transcript).is_file():
+        parts.append(transcript_text(Path(transcript)))
+    for line in data.get("lines") or []:
+        if isinstance(line, Mapping):
+            parts.append(str(line.get("text") or ""))
+            parts.append(str(line.get("zh") or ""))
+    for segment in data.get("segments") or []:
+        if not isinstance(segment, Mapping):
+            continue
+        for entry in segment.get("frame_ocr") or []:
+            if isinstance(entry, Mapping):
+                parts.append(str(entry.get("text") or ""))
+    return rules.comparison_text("".join(parts))
+
+
+def _rule_quote_source(
+    lines: Sequence[str],
+    data: Mapping[str, Any],
+    json_path: Path,
+    note: Path,
+    transcript: Optional[Path],
+    report: StageReport,
+) -> None:
+    """R15: every 「」 quotation can be found in the transcript or on a slide.
+
+    The field reviews found fabricated or reworded 「」 quotations in almost
+    every note: a summary sentence given quotation marks and a timecode reads
+    exactly like the speaker's words. Evergreen is skipped -- its 「」 is the
+    renderer's typography around a takeaway, not a quotation.
+    """
+    path = Path(transcript) if transcript else json_path.with_name(json_path.stem + ".srt")
+    source = quote_sources(data, path)
+    if len(source) < guideline.TRANSCRIPT_RUN_CHARS:
+        return  # R5 already says the transcript is missing or too short
+    have = _grams(source)
+    # Quotations the document itself declares (quotes_zh, quote bullets) were
+    # put there by the segmentation step and are projected by `render`; this
+    # rule is about the ones a writer adds.
+    # Segment titles are quoted by the renderer's own drafts (speaker outline,
+    # drafted questions); that is typography, not a claim about speech.
+    declared = set()
+    for segment in data.get("segments") or []:
+        if isinstance(segment, Mapping):
+            declared.add(rules.comparison_text(str(segment.get("title") or "")))
+            for item in render.quote_items(segment) + [
+                b for b in render.bullet_items(segment) if b["kind"] == "quote"
+            ]:
+                declared.add(rules.comparison_text(item["text"]))
+    evergreen = note_regions(lines).get("Evergreen Note")
+    for position, line in enumerate(lines):
+        if evergreen and evergreen[0] <= position < evergreen[1]:
+            continue
+        for match in QUOTED_SPAN.finditer(line):
+            quote = rules.comparison_text(match.group(0)[1:-1])
+            if len(quote) < R15_MIN_CHARS or quote in declared:
+                continue
+            wanted = _grams(quote)
+            share = len(wanted & have) / float(len(wanted) or 1)
+            if share < R15_MIN_SHARE:
+                excerpt = match.group(0) if len(match.group(0)) <= 40 else match.group(0)[:38] + "…」"
+                report.add(
+                    "warn", "R15", "%s:%d" % (note.name, position + 1),
+                    "quotation %s is not in the transcript or slide text (%d%% found); "
+                    "quote the speaker's own words or drop the quotation marks"
+                    % (excerpt, round(share * 100)),
+                )
 
 
 def _rule_transcript_paste(

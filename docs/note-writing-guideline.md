@@ -346,8 +346,12 @@ OCR 不入文這一條沒有例外。OCR 會把 `L4-L5` 讀成 `14-15`、把 `T2
 | 11 | **逐例說明被歸納成通則** | 講者逐病、逐例說的事，不在 Evergreen 或 Summary 寫成通則；要歸納就標 `[本筆記整理]` | 「各病都靠切片確診」（講者只說了其中兩個） | 逐病照錄 |
 | 12 | **題幹條件不一致** | 題幹的敘述要對每一個子題都成立 | 「三個病例 CT 都是高密度」，其中一例講者說等密度 | 題幹只寫三例共有的條件 |
 | 13 | **年齡 decade** | Nth decade＝(N-1)0 到 (N-1)9 歲，並附原文序數；younger than 35＝未滿 35 歲 | sixth decade -> 「60 多歲」 | 「50 到 59 歲（sixth decade）」 |
+| 14 | **說法不一致沒並列** | 投影片與講者、或講者前後說法不同時，兩種都寫並標出處，不挑一種 | 投影片寫 5 mm、講者說 6 mm -> 筆記只寫 6 mm | 「講者說 6 mm（00:14:10）；投影片寫 5 mm」 |
+| 15 | **引文不是原話** | 「」裡只放逐字稿或講義的原字；改寫、濃縮、翻譯過的話不加「」，時間碼要對得上 | 把自己的摘要句加上「」並附時間碼 | 摘要句不加引號；原話照錄並核對時間碼 |
+| 16 | **影格說明不符** | 影格旁的說明只寫畫面上看得到、且講者在那一段講到的東西 | 圖說寫「箭頭指出出血」，畫面上沒有箭頭 | 只描述畫面實際有的標示 |
+| 17 | **頁面個資** | 影格與筆記不露出頁面本身的個資：瀏覽器側欄、下載面板、試算表的 email 欄、網址列的 ID、登入帳號 | 影格保留了網址列的病歷系統 ID | 換一張影格、裁切，或在 JSON 清掉那張 |
 
-其中第 1、2、3、4、5、7、8 類，`l2n review-prompt` 會列給獨立驗收的人逐項找（見本規範後半的獨立驗收一節）。
+其中第 1、2、3、4、5、7、8 與 14 到 17 類，`l2n review-prompt` 會列給獨立驗收的人逐項找（見本規範後半的獨立驗收一節）。
 
 ---
 
@@ -601,6 +605,7 @@ exit code：`0` 全過、`1` 只有 warning、`2` 有任何 error。
 | **R11** | warning | 同一句話（去空白標點後 25 字以上）不會逐字出現在兩個以上的章節。掃 `# Evergreen Note`、`# Summary`、`# Note (layer 1-3)`、`## 題目`、`## 學習驗證`；`## 講者骨架`、`### References`、名詞小辭典與 frontmatter 不掃。 |
 | **R12** | warning（profile 設 `guideline.forbidden_terms = "error"` 時為 error） | **禁用譯名。** 範圍：frontmatter 之後每一行（含 `# 閱片` 與名詞小辭典），`### References`、程式碼圍欄、「」片段除外。清單來自生效 profile 的 `[check.forbidden_terms]`：`always` 層出現就報；`context` 層要同一行或該段逐字稿含它的英文線索才報。訊息：`warn R12 <筆記>:<行>: 「錯字」 -> 「正譯」 (English) [always]`。generic 不帶清單，所以不報。 |
 | **R13** | warning | **影格說明裡的推測。** 範圍：`# 閱片` 區，加上 Note 本文每個 `![[…]]` 嵌入行之後緊接的那一段（到空行為止）。先扣掉「」片段，再找「推測」「推斷」。訊息：`warn R13 <筆記>:<行>: 「推測」 in a frame description; ...`。 |
+| **R15** | warning | **「」引文找不到出處。** 8 字以上的「」引文（正規化後），其字元 4-gram 有六成以上要出現在逐字稿、JSON `lines`（含 `zh`）或投影片 OCR 裡。JSON 自己登錄的原話（`quotes_zh`、quote 條列）、段落標題與 Evergreen 不判。訊息：`warn R15 <筆記>:<行>: quotation 「…」 is not in the transcript or slide text (N% found); ...`。 |
 | **R14** | warning | **名詞小辭典。** `note.reader` 是 `student` 或 `public` 而 `## 名詞小辭典（非講者內容）` 不存在，報一條；該節內任何一行出現數值閾值（數字加 `%`、`mm`、`cm`、`HU`、`ms`、`歲`、`倍`），或比較符號（`<`、`>`，以及全形的小於等於、大於等於號 U+2264、U+2265），每行報一條。HTML 註解與行首的 `>` 不算。訊息：`warn R14 <筆記>: note.reader is student, so the note needs the section ...`；`warn R14 <筆記>:<行>: the glossary carries a threshold or a number with a unit (...)`。 |
 
 ### R11 的範圍與邊界

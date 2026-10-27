@@ -93,3 +93,15 @@ def test_the_cli_accepts_the_flag_more_than_once(tmp_path: Path, monkeypatch, no
     assert code == exit_codes.OK
     segments = read_json(document)["segments"]
     assert [bool(s["frame_ocr"]) for s in segments] == [False, True, False]
+
+
+def test_frame_ocr_url_with_an_identifier_is_reported():
+    from lecture2notes.notes import rules
+
+    def doc(text):
+        return {"segments": [{"frame_ocr": [{"frame": "f.png", "text": text}]}]}
+
+    assert rules.frame_ocr_url_id_findings(doc("https://his.example/view?mrn=A123456 胸部影像"))
+    assert rules.frame_ocr_url_id_findings(doc("www.example.org/patient/12345678/images"))
+    assert not rules.frame_ocr_url_id_findings(doc("https://radiopaedia.org/articles/lung-rads"))
+    assert not rules.frame_ocr_url_id_findings(doc("Lung-RADS 2022 category 4A"))

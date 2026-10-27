@@ -53,9 +53,10 @@ SRT／JSON 就從缺少的階段接續，不重跑已完成的階段。
   l2n check frames <stem>.json        # 抓圖或 OCR 後
   l2n check json <stem>.json          # JSON 建立或改動後
   l2n check note <stem>.json --note <stem>.v4.md   # 筆記擴寫後
-  l2n review-prompt <stem>.json                    # 再交給沒參與撰寫的人獨立驗收
+  l2n review-prompt <stem>.json                    # 必做：交給沒參與撰寫的人獨立驗收
   ```
 
   exit code：0 全過、1 只有 warning、2 有 error。**有 error 就回頭修，不要交出去。**
+  筆記要等獨立驗收的清單回來、逐條修完並重跑 `check note` 才算完成；只過機器驗收不算交付。
 - 保留原始字幕與錯字更動紀錄；背景程序追蹤到結束為止。
 - 回報時明講哪些內容尚未覆核（`unverified_terms`、待確認的姓名與數字）。

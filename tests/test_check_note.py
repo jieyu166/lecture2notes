@@ -1503,3 +1503,17 @@ def test_r7_still_reports_identifiers(radiology, line):
     json_path, note_path = radiology
     _insert_into_first_section(note_path, line)
     assert "R7" in _codes(check.check_note_stage(json_path, note_path))
+
+
+# -- R15 ---------------------------------------------------------------------------
+def test_r15_reports_a_quotation_the_sources_do_not_contain(lecture):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, "講者說「這是一句講者從來沒有說過的話而且很長」(00:00:05)")
+    hits = [f for f in check.check_note_stage(json_path, note_path).findings if f.code == "R15"]
+    assert len(hits) == 1 and "0% found" in hits[0].message
+
+
+def test_r15_accepts_the_speakers_own_words(lecture):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, "講者說「%s」(00:00:05)" % LONG_RUN[:20])
+    assert "R15" not in _codes(check.check_note_stage(json_path, note_path))

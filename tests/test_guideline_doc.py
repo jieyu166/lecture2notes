@@ -240,7 +240,8 @@ def test_every_documented_rule_id_is_one_the_code_reports(doc_text):
     machine = guideline.section_text(doc_text, guideline.MACHINE_CHECKABLE_HEADING)
 
     assert "**R14**" in machine
-    assert "**R15**" not in machine, "the table has a rule the code does not have"
+    assert "**R15**" in machine
+    assert "**R16**" not in machine, "the table has a rule the code does not have"
 
 
 # --------------------------------------------------------------------------

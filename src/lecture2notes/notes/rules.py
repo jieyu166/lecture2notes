@@ -361,8 +361,41 @@ def frame_ocr_email_findings(data: Mapping[str, Any]) -> List[Finding]:
     return findings
 
 
+#: A URL that carries a record or account identifier: a query parameter named
+#: like one, or a long run of digits as a path segment. Seen in frames that
+#: caught the browser's address bar over a records system.
+URL_ID_PATTERN = re.compile(
+    r"(?:https?://|www\.)\S*?(?:[?&](?:id|uid|pid|mrn|chart|chartno|patient|patientid|acc|accession|user|account)"
+    r"=[\w-]{4,}|/\d{6,}(?:[/?#]|\b))",
+    re.IGNORECASE,
+)
+
+
+def frame_ocr_url_id_findings(data: Mapping[str, Any]) -> List[Finding]:
+    """Warn on ``frame_ocr`` text with an address-bar URL that carries an ID."""
+    findings: List[Finding] = []
+    segments = data.get("segments")
+    for number, segment in enumerate(segments if isinstance(segments, list) else [], 1):
+        if not isinstance(segment, Mapping):
+            continue
+        for position, entry in enumerate(segment.get("frame_ocr") or []):
+            text = entry.get("text") if isinstance(entry, Mapping) else None
+            if isinstance(text, str) and URL_ID_PATTERN.search(text):
+                findings.append(Finding(
+                    "warn", "frame_ocr_url_id",
+                    "frame_ocr text shows a URL carrying an identifier (address bar of "
+                    "a records system?); pick another frame, crop it, or clear this "
+                    "frame_ocr entry",
+                    number, None,
+                    "segments[%d].frame_ocr[%d]" % (number, position),
+                ))
+    return findings
+
+
 __all__ = [
     "EMAIL_PATTERN",
+    "URL_ID_PATTERN",
+    "frame_ocr_url_id_findings",
     "forbidden_term_findings",
     "forbidden_term_matches",
     "frame_ocr_email_findings",
