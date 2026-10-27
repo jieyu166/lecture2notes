@@ -186,6 +186,9 @@ def capture(
     # DurationUnknown) must not leave an empty frames/ behind as evidence of a
     # run that never happened.
     planned = plan_frames(stem, plan_seconds(source, mode, every, detector, threshold))
+    if mode == "scene":
+        for warning in scene_mode.timing_warnings(scene_mode.stream_timing(source)):
+            _out.warn("frames: %s" % warning)
 
     frames_dir.mkdir(parents=True, exist_ok=True)
     grab = extract or scene_mode.extract_frame

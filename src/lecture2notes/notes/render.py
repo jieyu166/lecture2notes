@@ -1085,6 +1085,7 @@ def render_skeleton(
     editorial = render_editorial(data)
     if editorial:
         summary = "\n".join([summary, ""] + editorial)
+    summary = managed("summary", summary)
     reader = loader.note_reader(profile)
     glossary = "\n".join(render_glossary(data)) if reader != "self" else ""
 
@@ -1104,9 +1105,9 @@ def render_skeleton(
         "evergreen": evergreen,
         "summary": summary,
         "segments": "\n".join(section_lines) or "（尚無段落）",
-        "references": "\n".join(render_references(data)),
+        "references": managed("references", "\n".join(render_references(data))),
         "questions": "\n".join(render_questions(data, url)),
-        "triage": "\n".join(render_triage(data, url)),
+        "triage": managed("triage", "\n".join(render_triage(data, url))),
         "verification": "\n".join(render_verification(takeaways)),
         "title": text_of(data.get("title")),
         "glossary": glossary,
@@ -1121,6 +1122,75 @@ def render_skeleton(
         text = insert_triage(text, triage)
     text = insert_style_marker(text, chosen)
     return text.rstrip("\n") + "\n"
+
+
+# -- managed blocks and --refresh -------------------------------------------------
+# Three blocks of the skeleton are projections of the document that nobody is
+# meant to rewrite: the takeaway list in Summary, ## 分流 and the References
+# block. They are fenced with invisible comments so `l2n render --refresh` can
+# replace exactly them after the JSON changes, and leave every expanded line of
+# the note where the writer put it.
+
+MANAGED_BEGIN = "<!-- l2n:begin %s -->"
+MANAGED_END = "<!-- l2n:end %s -->"
+MANAGED_BLOCKS = ("summary", "triage", "references")
+
+
+def managed(name: str, body: str) -> str:
+    """``body`` fenced as the managed block ``name``; empty stays empty."""
+    if not body:
+        return ""
+    return "%s\n%s\n%s" % (MANAGED_BEGIN % name, body, MANAGED_END % name)
+
+
+def _block_span(text: str, name: str) -> Optional[Tuple[int, int]]:
+    begin, end = MANAGED_BEGIN % name, MANAGED_END % name
+    start = text.find(begin)
+    stop = text.find(end, start + 1) if start >= 0 else -1
+    if start < 0 or stop < 0:
+        return None
+    return start, stop + len(end)
+
+
+def _references_span(text: str) -> Optional[Tuple[int, int]]:
+    """An unfenced References block: after its heading, up to the next heading."""
+    match = re.search(r"(?m)^### References[ \t]*\n", text)
+    if not match:
+        return None
+    following = re.search(r"(?m)^#{1,3} ", text[match.end():])
+    stop = match.end() + following.start() if following else len(text)
+    return match.end(), stop
+
+
+def refresh_note(existing: str, fresh: str) -> Tuple[str, List[str], List[str]]:
+    """``existing`` with its managed blocks replaced by ``fresh``'s.
+
+    Returns ``(text, replaced, skipped)``. A note written before the blocks
+    were fenced still gets its References (found by heading) and gains 分流
+    (inserted before the Note body); its Summary list is left alone, because
+    without the fence there is no telling where the projection ends and the
+    writer's own lines begin.
+    """
+    text, replaced, skipped = existing, [], []
+    for name in MANAGED_BLOCKS:
+        source = _block_span(fresh, name)
+        block = fresh[source[0]:source[1]] if source else ""
+        target = _block_span(text, name)
+        if target:
+            text = text[:target[0]] + block + text[target[1]:]
+            replaced.append(name)
+        elif not block:
+            continue
+        elif name == "triage":
+            text = insert_triage(text, block)
+            replaced.append(name)
+        elif name == "references" and _references_span(text):
+            start, stop = _references_span(text)
+            text = text[:start] + "\n" + block + "\n\n" + text[stop:].lstrip("\n")
+            replaced.append(name)
+        else:
+            skipped.append(name)
+    return text, replaced, skipped
 
 
 def insert_triage(text: str, triage: str) -> str:
@@ -1199,6 +1269,11 @@ __all__ = [
     "render_segment",
     "render_skeleton",
     "render_triage",
+    "refresh_note",
+    "managed",
+    "MANAGED_BEGIN",
+    "MANAGED_END",
+    "MANAGED_BLOCKS",
     "insert_triage",
     "segment_questions",
     "short_clock",

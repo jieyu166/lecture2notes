@@ -539,15 +539,38 @@ def cmd_render(args: argparse.Namespace) -> int:
         ))
         return exit_codes.OK
 
-    if note_path.exists() and not getattr(args, "force", False):
-        _out.stage("render", "skip (%s exists; use --force)" % note_path.name)
-        return exit_codes.OK
     note_settings = loader.outputs(profile).get("note")
     base = (
         getattr(args, "media_base_url", None)
         or os.environ.get("L2N_MEDIA_BASE_URL")
         or (note_settings.get("media_base_url") if isinstance(note_settings, dict) else None)
     )
+    if getattr(args, "refresh", False):
+        if not note_path.is_file():
+            _out.error("render --refresh: %s does not exist; render it first" % note_path.name)
+            return exit_codes.ERROR
+        existing = note_path.read_text(encoding="utf-8")
+        fresh = render.render_skeleton(
+            data, style=style, stem=path.stem, profile=profile, media_base_url=base
+        )
+        text, replaced, skipped = render.refresh_note(existing, fresh)
+        if text == existing:
+            _out.skip("render --refresh: %s already current" % note_path.name)
+        else:
+            backup = note_path.with_name(note_path.name + ".bak")
+            backup.write_text(existing, encoding="utf-8", newline="\n")
+            note_path.write_text(text, encoding="utf-8", newline="\n")
+            _out.ok("render --refresh -> %s (replaced: %s; backup %s)" % (
+                note_path.name, ", ".join(replaced) or "-", backup.name
+            ))
+        for name in skipped:
+            _out.warn("render --refresh: %s has no fenced %s block (rendered before the "
+                      "fences existed); left as it is" % (note_path.name, name))
+        return exit_codes.OK
+    if note_path.exists() and not getattr(args, "force", False):
+        _out.stage("render", "skip (%s exists; use --force, or --refresh to update "
+                   "only the JSON-derived blocks)" % note_path.name)
+        return exit_codes.OK
     render.write_skeleton(
         note_path, data, style=style, stem=path.stem, profile=profile, media_base_url=base
     )
@@ -1496,6 +1519,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version", action="version", version="lecture2notes %s" % __version__
     )
+    parser.add_argument(
+        "--where", action="store_true",
+        help="印出實際載入的套件位置、安裝方式與 PATH 上所有 l2n，排查「改了程式沒生效」",
+    )
     sub = parser.add_subparsers(dest="command", metavar="<subcommand>")
 
     p = sub.add_parser(
@@ -1711,6 +1738,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--style", choices=["faithful", "concise"], default=None, help="引用密度風格"
     )
     p.add_argument(
+        "--refresh", action="store_true",
+        help="只更新筆記裡由 JSON 產生的區塊（Summary 重點、分流、References），保留擴寫內容",
+    )
+    p.add_argument(
         "--media-base-url", default=None,
         help="影片所在資料夾的網址；時間碼會變成指向影片該秒的連結（網址/影片#t=秒）"
              "（預設取 L2N_MEDIA_BASE_URL 或 overlay 的 [note] media_base_url）",
@@ -1879,9 +1910,65 @@ def build_parser() -> argparse.ArgumentParser:
 # --------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------
+def where_lines() -> List[str]:
+    """Which lecture2notes this process runs, and every other one in reach.
+
+    The field failure this answers: an editable install pointing at an old
+    checkout and a site-packages copy both present, edits made in a third
+    clone, and no command that said which one `l2n` actually loads.
+    """
+    import shutil
+    from importlib import metadata
+
+    import lecture2notes
+
+    lines = [
+        "lecture2notes %s" % __version__,
+        "loaded from: %s" % Path(lecture2notes.__file__).resolve().parent,
+        "python: %s" % sys.executable,
+    ]
+    if lecture2notes.FALLBACK_VERSION != __version__:
+        lines.append(
+            "warning: the code is %s but the install metadata says %s; reinstall "
+            "(pip install -e . or --force-reinstall) so both agree"
+            % (lecture2notes.FALLBACK_VERSION, __version__)
+        )
+    for dist in metadata.distributions():
+        if (dist.metadata.get("Name") or "").lower() != "lecture2notes":
+            continue
+        kind, target = "installed copy", str(dist.locate_file(""))
+        direct = dist.read_text("direct_url.json")
+        if direct:
+            try:
+                info = json.loads(direct)
+            except ValueError:
+                info = {}
+            if (info.get("dir_info") or {}).get("editable"):
+                kind, target = "editable", str(info.get("url", "")).replace("file://", "")
+            elif info.get("vcs_info"):
+                kind = "from %s@%s" % (info.get("url", ""), (info.get("vcs_info") or {}).get("requested_revision", ""))
+        lines.append("distribution %s: %s (%s)" % (dist.version, target, kind))
+    seen = []
+    for folder in os.environ.get("PATH", "").split(os.pathsep):
+        for name in ("l2n", "l2n.exe"):
+            candidate = Path(folder) / name
+            if candidate.is_file() and str(candidate) not in seen:
+                seen.append(str(candidate))
+    found = shutil.which("l2n")
+    for path in seen:
+        lines.append("l2n on PATH: %s%s" % (path, "  <- runs first" if found and Path(found) == Path(path) else ""))
+    if len([line for line in lines if line.startswith("distribution")]) > 1 or len(seen) > 1:
+        lines.append("warning: more than one install; pip uninstall lecture2notes until none is left, then install one")
+    return lines
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if getattr(args, "where", False):
+        for line in where_lines():
+            _out.line(line)
+        return exit_codes.OK
 
     _out.configure(
         quiet=getattr(args, "quiet", False),

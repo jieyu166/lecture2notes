@@ -1735,10 +1735,21 @@ def _rule_faithful_quotes(
                        "faithful style needs at least one quotation in this section")
 
 
+#: Where an eight-digit number is a PubMed ID by its own declaration.
+PMID_CONTEXT = re.compile(
+    r"PMID\s*[:：#]?\s*\d{1,9}|pubmed(?:\.ncbi\.nlm\.nih\.gov)?/\d{1,9}", re.IGNORECASE
+)
+
+
 def _rule_privacy(
     lines: Sequence[str], profile: str, note: Path, report: StageReport
 ) -> None:
-    """R7: nothing matching the profile's personal-data patterns."""
+    """R7: nothing matching the profile's personal-data patterns.
+
+    A PubMed identifier is a citation, not a chart number: ``PMID: 12345678``
+    and ``pubmed.ncbi.nlm.nih.gov/12345678`` are removed before matching.
+    """
+    lines = [PMID_CONTEXT.sub("", line) for line in lines]
     for pattern in loader.privacy_patterns(profile):
         try:
             compiled = re.compile(pattern)
@@ -1751,6 +1762,31 @@ def _rule_privacy(
                 report.add("error", "R7", "%s:%d" % (note.name, position + 1),
                            "line matches the privacy pattern %r" % pattern)
                 break
+
+
+#: A field's label in front of its value: ``- 影像判準：``, ``> **Pitfall**：``.
+FIELD_LABEL = re.compile(r"^(?:[-*+>]\s*|\d+[.)、]\s*)*(?:\*\*[^*]{1,30}\*\*|[^：:「」]{1,20})?\s*[：:]\s*")
+LIST_MARKER = re.compile(r"^(?:[-*+>]\s*|\d+[.)、]\s*)+")
+
+
+def filler_in(text: str) -> Optional[str]:
+    """The placeholder a line consists of, or None.
+
+    Only a line (or a labelled field) whose whole value is the placeholder
+    counts, optionally followed by a parenthetical. 「暫不適用」 quoted off a
+    slide, or "this rule 不適用 to children" in a sentence, is content.
+    """
+    text = QUOTED_SPAN.sub("", text).strip()
+    candidates = [LIST_MARKER.sub("", text).strip()]
+    labelled = FIELD_LABEL.sub("", text, count=1).strip()
+    if labelled != text:
+        candidates.append(labelled)
+    for value in candidates:
+        value = re.sub(r"(（[^）]*）|\([^)]*\))$", "", value).strip().strip("。.,，;；")
+        for placeholder in PLACEHOLDER_TEXT:
+            if value == placeholder:
+                return placeholder
+    return None
 
 
 def _rule_placeholder(
@@ -1776,9 +1812,9 @@ def _rule_placeholder(
     for title, start, end in sections:
         for position in range(start, end):
             text = lines[position]
-            if title == READING_REGION:
-                text = text.replace(guideline.NOT_COVERED_NOTE, "")
-            hit = next((t for t in PLACEHOLDER_TEXT if t in text), None)
+            if title == READING_REGION and guideline.NOT_COVERED_NOTE in text:
+                continue
+            hit = filler_in(text)
             if hit and title == READING_REGION:
                 report.add("warn", "R8", title,
                            "placeholder text %r; write %s exactly, or delete "

@@ -278,3 +278,16 @@ def test_quiet_silences_the_scan_progress(capsys):
         _out.reset()
 
     assert capsys.readouterr().out == ""
+
+
+def test_timing_warnings_flag_start_offset_and_variable_frame_rate():
+    from lecture2notes.frames import scene
+
+    found = scene.timing_warnings(
+        {"video_start": 87.5, "format_start": 0.0, "nominal_fps": 30.0, "average_fps": 24.2}
+    )
+    assert len(found) == 2 and "87.50" in found[0] and "variable frame rate" in found[1]
+    assert scene.timing_warnings(
+        {"video_start": 0.0, "format_start": 0.0, "nominal_fps": 30.0, "average_fps": 29.97}
+    ) == []
+    assert scene.timing_warnings({}) == []

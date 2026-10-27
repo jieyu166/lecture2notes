@@ -119,3 +119,41 @@ def test_hub_card_line_states_the_verdict():
     assert triage_line(document()) == "只看新知段（必看 2 分）"
     assert triage_line({"triage_overall": {"verdict": "跳過", "est_minutes": 0}}) == "跳過"
     assert triage_line({}) == ""
+
+
+def test_refresh_replaces_only_the_fenced_blocks(tmp_path):
+    data = document()
+    path = write_json_atomic(tmp_path / "sample-talk.json", data)
+    note = tmp_path / "sample-talk.v4.md"
+    assert run_cli(["render", str(path)]).returncode == 0
+    expanded = note.read_text(encoding="utf-8").replace(
+        "佔位段落摘要 02，僅用於驗證結構。", "我自己擴寫的第二段內容。"
+    )
+    note.write_text(expanded, encoding="utf-8")
+
+    data["takeaways_zh"][1] = "更新後的第二條重點"
+    data["triage_overall"]["verdict"] = "全看"
+    data["unverified_terms"] = ["新術語"]
+    write_json_atomic(path, data)
+    result = run_cli(["render", str(path), "--refresh"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = note.read_text(encoding="utf-8")
+    assert "我自己擴寫的第二段內容。" in text
+    assert "更新後的第二條重點" in text and "**全看**" in text and "新術語" in text
+    assert (tmp_path / "sample-talk.v4.md.bak").read_text(encoding="utf-8") == expanded
+    assert "already current" in run_cli(["render", str(path), "--refresh"]).stdout
+
+
+def test_refresh_on_an_unfenced_note_updates_references_and_adds_triage():
+    data = document()
+    fresh = render.render_skeleton(data, stem="sample-talk", profile="generic")
+    old = fresh
+    for name in render.MANAGED_BLOCKS:
+        old = old.replace(render.MANAGED_BEGIN % name + "\n", "").replace("\n" + render.MANAGED_END % name, "")
+    old = old.split(render.TRIAGE_HEADING)[0] + "# Note (layer 1-3)" + old.split("# Note (layer 1-3)", 1)[1]
+    old = old.replace("- （無）", "- 舊的內容")
+    data["unverified_terms"] = ["新術語"]
+    text, replaced, skipped = render.refresh_note(old, render.render_skeleton(data, stem="sample-talk", profile="generic"))
+    assert replaced == ["triage", "references"] and skipped == ["summary"]
+    assert "新術語" in text and "舊的內容" not in text
+    assert text.index(render.TRIAGE_HEADING) < text.index("# Note (layer 1-3)")

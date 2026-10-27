@@ -19,7 +19,7 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from lecture2notes import _deps, _out
 from lecture2notes.frames.manifest import timestamp_display, timestamp_file
@@ -109,6 +109,81 @@ def get_duration(video_path: Path) -> float:
             ("; stderr: " + detail[:DURATION_PREVIEW]) if detail else "",
         ))
         return 0.0
+
+
+#: Differences, in seconds, worth telling the user about before they trust
+#: frame times: a video stream that starts this long after the container, or a
+#: frame rate whose average is this far from the nominal one.
+START_OFFSET_WARN_SEC = 1.0
+VFR_WARN_RATIO = 0.02
+
+
+def _rate(text: Any) -> Optional[float]:
+    try:
+        num, _, den = str(text).partition("/")
+        value = float(num) / float(den or 1)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return value if value > 0 else None
+
+
+def stream_timing(video_path: Path) -> Dict[str, Optional[float]]:
+    """Start times and frame rates that decide whether frame times can be trusted.
+
+    ``format_start`` is the container's start, ``video_start`` the video
+    stream's; ``nominal_fps`` and ``average_fps`` are r_frame_rate and
+    avg_frame_rate. Missing values are None. Never raises: this is a diagnosis.
+    """
+    import json as _json
+
+    out: Dict[str, Optional[float]] = {
+        "format_start": None, "video_start": None, "nominal_fps": None, "average_fps": None,
+    }
+    try:
+        ffprobe = _deps.require_ffprobe()
+        done = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "format=start_time:stream=start_time,r_frame_rate,avg_frame_rate",
+             "-of", "json", str(video_path)],
+            capture_output=True, text=True, timeout=60,
+        )
+        data = _json.loads(done.stdout or "{}")
+    except (OSError, ValueError, subprocess.SubprocessError, SystemExit):
+        return out
+    stream = (data.get("streams") or [{}])[0]
+    for key, value in (("format_start", (data.get("format") or {}).get("start_time")),
+                       ("video_start", stream.get("start_time"))):
+        try:
+            out[key] = float(value)
+        except (TypeError, ValueError):
+            pass
+    out["nominal_fps"] = _rate(stream.get("r_frame_rate"))
+    out["average_fps"] = _rate(stream.get("avg_frame_rate"))
+    return out
+
+
+def timing_warnings(timing: Mapping[str, Optional[float]]) -> List[str]:
+    """What about this file's clock could make scene times disagree with a player.
+
+    Reported rather than corrected: which way to shift depends on how the file
+    was made and which player reads it, and a correction applied in the wrong
+    direction moves every frame further from its slide.
+    """
+    warnings: List[str] = []
+    video_start, format_start = timing.get("video_start"), timing.get("format_start")
+    if video_start is not None and abs(video_start) > START_OFFSET_WARN_SEC:
+        warnings.append(
+            "video stream start_time is %.2f s (container %.2f s): scene times may be "
+            "offset from what a player shows; spot-check a few frames against the video"
+            % (video_start, format_start or 0.0)
+        )
+    nominal, average = timing.get("nominal_fps"), timing.get("average_fps")
+    if nominal and average and abs(nominal - average) / nominal > VFR_WARN_RATIO:
+        warnings.append(
+            "variable frame rate (r_frame_rate %.3f, avg_frame_rate %.3f): times counted "
+            "in frames drift; prefer --detector ffmpeg or --mode interval" % (nominal, average)
+        )
+    return warnings
 
 
 def scan_progress_seconds(line: str) -> Optional[float]:
@@ -296,6 +371,8 @@ __all__ = [
     "detect_ffmpeg",
     "detect_scenes",
     "extract_frame",
+    "stream_timing",
+    "timing_warnings",
     "find_video",
     "get_duration",
     "mark",

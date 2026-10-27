@@ -1465,3 +1465,41 @@ def test_check_all_and_its_report_carry_the_new_rules(radiology, tmp_path):
 
     assert {"R12", "R13"} <= set(_codes(note_report))
     assert "R12" in codes and "R13" in codes
+
+
+# -- false positives the field runs hit (R7 / R8) --------------------------------
+@pytest.mark.parametrize("line", [
+    "- 投影片原文寫「暫不適用」，講者說明是因為證據不足",
+    "這個分級不適用於兒童",
+    "- 本院流程：暫不適用新制",
+])
+def test_r8_ignores_placeholder_words_inside_content(lecture, line):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, line)
+    assert "R8" not in _codes(check.check_note_stage(json_path, note_path))
+
+
+@pytest.mark.parametrize("line", ["- 影像判準：不適用", "N/A", "- **處置**：暫無。"])
+def test_r8_still_reports_a_field_that_is_only_filler(lecture, line):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, line)
+    assert "R8" in _codes(check.check_note_stage(json_path, note_path))
+
+
+@pytest.mark.parametrize("line", [
+    "出處見 PMID: 12345678",
+    "https://pubmed.ncbi.nlm.nih.gov/12345678/",
+    "病人：常見主訴為頭痛與嘔吐",
+    "講者提醒不要在投影片上露出病歷號或是生日",
+])
+def test_r7_ignores_citations_and_general_sentences(radiology, line):
+    json_path, note_path = radiology
+    _insert_into_first_section(note_path, line)
+    assert "R7" not in _codes(check.check_note_stage(json_path, note_path))
+
+
+@pytest.mark.parametrize("line", ["病人：王○明，男性", "病歷號 A1234567", "編號 13345678 的個案"])
+def test_r7_still_reports_identifiers(radiology, line):
+    json_path, note_path = radiology
+    _insert_into_first_section(note_path, line)
+    assert "R7" in _codes(check.check_note_stage(json_path, note_path))

@@ -92,3 +92,12 @@ def test_the_cli_package_ships_a_main_module():
     # with a sentence rather than only as three subprocess failures.
     assert (SRC / "lecture2notes" / "cli" / "__main__.py").is_file()
     assert (SRC / "lecture2notes" / "__main__.py").is_file()
+
+
+def test_where_names_the_loaded_package():
+    from lecture2notes.cli.main import where_lines
+    import lecture2notes
+
+    lines = where_lines()
+    assert lines[0] == "lecture2notes %s" % lecture2notes.__version__
+    assert any(line.startswith("loaded from: ") and "lecture2notes" in line for line in lines)

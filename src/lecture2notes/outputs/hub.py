@@ -169,6 +169,19 @@ def is_lecture_json(path: Path) -> bool:
     return not name.startswith("_") and not name.endswith(DERIVED_SUFFIXES)
 
 
+#: How much of a topic the search spread shows per lecture.
+LABEL_CHARS = 16
+
+
+def lecture_label(card: Mapping[str, Any]) -> str:
+    """How the search results name a lecture: number and a short topic."""
+    topic = str(card.get("topic") or card.get("stem") or "")
+    if len(topic) > LABEL_CHARS:
+        topic = topic[:LABEL_CHARS] + "…"
+    no = str(card.get("no") or "")
+    return ("%s %s" % (no, topic)).strip() if topic != no else no
+
+
 def build_card(
     json_path: Path, data: Mapping[str, Any], titles: Mapping[str, Any]
 ) -> Dict[str, Any]:
@@ -176,6 +189,13 @@ def build_card(
     json_path = Path(json_path)
     segments = data.get("segments") or []
     card = apply_titles(json_path.stem, titles)
+    # A stem the filename patterns cannot read (``20241207``) leaves the stem as
+    # the topic; the document's own title says more, unless an override spoke.
+    title = str(data.get("title") or "").strip()
+    override = titles.get(json_path.stem) if isinstance(titles, Mapping) else None
+    has_topic = isinstance(override, Mapping) and "topic" in override
+    if not has_topic and card.get("topic") == json_path.stem and title and title != json_path.stem:
+        card["topic"] = title
     frames = [frame for segment in segments for frame in (segment.get("frames") or [])]
     card.update({
         "stem": json_path.stem,
@@ -245,7 +265,7 @@ def build_index(cards: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     for card in cards:
         for takeaway in card.get("takeaways") or []:
             index.append({
-                "v": card["viewer"], "no": card.get("no", ""), "t": 0,
+                "v": card["viewer"], "no": card.get("no", ""), "lt": lecture_label(card), "t": 0,
                 "k": "takeaway", "x": str(takeaway),
             })
         for segment in card.get("segments") or []:
@@ -253,7 +273,7 @@ def build_index(cards: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
                 continue
             second = int(float(segment.get("start_sec") or 0))
             index.append({
-                "v": card["viewer"], "no": card.get("no", ""), "t": second,
+                "v": card["viewer"], "no": card.get("no", ""), "lt": lecture_label(card), "t": second,
                 "k": "segment", "x": str(segment.get("title") or ""),
             })
             for bullet in segment.get("bullets_zh") or []:
@@ -261,7 +281,7 @@ def build_index(cards: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
                 if not text:
                     continue
                 index.append({
-                    "v": card["viewer"], "no": card.get("no", ""), "t": second,
+                    "v": card["viewer"], "no": card.get("no", ""), "lt": lecture_label(card), "t": second,
                     "k": "bullet", "x": text,
                 })
             for quote_item in segment.get("quotes_zh") or []:
@@ -273,7 +293,7 @@ def build_index(cards: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
                     continue
                 at = quote_item.get("t") if isinstance(quote_item, Mapping) else None
                 index.append({
-                    "v": card["viewer"], "no": card.get("no", ""),
+                    "v": card["viewer"], "no": card.get("no", ""), "lt": lecture_label(card),
                     "t": int(float(at)) if isinstance(at, (int, float))
                     and not isinstance(at, bool) else second,
                     "k": "quote", "x": text,
@@ -285,7 +305,7 @@ def build_index(cards: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
                 if not text:
                     continue
                 index.append({
-                    "v": card["viewer"], "no": card.get("no", ""),
+                    "v": card["viewer"], "no": card.get("no", ""), "lt": lecture_label(card),
                     "t": int(frame_seconds(entry.get("frame", ""), second)),
                     "k": "slide", "x": text,
                 })
@@ -361,7 +381,7 @@ function run(qs){
   var hits=IDX.filter(function(r){return terms.every(function(t){return r.x.toLowerCase().indexOf(t)>=0;});}).slice(0,120);
   if(!hits.length){box.innerHTML='<div class="count">\u7121\u7b26\u5408\u7d50\u679c</div>';box.classList.add('open');return;}
   var perLecture={};
-  hits.forEach(function(h){var k=h.no||h.v.split('.')[0];perLecture[k]=(perLecture[k]||0)+1;});
+  hits.forEach(function(h){var k=h.lt||h.no||h.v.split('.')[0];perLecture[k]=(perLecture[k]||0)+1;});
   var spread=Object.keys(perLecture).sort().map(function(n){return n+'('+perLecture[n]+')';}).join('\u3000');
   box.innerHTML='<div class="count">'+hits.length+' \u7b46\uff0c\u5206\u5e03\uff1a'+esc(spread)+'</div>'+hits.map(function(h){
     var pos=Math.max(0,h.x.toLowerCase().indexOf(terms[0])-24);
@@ -513,6 +533,7 @@ __all__ = [
     "apply_titles",
     "build",
     "build_card",
+    "lecture_label",
     "triage_line",
     "build_index",
     "card_hrefs",

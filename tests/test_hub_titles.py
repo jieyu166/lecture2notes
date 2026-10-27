@@ -104,7 +104,9 @@ def test_stems_absent_from_the_mapping_keep_derived_values(course: Path) -> None
     cards = {card["stem"]: card for card in hub.collect(course)}
     assert cards[STEM_2]["topic"] == "佔位主題二"
     assert cards[STEM_2]["speaker"] == "講者乙醫師"
-    assert cards[UNNAMED]["topic"] == UNNAMED
+    # A stem no filename pattern reads falls back to the document's title,
+    # not to the bare stem (a field run showed "20241207" in the search spread).
+    assert cards[UNNAMED]["topic"] == "佔位課程第二場"
 
 
 def test_a_broken_titles_file_is_ignored_not_fatal(course: Path) -> None:
@@ -136,3 +138,10 @@ def test_cli_applies_the_override(course: Path) -> None:
     page = (course / hub.HUB_FILENAME).read_text(encoding="utf-8")
     assert stems_in_page(page)[2] == UNNAMED
     assert OVERRIDE_TOPIC in page
+
+
+def test_search_index_names_lectures_by_number_and_topic(course: Path) -> None:
+    cards = hub.collect(course)
+    labels = {hub.lecture_label(card) for card in cards}
+    assert "佔位課程第二場" in labels
+    assert all(label for label in labels)
