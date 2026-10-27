@@ -298,3 +298,14 @@ def test_cli_lines_refuses_legacy(tmp_path):
     result = run_cli(["lines", str(path)])
     assert result.returncode == 2
     assert "migrate" in result.stdout + result.stderr
+
+
+def test_migrate_refuses_a_json_that_is_not_a_lecture(tmp_path):
+    target = tmp_path / "E1.timing-fixes.json"
+    original = '{"fixes": [{"cue": 3, "shift": 0.5}]}'
+    target.write_text(original, encoding="utf-8")
+    result = run_cli(["migrate", str(target)])
+    assert result.returncode == 2
+    assert "not a lecture" in result.stdout + result.stderr
+    assert target.read_text(encoding="utf-8") == original
+    assert not (tmp_path / "E1.timing-fixes.json.bak").exists()

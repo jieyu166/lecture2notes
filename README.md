@@ -496,6 +496,9 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
   筆記，印出分流交辦書。子命令由 18 個變成 20 個。
 - **字幕解析**：接受沒補零或沒有小時的時間碼、WebVTT 檔頭／cue 識別碼／NOTE 區塊／行內標籤；
   新增 `dedupe_cues` 合併重複與捲動式字幕。
+- **`l2n migrate` 拒絕非講座 JSON**：沒有 `segments` 的檔案（例如其他工具的 `*.timing-fixes.json`）
+  不再被包成空的講座骨架，回報後原檔不動（exit 2）。版本號改為 `0.3.0.dev0`，從分支
+  `pip install -U` 才會真的重裝。
 
 > **舊版使用者請升級。** 這一版寫出的 JSON 是 `"schema_version": "2.1"`，舊版 `l2n check json`
 > 只認 `"2.0"`，會回報 `schema_version must be '2.0', got '2.1'`（exit 2）。這代表程式該升級，

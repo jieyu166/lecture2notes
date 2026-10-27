@@ -77,6 +77,10 @@ SEGMENT_ORDER = (
 )
 
 
+class NotALecture(ValueError):
+    """The file is JSON but not a lecture document; nothing was written."""
+
+
 @dataclass
 class MigrationResult:
     """What :func:`migrate_file` did."""
@@ -265,6 +269,13 @@ def migrate_file(path: Union[str, Path]) -> MigrationResult:
     target = Path(path)
     raw = target.read_bytes()
     data = json.loads(raw.decode("utf-8-sig"))
+    if not isinstance(data, Mapping) or not isinstance(data.get("segments"), list) or not data["segments"]:
+        # A sidecar that happens to end in .json (a timing-fix list, a tool's
+        # own state) is not an old lecture. Wrapping it in a lecture skeleton
+        # destroys it and leaves a document that fails every check.
+        raise NotALecture(
+            "%s has no segments; it is not a lecture document, left untouched" % target.name
+        )
     if not is_legacy(data) and data.get("schema_version") == SCHEMA_VERSION:
         return MigrationResult(target, None, False, len(data.get("segments") or []))
 
@@ -281,6 +292,7 @@ def migrate_file(path: Union[str, Path]) -> MigrationResult:
 __all__ = [
     "DEFAULT_PROFILE",
     "MigrationResult",
+    "NotALecture",
     "SEGMENT_ORDER",
     "TOP_LEVEL_ORDER",
     "migrate_file",

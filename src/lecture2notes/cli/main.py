@@ -45,7 +45,7 @@ from lecture2notes.profiles import bootstrap, loader
 from lecture2notes.schema import condense as condense_mod
 from lecture2notes.schema import scaffold as scaffold_mod
 from lecture2notes.schema.io import read_json, write_json_atomic
-from lecture2notes.schema.migrate import migrate_file
+from lecture2notes.schema.migrate import NotALecture, migrate_file
 
 LANG_CHOICES = ("zh", "en", "ja", "auto")
 LANG_REQUIRED_MESSAGE = "--lang is required (zh|en|ja|auto)"
@@ -914,6 +914,9 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         result = migrate_file(path)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         _out.error("migrate：JSON 無法解析 %s（%s）" % (path.name, exc))
+        return exit_codes.ERROR
+    except NotALecture as exc:
+        _out.error("migrate：%s" % exc)
         return exit_codes.ERROR
     if result.changed:
         _out.ok(result.summary)
