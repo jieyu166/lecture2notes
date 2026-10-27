@@ -505,6 +505,9 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
   `frames.json` 的 `timestamp_sec`，`-0445b.png` 這類補抽檔名也讀得懂。
 - **`triage-prompt`**：`--out`（失敗不留檔、錯誤只到 stderr）、`--scope`、`L2N_VAULT`；排除本講座
   自己產生的筆記；英文關鍵字改為整字比對。
+- **`l2n render --media-base-url <網址>`**（或 `L2N_MEDIA_BASE_URL`、overlay `[note] media_base_url`）：
+  骨架裡的時間變成 `[▶ mm:ss](網址/影片#t=秒)`；`## 題目` 直接用每段的 `question`（附講解處連結），
+  不足 8 題用 `questions_zh` 補；新增 `## 分流`；`已知` 段只寫一行並連到既有筆記。課程首頁卡片顯示分流結論。
 - **`l2n migrate` 拒絕非講座 JSON**：沒有 `segments` 的檔案（例如其他工具的 `*.timing-fixes.json`）
   不再被包成空的講座骨架，回報後原檔不動（exit 2）。版本號改為 `0.3.0.dev0`，從分支
   `pip install -U` 才會真的重裝。

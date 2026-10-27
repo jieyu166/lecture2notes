@@ -542,8 +542,18 @@ def cmd_render(args: argparse.Namespace) -> int:
     if note_path.exists() and not getattr(args, "force", False):
         _out.stage("render", "skip (%s exists; use --force)" % note_path.name)
         return exit_codes.OK
-    render.write_skeleton(note_path, data, style=style, stem=path.stem, profile=profile)
-    _out.ok("render -> %s (style %s, profile %s)" % (note_path, style, profile))
+    note_settings = loader.outputs(profile).get("note")
+    base = (
+        getattr(args, "media_base_url", None)
+        or os.environ.get("L2N_MEDIA_BASE_URL")
+        or (note_settings.get("media_base_url") if isinstance(note_settings, dict) else None)
+    )
+    render.write_skeleton(
+        note_path, data, style=style, stem=path.stem, profile=profile, media_base_url=base
+    )
+    _out.ok("render -> %s (style %s, profile %s%s)" % (
+        note_path, style, profile, ", timecode links" if base else ""
+    ))
     return exit_codes.OK
 
 
@@ -1699,6 +1709,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("json_file", nargs="?", help="正式 JSON 路徑")
     p.add_argument(
         "--style", choices=["faithful", "concise"], default=None, help="引用密度風格"
+    )
+    p.add_argument(
+        "--media-base-url", default=None,
+        help="影片所在資料夾的網址；時間碼會變成指向影片該秒的連結（網址/影片#t=秒）"
+             "（預設取 L2N_MEDIA_BASE_URL 或 overlay 的 [note] media_base_url）",
     )
     p.add_argument(
         "--expand-prompt", action="store_true", help="印出 LLM 擴寫指令包後結束"

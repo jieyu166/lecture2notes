@@ -186,8 +186,21 @@ def build_card(
         "minutes": round(float(segments[-1].get("end_sec") or 0) / 60) if segments else 0,
         "summary": (data.get("overall_summary_zh") or "")[:150],
         "takeaways": data.get("takeaways_zh") or [],
+        "triage": triage_line(data),
     })
     return card
+
+
+def triage_line(data: Mapping[str, Any]) -> str:
+    """``只看新知段（必看 14 分）``, from schema 2.1 ``triage_overall``; '' without it."""
+    overall = data.get("triage_overall")
+    if not isinstance(overall, Mapping) or not overall.get("verdict"):
+        return ""
+    verdict = str(overall["verdict"])
+    minutes = overall.get("est_minutes")
+    if isinstance(minutes, (int, float)) and not isinstance(minutes, bool) and verdict != "跳過":
+        return "%s（必看 %s 分）" % (verdict, ("%.1f" % minutes).rstrip("0").rstrip("."))
+    return verdict
 
 
 def collect(folder: Path, require_viewer: bool = True) -> List[Dict[str, Any]]:
@@ -413,7 +426,7 @@ def render(
             '<a class="card" href="%s" data-stem="%s">%s<div class="body">'
             '<h2><span class="no">%s</span>%s</h2>'
             '<div class="who">%s</div><div class="sum">%s</div>'
-            '<div class="stat">%d 分　·　%d 段　·　%d 張投影片</div></div></a>'
+            '<div class="stat">%d 分　·　%d 段　·　%d 張投影片%s</div></div></a>'
             % (
                 html.escape(quote(str(card["viewer"])), quote=True),
                 html.escape(str(card.get("stem") or ""), quote=True),
@@ -425,6 +438,7 @@ def render(
                 int(card.get("minutes") or 0),
                 len(card.get("segments") or []),
                 len(card.get("frames") or []),
+                ("　·　分流：%s" % html.escape(card["triage"])) if card.get("triage") else "",
             )
         )
 
@@ -499,6 +513,7 @@ __all__ = [
     "apply_titles",
     "build",
     "build_card",
+    "triage_line",
     "build_index",
     "card_hrefs",
     "card_sort_key",

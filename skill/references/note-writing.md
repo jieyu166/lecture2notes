@@ -102,6 +102,10 @@ note: ai_draft_remaining=0
 | 講者說「通常」，筆記寫「一定」；相鄰兩句被接成因果 | **抓不到**。規範 §2.5，交給 `l2n review-prompt` 的獨立驗收 |
 | 譯名不是台灣用法（蛛網膜、頜、thrombosis 譯成栓塞） | radiology profile 會抓（R12，清單在 `outputs.toml`）；generic 不帶清單 |
 
+schema 2.1 的骨架：`## 分流` 照抄不改寫；`已知` 段只留那一行與連結，不擴寫；`## 題目`
+裡已附答案的題目來自 JSON 的 `segments[].question`，答案不改，只補草稿題的答案；
+`[▶ mm:ss](...)` 時間碼連結保留原樣（細節見 frames-and-notes.md「schema 2.1 文件的骨架」）。
+
 1.4 新增的三條機器規則：R12 禁用譯名、R13 影格說明裡的「推測／推斷」、R14 名詞小辭典
 （`student`／`public` 讀者缺這一節，或小辭典裡寫了數值閾值）。R5、R8 也開始掃 `# 閱片`；
 R9 要求每一題都有自己的 `> [!answer]-`。細節見規範「機器可檢查」。

@@ -1165,7 +1165,11 @@ def check_note_stage(
         effective_profile = loader.BUILTIN_PROFILE
 
     text = note_path.read_text(encoding="utf-8", errors="replace")
-    lines = note_lines(text)
+    # A timecode link is read as its label: `[▶ 12:05](<url>#t=725)` is the
+    # time 12:05 to every rule, whether or not the note was rendered with a
+    # media base URL, and the URL itself (a course folder, a dated file name)
+    # is neither prose nor personal data.
+    lines = [render.TIME_LINK.sub(r"\1", line) for line in note_lines(text)]
 
     # The note records the contract it was written to. Without `--style`, that
     # is a better answer than the profile's default: the profile says what the
@@ -1384,9 +1388,17 @@ def _rule_unexpanded(
         if "note" in skeleton_regions else []
     )
     unexpanded = 0
+    known = {
+        position for position, segment in enumerate(data.get("segments") or [])
+        if isinstance(segment, Mapping) and render.novelty_of(segment) == "已知"
+    }
     for position, (_title, start, end) in enumerate(mine):
         if position >= len(theirs):
             break
+        if position in known:
+            # A segment the reader already knows is one line and a link on
+            # purpose; leaving it unexpanded is the instruction, not residue.
+            continue
         _, other_start, other_end = theirs[position]
         ratio = residual_ratio(
             lines[start:end], skeleton_lines[other_start:other_end]

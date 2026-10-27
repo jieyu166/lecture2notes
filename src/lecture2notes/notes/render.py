@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from lecture2notes.notes import guideline
 from lecture2notes.profiles import loader
@@ -366,21 +366,107 @@ def bullet_items(segment: Mapping[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
-def _timestamp_suffix(value: Any) -> str:
-    stamp = clock(value)
+# -- timecode links (schema 2.1) --------------------------------------------
+# With a media base URL, every time the skeleton prints becomes a link that
+# opens the video at that second (an MP4 media fragment, ``#t=<seconds>``):
+# ``[▶ 12:05](<base>/<video>#t=725)``. The base URL is never in this package:
+# it comes from ``--media-base-url``, ``L2N_MEDIA_BASE_URL`` or the overlay's
+# ``[note] media_base_url``. Without one, times print as plain text, exactly as
+# before. `check note` reads a link back as its label, so every rule sees the
+# same text whichever way the note was rendered.
+
+#: The visible part of a timecode link, and what `check note` reduces it to.
+TIME_LINK = re.compile(r"\[▶\s*([^\]]*)\]\([^)\s]*\)")
+
+
+def short_clock(seconds: Any) -> str:
+    """``mm:ss``, or ``h:mm:ss`` past an hour; empty when there is no number."""
+    try:
+        total = int(float(seconds))
+    except (TypeError, ValueError):
+        return ""
+    if total < 0:
+        return ""
+    hours, rest = divmod(total, 3600)
+    if hours:
+        return "%d:%02d:%02d" % (hours, rest // 60, rest % 60)
+    return "%02d:%02d" % (rest // 60, rest % 60)
+
+
+def video_url(data: Mapping[str, Any], base: Optional[str]) -> Optional[str]:
+    """``<base>/<source.video>``, URL-quoted; None without a base or a video."""
+    from urllib.parse import quote
+
+    if not base:
+        return None
+    source = data.get("source") if isinstance(data.get("source"), Mapping) else {}
+    name = text_of(source.get("video")) or ("%s.mp4" % text_of(data.get("stem")))
+    return "%s/%s" % (base.rstrip("/"), quote(Path(name).name))
+
+
+def time_link(seconds: Any, url: Optional[str], label: str = "") -> str:
+    """``[▶ label mm:ss](url#t=s)``, or the bare ``mm:ss`` (or clock) without a URL."""
+    if url is None:
+        stamp = clock(seconds)
+        return ("%s %s" % (label, stamp)).strip() if stamp else ""
+    stamp = short_clock(seconds)
+    if not stamp:
+        return ""
+    text = ("%s %s" % (label, stamp)).strip()
+    return "[▶ %s](%s#t=%d)" % (text, url, int(float(seconds)))
+
+
+def _timestamp_suffix(value: Any, url: Optional[str] = None) -> str:
+    stamp = time_link(value, url)
     return " (%s)" % stamp if stamp else ""
 
 
-def render_segment(
-    segment: Mapping[str, Any], position: int, style: str = "concise"
-) -> List[str]:
-    """One ``## n、title`` section: embed, summary, quotes, bullets, in order."""
+def novelty_of(segment: Mapping[str, Any]) -> str:
+    triage = segment.get("triage")
+    return text_of(triage.get("novelty")) if isinstance(triage, Mapping) else ""
+
+
+#: The one line a segment the reader already knows gets instead of a body.
+KNOWN_LINE = "已知，不重寫：見 %s。%s"
+
+
+def render_known_segment(segment: Mapping[str, Any], position: int, url: Optional[str]) -> List[str]:
+    """A 已知 segment: heading, time, one line pointing at the note that covers it."""
+    triage = segment.get("triage") if isinstance(segment.get("triage"), Mapping) else {}
+    notes = "、".join(strings_of(triage.get("related_notes"))) or "既有筆記"
+    reason = text_of(triage.get("reason"))
     lines = ["## %d、%s" % (position, text_of(segment.get("title")))]
-    span = "%s - %s" % (
-        clock(segment.get("start_sec")), clock(segment.get("end_sec"))
-    )
-    if span.strip(" -"):
-        lines.extend(["", "(%s)" % span])
+    span = _span(segment, url)
+    if span:
+        lines.extend(["", span])
+    lines.extend(["", KNOWN_LINE % (notes, ("（%s）" % reason) if reason else "")])
+    return lines
+
+
+def _span(segment: Mapping[str, Any], url: Optional[str]) -> str:
+    start = time_link(segment.get("start_sec"), url)
+    end = short_clock(segment.get("end_sec")) if url else clock(segment.get("end_sec"))
+    if not start and not end:
+        return ""
+    return "(%s - %s)" % (start, end)
+
+
+def render_segment(
+    segment: Mapping[str, Any], position: int, style: str = "concise",
+    url: Optional[str] = None,
+) -> List[str]:
+    """One ``## n、title`` section: embed, summary, quotes, bullets, in order.
+
+    A segment triaged 已知 gets one line and a link to the note that already
+    covers it instead: rewriting what the reader knows is the cost triage is
+    there to remove.
+    """
+    if novelty_of(segment) == "已知":
+        return render_known_segment(segment, position, url)
+    lines = ["## %d、%s" % (position, text_of(segment.get("title")))]
+    span = _span(segment, url)
+    if span:
+        lines.extend(["", span])
 
     frame = segment.get("frame")
     if isinstance(frame, str) and frame:
@@ -395,7 +481,7 @@ def render_segment(
         quotes = quotes[:1]
     for quote in quotes:
         lines.extend([
-            "", "> 「%s」%s" % (quote["text"], _timestamp_suffix(quote.get("t")))
+            "", "> 「%s」%s" % (quote["text"], _timestamp_suffix(quote.get("t"), url))
         ])
 
     bullets = bullet_items(segment)
@@ -406,8 +492,10 @@ def render_segment(
         for bullet in bullets:
             if bullet["kind"] == "quote":
                 lines.append(
-                    "- 「%s」%s" % (bullet["text"], _timestamp_suffix(bullet.get("t")))
+                    "- 「%s」%s" % (bullet["text"], _timestamp_suffix(bullet.get("t"), url))
                 )
+            elif url and bullet.get("t") is not None:
+                lines.append("- %s%s" % (bullet["text"], _timestamp_suffix(bullet.get("t"), url)))
             else:
                 lines.append("- %s" % bullet["text"])
     return lines
@@ -545,16 +633,197 @@ def question_drafts(data: Mapping[str, Any]) -> List[str]:
     return drafts
 
 
-def render_questions(data: Mapping[str, Any]) -> List[str]:
-    """The 題目 section: drafted questions, each with a collapsed answer."""
-    lines: List[str] = [QUESTION_NOTE, "", AI_DRAFT_MARK, ""]
-    for number, question in enumerate(question_drafts(data), 1):
+#: With per-segment questions (schema 2.1), the section carries at least this
+#: many: one per segment, then the cross-segment ``questions_zh``, then drafts.
+SEGMENT_QUESTION_MIN = 8
+
+
+def segment_questions(data: Mapping[str, Any]) -> List[Tuple[Mapping[str, Any], Mapping[str, Any]]]:
+    """``(segment, question)`` for every segment that carries a 2.1 question."""
+    segments = data.get("segments") if isinstance(data.get("segments"), list) else []
+    out = []
+    for segment in segments:
+        if not isinstance(segment, Mapping):
+            continue
+        question = segment.get("question")
+        if isinstance(question, Mapping) and text_of(question.get("q")).strip():
+            out.append((segment, question))
+    return out
+
+
+def render_questions(data: Mapping[str, Any], url: Optional[str] = None) -> List[str]:
+    """The 題目 section, each question with a collapsed answer.
+
+    A 2.1 document already has one question per segment with its answer and
+    the second the speaker explains it; those come first, answered, with a
+    link back to that second. Below :data:`SEGMENT_QUESTION_MIN`, the
+    cross-segment ``questions_zh`` and then drafts fill the rest, and one
+    inference question is always there. A document without segment questions
+    keeps the drafted section it always had.
+    """
+    answered = segment_questions(data)
+    if not answered:
+        lines: List[str] = [QUESTION_NOTE, "", AI_DRAFT_MARK, ""]
+        for number, question in enumerate(question_drafts(data), 1):
+            if number > 1:
+                lines.append("")
+            lines.append("%d. %s" % (number, question))
+            lines.append("%s%s 答案" % (ANSWER_INDENT, guideline.ANSWER_CALLOUT))
+            lines.append("%s> %s" % (ANSWER_INDENT, ANSWER_PLACEHOLDER))
+        return lines
+
+    items: List[Tuple[str, str]] = []
+    for segment, question in answered:
+        where = time_link(question.get("answer_sec"), url, "講解處")
+        answer = text_of(question.get("a")).strip() or ANSWER_PLACEHOLDER
+        items.append((
+            text_of(question.get("q")).strip(),
+            "%s%s" % (answer, ("（%s）" % where) if where else ""),
+        ))
+    drafted = False
+    for text in explicit_questions(data):
+        if len(items) >= SEGMENT_QUESTION_MIN:
+            break
+        items.append((text, ANSWER_PLACEHOLDER))
+        drafted = True
+    if len(items) < SEGMENT_QUESTION_MIN:
+        for text in question_drafts(data):
+            if len(items) >= SEGMENT_QUESTION_MIN:
+                break
+            if text not in (q for q, _ in items):
+                items.append((text, ANSWER_PLACEHOLDER))
+                drafted = True
+    if not any(q.startswith(guideline.INFERENCE_MARK) for q, _ in items):
+        items.append((_inference_draft(segment_titles(data)), ANSWER_PLACEHOLDER))
+        drafted = True
+
+    lines = [QUESTION_NOTE, ""]
+    if drafted:
+        lines.extend([AI_DRAFT_MARK, ""])
+    for number, (question, answer) in enumerate(items, 1):
         if number > 1:
             lines.append("")
         lines.append("%d. %s" % (number, question))
         lines.append("%s%s 答案" % (ANSWER_INDENT, guideline.ANSWER_CALLOUT))
-        lines.append("%s> %s" % (ANSWER_INDENT, ANSWER_PLACEHOLDER))
+        lines.append("%s> %s" % (ANSWER_INDENT, answer))
     return lines
+
+
+# -- triage (schema 2.1) -------------------------------------------------------
+TRIAGE_HEADING = "## 分流"
+
+
+def _segment_minutes(segment: Mapping[str, Any]) -> float:
+    try:
+        return (float(segment.get("end_sec")) - float(segment.get("start_sec"))) / 60.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _minutes(value: float) -> str:
+    return ("%.1f" % value).rstrip("0").rstrip(".") if value < 10 else "%d" % round(value)
+
+
+def render_triage(data: Mapping[str, Any], url: Optional[str] = None) -> List[str]:
+    """``## 分流``: the verdict, the must-watch segments and one row per segment.
+
+    Empty when the document carries no triage, so a template that asks for it
+    loses nothing on an older document.
+    """
+    overall = data.get("triage_overall")
+    segments = [s for s in (data.get("segments") or []) if isinstance(s, Mapping)]
+    rows = [s for s in segments if isinstance(s.get("triage"), Mapping)]
+    if not isinstance(overall, Mapping) and not rows:
+        return []
+    lines = [TRIAGE_HEADING, ""]
+    if isinstance(overall, Mapping):
+        total = sum(_segment_minutes(s) for s in segments)
+        try:
+            est = float(overall.get("est_minutes"))
+        except (TypeError, ValueError):
+            est = 0.0
+        saved = total - est
+        lines.append("**%s**（必看約 %s 分鐘／全片 %s 分鐘%s）" % (
+            text_of(overall.get("verdict")) or "-", _minutes(est), _minutes(total),
+            "，省下約 %s 分鐘" % _minutes(saved) if saved > 0.5 else "",
+        ))
+        must = [i for i in (overall.get("must_watch") or []) if isinstance(i, int)]
+        picks = []
+        for index in must:
+            if 1 <= index <= len(segments):
+                segment = segments[index - 1]
+                link = time_link(segment.get("start_sec"), url)
+                picks.append("第 %d 段「%s」%s" % (
+                    index, text_of(segment.get("title")), (" " + link) if link else ""
+                ))
+        if picks:
+            lines.extend(["", "必看：" + "；".join(picks)])
+        reason = text_of(overall.get("reason"))
+        if reason:
+            lines.extend(["", "> %s" % reason])
+    if rows:
+        lines.extend(["", "| 段 | 時間 | 判斷 | 理由 | 既有筆記 |", "| --- | --- | --- | --- | --- |"])
+        for position, segment in enumerate(segments, 1):
+            triage = segment.get("triage")
+            if not isinstance(triage, Mapping):
+                continue
+            lines.append("| %d %s | %s | %s | %s | %s |" % (
+                position, text_of(segment.get("title")).replace("|", "／"),
+                time_link(segment.get("start_sec"), url) or "-",
+                text_of(triage.get("novelty")) or "-",
+                text_of(triage.get("reason")).replace("|", "／") or "-",
+                "、".join(strings_of(triage.get("related_notes"))) or "-",
+            ))
+    return lines
+
+
+# -- Summary anchors -------------------------------------------------------------
+#: How alike a takeaway and a segment must be (character-bigram overlap) before
+#: the takeaway gets that segment's link, and by how much the best segment must
+#: beat the runner-up. A takeaway that spans the lecture gets no link rather
+#: than a wrong one.
+ANCHOR_MIN_SCORE = 0.12
+ANCHOR_MARGIN = 1.25
+
+
+def _bigrams(text: str) -> set:
+    compact = re.sub(r"\s+", "", text.lower())
+    return {compact[i:i + 2] for i in range(len(compact) - 1)}
+
+
+def takeaway_anchor(takeaway: str, segments: Sequence[Any]) -> Optional[float]:
+    """The second a takeaway was said, when one segment clearly owns it.
+
+    Within that segment, a timed bullet that overlaps the takeaway better than
+    the segment as a whole gives its own ``t``; otherwise the segment's start.
+    """
+    wanted = _bigrams(takeaway)
+    if not wanted:
+        return None
+    scored = []
+    for segment in segments:
+        if not isinstance(segment, Mapping):
+            continue
+        text = " ".join([text_of(segment.get("title")), text_of(segment.get("summary_zh"))]
+                        + [b["text"] for b in bullet_items(segment)])
+        have = _bigrams(text)
+        score = len(wanted & have) / float(len(wanted | have) or 1)
+        scored.append((score, segment))
+    scored.sort(key=lambda item: -item[0])
+    if not scored or scored[0][0] < ANCHOR_MIN_SCORE:
+        return None
+    if len(scored) > 1 and scored[0][0] < scored[1][0] * ANCHOR_MARGIN:
+        return None
+    best = scored[0][1]
+    timed = [b for b in bullet_items(best) if isinstance(b.get("t"), (int, float))]
+    if timed:
+        top = max(timed, key=lambda b: len(wanted & _bigrams(b["text"])))
+        if len(wanted & _bigrams(top["text"])) >= len(wanted) * 0.5:
+            return float(top["t"])
+    try:
+        return float(best.get("start_sec"))
+    except (TypeError, ValueError):
+        return None
 
 
 #: Columns of one speaker-outline row, separated so a reader scans down one.
@@ -782,8 +1051,13 @@ def render_skeleton(
     profile: str = loader.BUILTIN_PROFILE,
     template: Optional[str] = None,
     frontmatter: Optional[str] = None,
+    media_base_url: Optional[str] = None,
 ) -> str:
     """The deterministic skeleton note, projected only from *data*.
+
+    ``media_base_url`` turns every printed time into a link that opens the
+    video at that second; the folder the video is served from is the caller's
+    to know, never this package's.
 
     No clock is read, no model is called, and nothing outside *data* and the
     profile's template files reaches the output, so rendering the same document
@@ -801,8 +1075,13 @@ def render_skeleton(
     segments = data.get("segments") if isinstance(data.get("segments"), list) else []
     takeaways = strings_of(data.get("takeaways_zh"))
 
+    url = video_url(data, media_base_url)
     evergreen = "**「%s」**" % takeaways[0] if takeaways else "**「（待擴寫）」**"
-    summary = "\n".join("- %s" % item for item in takeaways) or "- （待擴寫）"
+    summary_items = []
+    for item in takeaways:
+        at = takeaway_anchor(item, segments) if url else None
+        summary_items.append("- %s%s" % (item, _timestamp_suffix(at, url) if at is not None else ""))
+    summary = "\n".join(summary_items) or "- （待擴寫）"
     editorial = render_editorial(data)
     if editorial:
         summary = "\n".join([summary, ""] + editorial)
@@ -815,7 +1094,7 @@ def render_skeleton(
             continue
         if section_lines:
             section_lines.append("")
-        section_lines.extend(render_segment(segment, position, chosen))
+        section_lines.extend(render_segment(segment, position, chosen, url))
 
     context = {
         "frontmatter": render_frontmatter(data, frontmatter, stem, profile),
@@ -826,7 +1105,8 @@ def render_skeleton(
         "summary": summary,
         "segments": "\n".join(section_lines) or "（尚無段落）",
         "references": "\n".join(render_references(data)),
-        "questions": "\n".join(render_questions(data)),
+        "questions": "\n".join(render_questions(data, url)),
+        "triage": "\n".join(render_triage(data, url)),
         "verification": "\n".join(render_verification(takeaways)),
         "title": text_of(data.get("title")),
         "glossary": glossary,
@@ -836,8 +1116,24 @@ def render_skeleton(
     text = fill(body, context)
     if glossary and not placed:
         text = insert_glossary(text, glossary)
+    triage = context["triage"]
+    if triage and not re.search(r"\{\{\s*triage\s*\}\}", body):
+        text = insert_triage(text, triage)
     text = insert_style_marker(text, chosen)
     return text.rstrip("\n") + "\n"
+
+
+def insert_triage(text: str, triage: str) -> str:
+    """Put ``## 分流`` right before ``# Note (layer 1-3)``, or at the end.
+
+    For an overlay template written before 2.1 that has no ``{{triage}}``:
+    a note about whether to watch belongs before the notes on what was said.
+    """
+    marker = "\n# Note (layer 1-3)"
+    at = text.find(marker)
+    if at < 0:
+        return text.rstrip("\n") + "\n\n" + triage + "\n"
+    return text[:at] + "\n" + triage + "\n" + text[at:]
 
 
 def write_skeleton(path: Path, data: Mapping[str, Any], **kwargs: Any) -> Path:
@@ -902,6 +1198,17 @@ __all__ = [
     "render_references",
     "render_segment",
     "render_skeleton",
+    "render_triage",
+    "insert_triage",
+    "segment_questions",
+    "short_clock",
+    "takeaway_anchor",
+    "time_link",
+    "video_url",
+    "TIME_LINK",
+    "TRIAGE_HEADING",
+    "SEGMENT_QUESTION_MIN",
+    "KNOWN_LINE",
     "render_speaker_outline",
     "render_summary_slots",
     "render_verification",
