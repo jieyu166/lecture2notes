@@ -243,7 +243,7 @@ def _declared_version() -> str:
 def test_the_project_is_at_0_3_0_dev():
     # Bumped with schema 2.1: an unchanged number let `pip install -U` from the
     # branch skip the reinstall and leave the 2.0-only l2n in place.
-    assert _declared_version() == "0.3.0.dev5"
+    assert _declared_version() == "0.3.0.dev6"
 
 
 def test_the_source_fallback_matches_pyproject():

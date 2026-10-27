@@ -512,6 +512,9 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
   R7 放過 PMID 與一般敘述；新增 R15（「」引文要找得到出處）與 `check json` 的 `frame_ocr_url_id`；
   `l2n render --refresh` 只更新 JSON 衍生區塊（Summary 重點、分流、References）並留 `.bak`；
   `l2n --where` 印出實際載入的安裝；課程首頁搜尋改用講題稱呼各場；擴寫交辦書把獨立驗收列為必做。
+- **第六輪實地回報**：備份不再覆蓋舊的 `.bak`（改加時間戳）；`render --upgrade` 會替「就是 JSON 重點投影」的
+  舊 Summary 加 fence（自己寫的不加，並說明）；新增 `render --embed-names`（嵌圖只寫檔名，筆記放進 vault 不破圖，
+  R2 也照檔名找）；`number_unsupported` 略過題號（第 N 題、Q10、N 號），沒有投影片 OCR 時改說「無 OCR 可比對」。
 - **影像串流晚於容器起點**（實檔：影像 3.8 秒、音訊與容器 0）：PySceneDetect 從第一個影像畫面起算，
   換頁時間因此早了 3.8 秒、抽到的是換頁前的畫面；現在改用容器時間軸。之前產生的 `frames.json` 要用
   `l2n frames --force` 重抓。`number_unsupported` 對整條標明「投影片」的條列不再逐數字報。

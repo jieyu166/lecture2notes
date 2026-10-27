@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Union
 
-from lecture2notes.schema.io import write_json_atomic
+from lecture2notes.schema.io import backup_path, write_json_atomic
 from lecture2notes.schema.model import (
     BULLET_KINDS,
     SCHEMA_VERSION,
@@ -352,7 +352,7 @@ def migrate_file(path: Union[str, Path]) -> MigrationResult:
     if not is_legacy(data) and data.get("schema_version") == SCHEMA_VERSION and not repairs:
         return MigrationResult(target, None, False, len(data.get("segments") or []))
 
-    backup = target.with_name(target.name + ".bak")
+    backup = backup_path(target)
     backup.write_bytes(raw)
     write_json_atomic(target, upgraded)
     return MigrationResult(target, backup, True, len(upgraded.get("segments") or []), repairs)

@@ -45,7 +45,7 @@ from lecture2notes.outputs.plan import plan_for
 from lecture2notes.profiles import bootstrap, loader
 from lecture2notes.schema import condense as condense_mod
 from lecture2notes.schema import scaffold as scaffold_mod
-from lecture2notes.schema.io import read_json, write_json_atomic
+from lecture2notes.schema.io import backup_path, read_json, write_json_atomic
 from lecture2notes.schema.migrate import NotALecture, migrate_file
 
 LANG_CHOICES = ("zh", "en", "ja", "auto")
@@ -545,6 +545,9 @@ def cmd_render(args: argparse.Namespace) -> int:
         or os.environ.get("L2N_MEDIA_BASE_URL")
         or (note_settings.get("media_base_url") if isinstance(note_settings, dict) else None)
     )
+    embed_names = bool(getattr(args, "embed_names", False)) or bool(
+        isinstance(note_settings, dict) and note_settings.get("embed_names")
+    )
     offset = 0.0
     if base:
         source = data.get("source") if isinstance(data.get("source"), dict) else {}
@@ -561,13 +564,13 @@ def cmd_render(args: argparse.Namespace) -> int:
         marker_style = getattr(args, "style", None) or render.read_style_marker(existing) or "concise"
         fresh = render.render_skeleton(
             data, style=marker_style, stem=path.stem, profile=profile, media_base_url=base,
-            media_offset=offset,
+            media_offset=offset, embed_names=embed_names,
         )
         text, added, notes = render.upgrade_note(existing, fresh, marker_style)
         if text == existing:
             _out.skip("render --upgrade: %s already has every section" % note_path.name)
         else:
-            backup = note_path.with_name(note_path.name + ".bak")
+            backup = backup_path(note_path)
             backup.write_text(existing, encoding="utf-8", newline="\n")
             note_path.write_text(text, encoding="utf-8", newline="\n")
             _out.ok("render --upgrade -> %s (added: %s; backup %s)" % (
@@ -587,13 +590,13 @@ def cmd_render(args: argparse.Namespace) -> int:
         existing = note_path.read_text(encoding="utf-8")
         fresh = render.render_skeleton(
             data, style=style, stem=path.stem, profile=profile, media_base_url=base,
-            media_offset=offset,
+            media_offset=offset, embed_names=embed_names,
         )
         text, replaced, skipped = render.refresh_note(existing, fresh)
         if text == existing:
             _out.skip("render --refresh: %s already current" % note_path.name)
         else:
-            backup = note_path.with_name(note_path.name + ".bak")
+            backup = backup_path(note_path)
             backup.write_text(existing, encoding="utf-8", newline="\n")
             note_path.write_text(text, encoding="utf-8", newline="\n")
             _out.ok("render --refresh -> %s (replaced: %s; backup %s)" % (
@@ -609,7 +612,7 @@ def cmd_render(args: argparse.Namespace) -> int:
         return exit_codes.OK
     render.write_skeleton(
         note_path, data, style=style, stem=path.stem, profile=profile, media_base_url=base,
-        media_offset=offset,
+        media_offset=offset, embed_names=embed_names,
     )
     _out.ok("render -> %s (style %s, profile %s%s)" % (
         note_path, style, profile, ", timecode links" if base else ""
@@ -1778,6 +1781,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("json_file", nargs="?", help="正式 JSON 路徑")
     p.add_argument(
         "--style", choices=["faithful", "concise"], default=None, help="引用密度風格"
+    )
+    p.add_argument(
+        "--embed-names", action="store_true",
+        help="嵌圖只寫檔名（![[x.png]]），讓 Obsidian 在整個 vault 找；筆記不放在講座資料夾時用",
     )
     p.add_argument(
         "--upgrade", action="store_true",

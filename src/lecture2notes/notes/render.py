@@ -473,7 +473,7 @@ def _span(segment: Mapping[str, Any], url: Optional[str]) -> str:
 
 def render_segment(
     segment: Mapping[str, Any], position: int, style: str = "concise",
-    url: Optional[str] = None,
+    url: Optional[str] = None, embed_names: bool = False,
 ) -> List[str]:
     """One ``## n、title`` section: embed, summary, quotes, bullets, in order.
 
@@ -490,7 +490,10 @@ def render_segment(
 
     frame = segment.get("frame")
     if isinstance(frame, str) and frame:
-        lines.extend(["", "![[%s]]" % frame.replace("\\", "/")])
+        # embed_names: Obsidian resolves a bare file name anywhere in the vault,
+        # so a note filed away from its lecture folder keeps its pictures.
+        target = frame.replace("\\", "/")
+        lines.extend(["", "![[%s]]" % (target.rsplit("/", 1)[-1] if embed_names else target)])
 
     summary = text_of(segment.get("summary_zh"))
     if summary:
@@ -1073,6 +1076,7 @@ def render_skeleton(
     frontmatter: Optional[str] = None,
     media_base_url: Optional[str] = None,
     media_offset: float = 0.0,
+    embed_names: bool = False,
 ) -> str:
     """The deterministic skeleton note, projected only from *data*.
 
@@ -1116,7 +1120,7 @@ def render_skeleton(
             continue
         if section_lines:
             section_lines.append("")
-        section_lines.extend(render_segment(segment, position, chosen, url))
+        section_lines.extend(render_segment(segment, position, chosen, url, embed_names))
 
     context = {
         "frontmatter": render_frontmatter(data, frontmatter, stem, profile),
@@ -1242,6 +1246,51 @@ def _fresh_section(fresh_lines: Sequence[str], heading: str) -> List[str]:
     return section
 
 
+#: Share of a Summary list that must match the document's takeaways, both
+#: ways, before --upgrade treats it as the projection and fences it.
+SUMMARY_MATCH_SHARE = 0.8
+
+
+def _bullet_key(line: str) -> str:
+    text = TIME_LINK.sub("", line)
+    text = re.sub(r"\(\s*\)|\(\s*[\d:]+\s*\)", "", text)
+    text = re.sub(r"^\s*[-*+]\s*", "", text).replace("**", "")
+    return re.sub(r"\s+", "", text)
+
+
+def fence_projected_summary(text: str, fresh: str) -> Tuple[str, bool]:
+    """Fence an unfenced Summary list that is the takeaway projection.
+
+    Only a contiguous bullet list whose items match the fresh skeleton's
+    takeaways (at least :data:`SUMMARY_MATCH_SHARE` either way) is fenced; a
+    Summary the writer wrote is theirs, and fencing it would let --refresh
+    overwrite it.
+    """
+    if _block_span(text, "summary") is not None:
+        return text, False
+    source = _block_span(fresh, "summary")
+    if source is None:
+        return text, False
+    wanted = [_bullet_key(l) for l in fresh[source[0]:source[1]].split("\n") if l.lstrip().startswith("- ")]
+    lines = text.split("\n")
+    start = _heading_line(lines, "# Summary")
+    if start < 0 or not wanted:
+        return text, False
+    stop = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("#")), len(lines))
+    first = next((i for i in range(start + 1, stop) if lines[i].lstrip().startswith("- ")), None)
+    if first is None:
+        return text, False
+    last = first
+    while last + 1 < stop and lines[last + 1].lstrip().startswith("- "):
+        last += 1
+    have = [_bullet_key(l) for l in lines[first:last + 1]]
+    hits = sum(1 for key in have if key in wanted)
+    if hits < SUMMARY_MATCH_SHARE * len(wanted) or hits < SUMMARY_MATCH_SHARE * len(have):
+        return text, False
+    lines[first:last + 1] = [MANAGED_BEGIN % "summary"] + lines[first:last + 1] + [MANAGED_END % "summary"]
+    return "\n".join(lines), True
+
+
 def upgrade_note(existing: str, fresh: str, style: str) -> Tuple[str, List[str], List[str]]:
     """Bring a note written to an older skeleton up to the current one.
 
@@ -1295,6 +1344,13 @@ def upgrade_note(existing: str, fresh: str, style: str) -> Tuple[str, List[str],
     if triage and _block_span(text, "triage") is None and TRIAGE_HEADING not in text:
         text = insert_triage(text, fresh[triage[0]:triage[1]])
         added.append(TRIAGE_HEADING)
+
+    text, fenced = fence_projected_summary(text, fresh)
+    if fenced:
+        added.append("Summary fence (the list is the takeaway projection)")
+    elif _block_span(text, "summary") is None and "# Summary" in text:
+        notes.append("Summary holds the writer's own list, so it is not fenced and "
+                     "--refresh leaves it alone; sync it by hand when takeaways change")
 
     if read_style_marker(text) is None:
         text = insert_style_marker(text, style)

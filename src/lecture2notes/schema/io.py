@@ -30,6 +30,28 @@ JSON_INDENT = 2
 BOM = b"\xef\xbb\xbf"
 
 
+def backup_path(path: Union[str, Path]) -> Path:
+    """Where to keep the previous version of ``path`` without losing an older one.
+
+    ``<name>.bak`` when it is free; otherwise ``<name>.<YYYYmmdd-HHMMSS>.bak``
+    (with a counter if even that exists). A backup that overwrites the last
+    backup is how a months-old original disappears on the second migration.
+    """
+    from datetime import datetime
+
+    target = Path(path)
+    plain = target.with_name(target.name + ".bak")
+    if not plain.exists():
+        return plain
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    candidate = target.with_name("%s.%s.bak" % (target.name, stamp))
+    counter = 1
+    while candidate.exists():
+        candidate = target.with_name("%s.%s-%d.bak" % (target.name, stamp, counter))
+        counter += 1
+    return candidate
+
+
 def dumps(data: Any) -> str:
     """The canonical serialisation, without writing anything."""
     return json.dumps(data, ensure_ascii=False, indent=JSON_INDENT, allow_nan=False)
