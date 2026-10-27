@@ -1,4 +1,4 @@
-"""Upgrade a 1.x lecture document to canonical schema v2.
+"""Upgrade a 1.x or 2.0 lecture document to the current canonical schema.
 
 A 1.x document has no ``schema_version``. It is not wrong, it is simply older:
 bullets are bare strings with no time and no kind, there is no record of which
@@ -6,6 +6,10 @@ subtitle or engine produced it, and the correction table lives beside the file
 instead of inside it. Rather than teaching every reader both shapes forever,
 the shapes are collapsed here once, in one direction, with the original kept
 next to it as ``<file>.bak``.
+
+A 2.0 document is already the right shape: 2.1 only added optional fields
+(``lines``, ``triage_overall``, ``segments[].question``, ``segments[].triage``),
+so upgrading one changes the version label and nothing else.
 
 Nothing is thrown away. Keys this schema does not know about are carried over
 unchanged after the canonical ones, so a migration is never a silent deletion.
@@ -46,7 +50,9 @@ TOP_LEVEL_ORDER = (
     "profile",
     "overall_summary_zh",
     "takeaways_zh",
+    "triage_overall",
     "segments",
+    "lines",
     "corrections",
     "unverified_terms",
 )
@@ -66,6 +72,8 @@ SEGMENT_ORDER = (
     "frames",
     "frame_ocr",
     "editorial_notes_zh",
+    "question",
+    "triage",
 )
 
 
@@ -241,21 +249,31 @@ def normalize_legacy(data: Mapping[str, Any], stem: str = "") -> Dict[str, Any]:
     return _ordered(payload, TOP_LEVEL_ORDER)
 
 
+def relabel(data: Mapping[str, Any]) -> Dict[str, Any]:
+    """A 2.0 document as 2.1: the same content under the current version."""
+    payload = deepcopy(dict(data))
+    payload["schema_version"] = SCHEMA_VERSION
+    return payload
+
+
 def migrate_file(path: Union[str, Path]) -> MigrationResult:
     """Upgrade ``path`` in place, leaving the original bytes at ``<path>.bak``.
 
-    A document that is already v2 is left untouched and no backup is written,
+    A document already at the current version is left untouched and no backup is written,
     so running this twice is not a way to lose the previous backup.
     """
     target = Path(path)
     raw = target.read_bytes()
     data = json.loads(raw.decode("utf-8-sig"))
-    if not is_legacy(data):
+    if not is_legacy(data) and data.get("schema_version") == SCHEMA_VERSION:
         return MigrationResult(target, None, False, len(data.get("segments") or []))
 
     backup = target.with_name(target.name + ".bak")
     backup.write_bytes(raw)
-    upgraded = normalize_legacy(data, stem=target.stem)
+    if is_legacy(data):
+        upgraded = normalize_legacy(data, stem=target.stem)
+    else:
+        upgraded = relabel(data)
     write_json_atomic(target, upgraded)
     return MigrationResult(target, backup, True, len(upgraded.get("segments") or []))
 
@@ -267,4 +285,5 @@ __all__ = [
     "TOP_LEVEL_ORDER",
     "migrate_file",
     "normalize_legacy",
+    "relabel",
 ]

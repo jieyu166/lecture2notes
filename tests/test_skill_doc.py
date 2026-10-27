@@ -38,6 +38,8 @@ CLI_STAGES = (
     "ocr",
     "condense",
     "scaffold",
+    "lines",
+    "triage-prompt",
     "render",
     "viewer",
     "pbf",
@@ -154,7 +156,7 @@ def test_skill_md_is_ascii_safe_for_console_markers():
 def test_segmentation_reference_states_the_division_of_labour():
     text = (REFERENCES_DIR / "segmentation.md").read_text(encoding="utf-8")
     assert "l2n scaffold" in text
-    assert "schema_version" in text and '"2.0"' in text
+    assert "schema_version" in text and '"2.1"' in text
     # The point of the file: the model writes the semantics, the CLI does the
     # mechanics. Both halves must be stated.
     assert "語言模型" in text

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -434,8 +435,42 @@ def write_json_atomic(path: Path, data: Mapping[str, Any]) -> Path:
 # and rebuild paths. Everything below is schema v2: the documented, versioned
 # contract that ``l2n check json`` enforces and that ``l2n migrate`` produces.
 
-#: The only version this package writes, and the only one the validator accepts.
-SCHEMA_VERSION = "2.0"
+#: The version this package writes.
+SCHEMA_VERSION = "2.1"
+#: Every version the validator accepts. 2.1 only adds optional fields, so a 2.0
+#: document is still a valid document; it just cannot carry those fields.
+ACCEPTED_SCHEMA_VERSIONS = ("2.0", "2.1")
+#: The optional fields 2.1 introduced, at the top level and inside a segment.
+#: A 2.0 document that carries one was written by a newer tool and labelled by
+#: an older one; `l2n migrate` relabels it.
+V21_TOP_LEVEL_FIELDS = ("lines", "triage_overall")
+V21_SEGMENT_FIELDS = ("question", "triage")
+
+#: ``segments[].triage.novelty``: is this segment new to the reader?
+TRIAGE_NOVELTY = ("新知", "已知", "複習")
+#: ``triage_overall.verdict``: the decision made before watching.
+TRIAGE_VERDICTS = ("全看", "只看新知段", "跳過")
+#: The shortest triage reason that can still say which segments, how long and why.
+TRIAGE_REASON_MIN_CHARS = 30
+#: A reason names segments ("第 3 段", "段 3-5", "#3") and minutes ("12 分鐘").
+TRIAGE_SEGMENT_REF = re.compile(r"第\s*\d+\s*(?:[-–~、,，至到]\s*\d+\s*)*段|段\s*\d+|#\d+")
+TRIAGE_MINUTES_REF = re.compile(r"\d+(?:\.\d+)?\s*(?:分鐘|分|min)")
+#: ``est_minutes`` may differ from the must-watch total by this much (minutes),
+#: or by this fraction of it, whichever is larger, before it is reported.
+TRIAGE_MINUTES_SLACK = 2.0
+TRIAGE_MINUTES_RATIO = 0.2
+#: An Obsidian wikilink, which is what ``related_notes`` must hold.
+WIKILINK = re.compile(r"^\[\[[^\[\]]+\]\]$")
+
+#: How far the transcript may start after 0 or end before the duration before
+#: ``lines`` is reported as not covering the lecture. Silence at either end is
+#: normal; a minute of it usually is not.
+LINES_EDGE_TOLERANCE_SEC = 60.0
+#: A silence inside the transcript longer than this is reported.
+LINES_GAP_WARN_SEC = 180.0
+#: How close a transcript line must be to ``answer_sec`` for the answer to count
+#: as something the speaker said there.
+ANSWER_LINE_TOLERANCE_SEC = 5.0
 
 #: Inclusive bounds on the overall summary, in characters.
 MIN_SUMMARY_CHARS = 100
@@ -466,7 +501,9 @@ DRAFT_MESSAGE = 'draft document: fill every ai-draft field, then remove "draft"'
 #: been written, and a draft by definition has not been written yet; failing it
 #: for that buries the structural findings that actually need fixing. Every
 #: other rule still applies at full severity.
-DRAFT_RELAXED_CODES = ("summary_length", "takeaway_count", "bullets_count")
+DRAFT_RELAXED_CODES = (
+    "summary_length", "takeaway_count", "bullets_count", "triage_vague",
+)
 
 
 def is_draft(data: Any) -> bool:
@@ -802,11 +839,25 @@ def _validate_subtitle(subtitle: Any, findings: List[Finding]) -> None:
 
 def _validate_top_level(data: Mapping[str, Any], findings: List[Finding]) -> None:
     version = data.get("schema_version")
-    if version != SCHEMA_VERSION:
+    if version not in ACCEPTED_SCHEMA_VERSIONS:
         findings.append(_error(
             "schema_version", "schema_version",
-            "schema_version must be %r, got %r" % (SCHEMA_VERSION, version),
+            "schema_version must be one of %s, got %r (a newer version means "
+            "this l2n is out of date: upgrade it, do not edit the file)"
+            % (", ".join(repr(v) for v in ACCEPTED_SCHEMA_VERSIONS), version),
         ))
+    elif version == "2.0":
+        segments = data.get("segments") if isinstance(data.get("segments"), list) else []
+        newer = [key for key in V21_TOP_LEVEL_FIELDS if key in data] + sorted({
+            "segments[].%s" % key
+            for segment in segments if isinstance(segment, Mapping)
+            for key in V21_SEGMENT_FIELDS if key in segment
+        })
+        if newer:
+            findings.append(_error(
+                "schema_version", "schema_version",
+                "%s need schema 2.1; run: l2n migrate <stem>.json" % ", ".join(newer),
+            ))
 
     for key in ("stem", "title", "profile"):
         if not isinstance(data.get(key), str) or not data.get(key):
@@ -1141,6 +1192,341 @@ def _validate_segment_times(
             ))
 
 
+def _warn(
+    code: str, location: str, message: str, segment_index: Optional[int] = None
+) -> Finding:
+    return Finding("warn", code, message, segment_index, None, location)
+
+
+def _nonempty_str(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _valid_lines(data: Mapping[str, Any]) -> List[Mapping[str, Any]]:
+    """The well-formed entries of ``lines``, for rules that read them."""
+    lines = data.get("lines")
+    if not isinstance(lines, list):
+        return []
+    return [
+        line for line in lines
+        if isinstance(line, Mapping) and _is_number(line.get("t")) and _is_number(line.get("end"))
+    ]
+
+
+def _validate_lines(data: Mapping[str, Any], findings: List[Finding]) -> None:
+    """``lines``: the transcript, one object per cue, covering the lecture.
+
+    Shape: ``[{"t": 12.5, "end": 15.0, "text": "...", "zh": "..."}]``; ``zh``
+    is optional. Ordered by ``t``. Coverage is judged against the duration and
+    the last segment, so a transcript cut off half way is an error and a long
+    silence at either end is a warning.
+    """
+    if "lines" not in data:
+        return
+    lines = data.get("lines")
+    if not isinstance(lines, list) or not lines:
+        findings.append(_error("lines", "lines", "lines must be a non-empty array of objects"))
+        return
+    duration = data.get("duration_sec")
+    limit = float(duration) + 1.0 if _is_number(duration) else None
+    previous_t: Optional[float] = None
+    previous_end: Optional[float] = None
+    for position, line in enumerate(lines):
+        where = "lines[%d]" % position
+        if not isinstance(line, Mapping):
+            findings.append(_error("lines", where, "%s must be an object" % where))
+            continue
+        t, end = line.get("t"), line.get("end")
+        if not _is_number(t) or not _is_number(end):
+            findings.append(_error("lines", where, "%s.t and .end must be numbers" % where))
+            continue
+        t, end = float(t), float(end)
+        if t < 0 or end < t:
+            findings.append(_error(
+                "lines_range", where, "%s has t=%s end=%s" % (where, t, end)
+            ))
+        if limit is not None and end > limit:
+            findings.append(_error(
+                "lines_range", where,
+                "%s ends at %s, after duration_sec %s" % (where, end, duration),
+            ))
+        if previous_t is not None and t < previous_t:
+            findings.append(_error(
+                "lines_order", where,
+                "%s starts at %s, before the previous line (%s)" % (where, t, previous_t),
+            ))
+        if previous_end is not None and t - previous_end > LINES_GAP_WARN_SEC:
+            findings.append(_warn(
+                "lines_gap", where,
+                "%d seconds without a transcript line before %s"
+                % (t - previous_end, format_clock(t)),
+            ))
+        previous_t, previous_end = t, max(end, previous_end or end)
+        if not _nonempty_str(line.get("text")):
+            findings.append(_error(
+                "lines", where + ".text", "%s.text must be a non-empty string" % where
+            ))
+        if "zh" in line and not isinstance(line.get("zh"), str):
+            findings.append(_error(
+                "lines", where + ".zh", "%s.zh must be a string when present" % where
+            ))
+
+    valid = _valid_lines(data)
+    if not valid:
+        return
+    first = min(float(line["t"]) for line in valid)
+    last = max(float(line["end"]) for line in valid)
+    segments = [s for s in (data.get("segments") or []) if isinstance(s, Mapping)]
+    last_start = segments[-1].get("start_sec") if segments else None
+    if _is_number(last_start) and last < float(last_start):
+        findings.append(_error(
+            "lines_coverage", "lines",
+            "lines end at %s, before the last segment starts (%s): the transcript "
+            "is truncated" % (format_clock(last), format_clock(float(last_start))),
+        ))
+    elif _is_number(duration) and last < float(duration) - LINES_EDGE_TOLERANCE_SEC:
+        findings.append(_warn(
+            "lines_coverage", "lines",
+            "lines end at %s, %d seconds before the end of the lecture"
+            % (format_clock(last), float(duration) - last),
+        ))
+    if first > LINES_EDGE_TOLERANCE_SEC:
+        findings.append(_warn(
+            "lines_coverage", "lines",
+            "lines start at %s; the first %d seconds have no transcript"
+            % (format_clock(first), first),
+        ))
+
+
+def _validate_question(
+    segment: Mapping[str, Any], number: int, lines: Sequence[Mapping[str, Any]],
+    findings: List[Finding],
+) -> None:
+    """``segments[].question``: one question per segment, answered in it.
+
+    Shape: ``{"q": "...", "a": "...", "answer_sec": 123.4}``. ``answer_sec`` is
+    where the speaker explains the answer, so it has to fall inside the segment;
+    when ``lines`` is present, a line must be spoken near it.
+    """
+    if "question" not in segment:
+        return
+    where = "segments[%d].question" % number
+    question = segment.get("question")
+    if not isinstance(question, Mapping):
+        findings.append(_error("question", where, "%s must be an object" % where, number))
+        return
+    for key in ("q", "a"):
+        if not _nonempty_str(question.get(key)):
+            findings.append(_error(
+                "question", "%s.%s" % (where, key),
+                "%s.%s must be a non-empty string" % (where, key), number,
+            ))
+    answer = question.get("answer_sec")
+    if not _is_number(answer):
+        findings.append(_error(
+            "answer_sec", where + ".answer_sec",
+            "%s.answer_sec must be a number (seconds)" % where, number,
+        ))
+        return
+    start, end = segment.get("start_sec"), segment.get("end_sec")
+    if _is_number(start) and _is_number(end) and not float(start) <= float(answer) <= float(end):
+        findings.append(_error(
+            "answer_sec", where + ".answer_sec",
+            "segment %d answer_sec %s is outside the segment (%s-%s)"
+            % (number, answer, start, end), number,
+        ))
+        return
+    if lines and not any(
+        float(line["t"]) - ANSWER_LINE_TOLERANCE_SEC
+        <= float(answer)
+        <= float(line["end"]) + ANSWER_LINE_TOLERANCE_SEC
+        for line in lines
+    ):
+        findings.append(_warn(
+            "answer_unsupported", where + ".answer_sec",
+            "segment %d answer_sec %s has no transcript line within %d seconds"
+            % (number, answer, ANSWER_LINE_TOLERANCE_SEC), number,
+        ))
+
+
+def _validate_triage(
+    segment: Mapping[str, Any], number: int, findings: List[Finding]
+) -> None:
+    """``segments[].triage``: is this segment worth the reader's time?
+
+    Shape: ``{"novelty": "新知|已知|複習", "reason": "...",
+    "related_notes": ["[[Note]]"]}``. 已知 means an existing note already covers
+    it, so that note has to be named -- an unlinked 已知 is a guess.
+    """
+    if "triage" not in segment:
+        return
+    where = "segments[%d].triage" % number
+    triage = segment.get("triage")
+    if not isinstance(triage, Mapping):
+        findings.append(_error("triage", where, "%s must be an object" % where, number))
+        return
+    novelty = triage.get("novelty")
+    if novelty not in TRIAGE_NOVELTY:
+        findings.append(_error(
+            "triage", where + ".novelty",
+            "%s.novelty must be one of %s, got %r" % (where, "/".join(TRIAGE_NOVELTY), novelty),
+            number,
+        ))
+    if not _nonempty_str(triage.get("reason")):
+        findings.append(_error(
+            "triage", where + ".reason", "%s.reason must be a non-empty string" % where, number
+        ))
+    notes = triage.get("related_notes", [])
+    if not isinstance(notes, list) or not all(
+        isinstance(item, str) and WIKILINK.match(item) for item in notes
+    ):
+        findings.append(_error(
+            "triage", where + ".related_notes",
+            "%s.related_notes must be an array of [[wikilinks]]" % where, number,
+        ))
+    elif novelty == "已知" and not notes:
+        findings.append(_error(
+            "triage", where + ".related_notes",
+            "segment %d is 已知 but names no note that covers it" % number, number,
+        ))
+
+
+def _segment_minutes(segments: Sequence[Mapping[str, Any]], indexes: Sequence[int]) -> float:
+    total = 0.0
+    for segment in segments:
+        if segment.get("index") in indexes:
+            start, end = segment.get("start_sec"), segment.get("end_sec")
+            if _is_number(start) and _is_number(end):
+                total += (float(end) - float(start)) / 60.0
+    return total
+
+
+def _validate_triage_overall(data: Mapping[str, Any], findings: List[Finding]) -> None:
+    """``triage_overall``: the decision before watching, specific enough to act on.
+
+    Shape: ``{"verdict": "全看|只看新知段|跳過", "must_watch": [2, 5],
+    "est_minutes": 14, "reason": "..."}``. ``est_minutes`` is the time the
+    must-watch segments take. The reason has to name segments (unless the
+    verdict is to skip) and minutes (unless it is to watch everything): a
+    reason that does neither is the generic advice this field exists to replace.
+    """
+    segments = [s for s in (data.get("segments") or []) if isinstance(s, Mapping)]
+    with_triage = [s for s in segments if "triage" in s]
+    if "triage_overall" not in data:
+        if with_triage:
+            findings.append(_warn(
+                "triage_missing", "triage_overall",
+                "segments carry triage but triage_overall is missing",
+            ))
+        return
+    if with_triage and len(with_triage) < len(segments):
+        missing = [s.get("index") for s in segments if "triage" not in s]
+        findings.append(_warn(
+            "triage_missing", "segments",
+            "segments %s have no triage" % ", ".join(str(i) for i in missing),
+        ))
+
+    where = "triage_overall"
+    overall = data.get("triage_overall")
+    if not isinstance(overall, Mapping):
+        findings.append(_error("triage_overall", where, "triage_overall must be an object"))
+        return
+    verdict = overall.get("verdict")
+    if verdict not in TRIAGE_VERDICTS:
+        findings.append(_error(
+            "triage_overall", where + ".verdict",
+            "verdict must be one of %s, got %r" % ("/".join(TRIAGE_VERDICTS), verdict),
+        ))
+    count = len(segments)
+    must = overall.get("must_watch")
+    valid_must: List[int] = []
+    if not isinstance(must, list):
+        findings.append(_error(
+            "triage_overall", where + ".must_watch",
+            "must_watch must be an array of segment indexes",
+        ))
+    else:
+        for index in must:
+            if isinstance(index, int) and not isinstance(index, bool) and 1 <= index <= count:
+                valid_must.append(index)
+            else:
+                findings.append(_error(
+                    "triage_overall", where + ".must_watch",
+                    "must_watch names segment %r, which does not exist" % (index,),
+                ))
+        if verdict == "只看新知段" and not must:
+            findings.append(_error(
+                "triage_overall", where + ".must_watch",
+                "verdict 只看新知段 needs at least one must_watch segment",
+            ))
+    for segment in segments:
+        triage = segment.get("triage")
+        if (
+            segment.get("index") in valid_must
+            and isinstance(triage, Mapping)
+            and triage.get("novelty") == "已知"
+        ):
+            findings.append(_warn(
+                "triage_conflict", where + ".must_watch",
+                "segment %s is must_watch but triaged 已知" % segment.get("index"),
+            ))
+
+    minutes = overall.get("est_minutes")
+    duration = data.get("duration_sec")
+    if not _is_number(minutes) or float(minutes) < 0:
+        findings.append(_error(
+            "triage_overall", where + ".est_minutes",
+            "est_minutes must be a non-negative number",
+        ))
+    else:
+        if _is_number(duration) and float(minutes) > float(duration) / 60.0 + 1:
+            findings.append(_error(
+                "triage_overall", where + ".est_minutes",
+                "est_minutes %s is longer than the lecture (%.0f min)"
+                % (minutes, float(duration) / 60.0),
+            ))
+        expected = _segment_minutes(segments, valid_must)
+        slack = max(TRIAGE_MINUTES_SLACK, expected * TRIAGE_MINUTES_RATIO)
+        if isinstance(must, list) and abs(float(minutes) - expected) > slack:
+            findings.append(_warn(
+                "triage_minutes", where + ".est_minutes",
+                "est_minutes %s, but the must_watch segments run %.1f min"
+                % (minutes, expected),
+            ))
+
+    reason = overall.get("reason")
+    if not _nonempty_str(reason):
+        findings.append(_error(
+            "triage_overall", where + ".reason", "reason must be a non-empty string"
+        ))
+        return
+    vague: List[str] = []
+    if len(reason.strip()) < TRIAGE_REASON_MIN_CHARS:
+        vague.append("shorter than %d characters" % TRIAGE_REASON_MIN_CHARS)
+    if verdict != "跳過" and not TRIAGE_SEGMENT_REF.search(reason):
+        vague.append('names no segment (write "第 3 段")')
+    if verdict != "全看" and not TRIAGE_MINUTES_REF.search(reason):
+        vague.append('states no minutes saved or needed (write "省下 25 分鐘")')
+    if vague:
+        findings.append(_error(
+            "triage_vague", where + ".reason",
+            "reason is too generic to act on: %s" % "; ".join(vague),
+        ))
+
+
+def _validate_question_coverage(
+    segments: Sequence[Any], findings: List[Finding]
+) -> None:
+    """Once one segment has a question, every segment should."""
+    mapped = [s for s in segments if isinstance(s, Mapping)]
+    missing = [s.get("index") for s in mapped if "question" not in s]
+    if missing and len(missing) < len(mapped):
+        findings.append(_warn(
+            "question_missing", "segments",
+            "segments %s have no question" % ", ".join(str(i) for i in missing),
+        ))
+
+
 def validate_document(data: Mapping[str, Any]) -> List[Finding]:
     """Every v2 rule violation in ``data``, as an ordered list of findings.
 
@@ -1158,6 +1544,9 @@ def validate_document(data: Mapping[str, Any]) -> List[Finding]:
     if not isinstance(segments, list) or not segments:
         findings.append(_error("segments", "segments", "segments must be a non-empty array"))
         return findings
+
+    _validate_lines(data, findings)
+    lines = _valid_lines(data)
 
     for position, segment in enumerate(segments, 1):
         if not isinstance(segment, Mapping):
@@ -1185,6 +1574,8 @@ def validate_document(data: Mapping[str, Any]) -> List[Finding]:
         _validate_segment_times(segment, position, findings)
         _validate_bullets(segment, position, findings)
         _validate_segment_lists(segment, position, findings)
+        _validate_question(segment, position, lines, findings)
+        _validate_triage(segment, position, findings)
 
     # Boundaries: each segment ends exactly where the next one begins, and the
     # last one ends at the floored media duration. Checked after the per-segment
@@ -1216,6 +1607,8 @@ def validate_document(data: Mapping[str, Any]) -> List[Finding]:
                 len(segments),
             ))
 
+    _validate_question_coverage(segments, findings)
+    _validate_triage_overall(data, findings)
     return relax_for_draft(data, findings)
 
 
@@ -1252,7 +1645,12 @@ def load_document(path: Path) -> Dict[str, Any]:
 
 
 __all__ = [
+    "ACCEPTED_SCHEMA_VERSIONS",
     "AI_DRAFT_MARK",
+    "TRIAGE_NOVELTY",
+    "TRIAGE_VERDICTS",
+    "V21_SEGMENT_FIELDS",
+    "V21_TOP_LEVEL_FIELDS",
     "BOUNDARY_EPSILON",
     "DRAFT_KEY",
     "DRAFT_MESSAGE",

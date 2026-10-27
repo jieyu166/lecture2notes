@@ -286,9 +286,9 @@ def test_condense_on_a_missing_file_is_a_usage_error(tmp_path: Path):
     assert cli_entry(["condense", str(tmp_path / "nope.srt")]) == exit_codes.ERROR
 
 
-def test_condense_is_a_subcommand_and_the_count_is_18():
+def test_condense_is_a_subcommand_and_the_count_is_20():
     assert "condense" in SUBCOMMANDS
-    assert len(SUBCOMMANDS) == 18
+    assert len(SUBCOMMANDS) == 20
     assert condense.DEFAULT_BUCKET_SEC == 60
 
 

@@ -117,6 +117,7 @@ Relation values:
 | `notes/__init__.py` | original | — | Package marker. |
 | `notes/guideline.py` | original | — | This package's own note-writing guideline constants (version string, mandatory section order, rule identifiers); no prior script. |
 | `notes/render.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/render_v4_note.py`. Upstream's `render_embeds.py` expands embed placeholders inside an existing note in a different format; different input/output convention, no shared functions. |
+| `notes/triage.py` | original | — | The triage brief `l2n triage-prompt` prints (schema 2.1): per-segment keywords and the vault notes that may already cover each segment, as candidates for the model's 新知/已知/複習 call. No upstream analog. |
 | `notes/review.py` | original | — | The independent-review brief `l2n review-prompt` prints (guideline 1.4): the errors no rule can see, and sampling candidates (numbers by segment time span, decade mentions, quotations, R12 context-layer hits). No prior script; the review practice it encodes comes from the maintainer's own textbook-note workflow. |
 | `notes/rewrite.py` | ported-from-rad-workflow | — | From `rad-workflow` `skills/lecture-to-notes/scripts/rewrite_evidence.py` (only the sensitive-data-pattern and text-normalization helpers were kept). No upstream file addresses claims/citations/evidence packets at all. |
 | `notes/rules.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/lecture_content_rules.py`. No upstream equivalent (Traditional/Simplified Chinese content rules are specific to this project's language target). |
@@ -137,10 +138,11 @@ Relation values:
 | `schema/condense.py` | original | — | Session-written per-minute transcript condensing (`condense_agent.py` in `rad-workflow`, never itself a port of an upstream file). No upstream analog. |
 | `schema/io.py` | original | — | The single atomic, BOM-free, LF-only canonical JSON writer/reader. No upstream analog. |
 | `schema/migrate.py` | original | — | `l2n migrate`: upgrades a 1.x lecture document to canonical schema v2. No upstream analog. |
+| `schema/lines.py` | original | — | Written for this package: `l2n lines` writes the transcript into the canonical document (schema 2.1 `lines`), keeping translations of unchanged lines, and `check json` reports lines that drifted from the subtitle. No upstream analog. |
 | `schema/scaffold.py` | original | — | Written for this package: `l2n scaffold` projects a structurally valid, entirely placeholder schema v2 document from a subtitle file. No rad-workflow or upstream counterpart. |
 | `schema/model.py` | ported-from-rad-workflow | — | From `rad-workflow` `.worktrees/rebuild-nr-viewer/skills/lecture-to-notes/scripts/lecture_model.py`. No upstream canonical-schema module or time-signature validator exists in `drpwchen/lecture-to-notes`. |
 
-Counts: 7 inspired, 15 ported-from-rad-workflow, 38 original — 60 modules total.
+Counts: 7 inspired, 15 ported-from-rad-workflow, 40 original — 62 modules total.
 
 ## ASR default parameters
 

@@ -282,9 +282,9 @@ def test_the_frames_command_passes_force_through(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------
 # l2n review-prompt (B7 (c))
 # --------------------------------------------------------------------------
-def test_review_prompt_is_the_eighteenth_subcommand():
+def test_review_prompt_is_a_subcommand():
     assert "review-prompt" in SUBCOMMANDS
-    assert len(SUBCOMMANDS) == 18
+    assert len(SUBCOMMANDS) == 20
 
 
 def _write_body(note_path: Path, line: str) -> None:

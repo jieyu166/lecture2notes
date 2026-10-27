@@ -804,6 +804,10 @@ def check_json(path: Path, require_frames: bool = True) -> StageReport:
         return report
 
     report.findings.extend(validate_document(data))
+    if isinstance(data, Mapping):
+        from lecture2notes.schema import lines as lines_mod
+
+        report.findings.extend(lines_mod.stale_findings(target, data))
     if require_frames:
         check_json_frames(data, target.parent, report)
     if isinstance(data, Mapping):

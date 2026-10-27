@@ -59,6 +59,8 @@ SUBCOMMANDS: List[str] = [
     "ocr",
     "condense",
     "scaffold",
+    "lines",
+    "triage-prompt",
     "render",
     "viewer",
     "pbf",
@@ -580,6 +582,71 @@ def cmd_viewer(args: argparse.Namespace) -> int:
             result["estimated"], result["cues"],
         )
     )
+    return exit_codes.OK
+
+
+def cmd_lines(args: argparse.Namespace) -> int:
+    """`l2n lines <stem>.json`: write the transcript into the document.
+
+    Rebuilding keeps every translation whose line did not change. A 2.0
+    document is relabelled 2.1 in the same write, because `lines` is a 2.1
+    field; a 1.x document has to be migrated first.
+    """
+    from lecture2notes.schema import lines as lines_mod
+    from lecture2notes.schema.model import SCHEMA_VERSION, is_legacy
+
+    path, data = _load_document(getattr(args, "json_file", None), "lines")
+    if path is None:
+        return exit_codes.ERROR
+    if is_legacy(data):
+        _out.error("lines：%s 是舊版 JSON，先跑 l2n migrate %s" % (path.name, path.name))
+        return exit_codes.ERROR
+    if data.get("lines") and not getattr(args, "force", False):
+        _out.skip("lines: %s 已有 lines（--force 依字幕重建，保留未變動句的 zh）" % path.name)
+        return exit_codes.OK
+    subtitle = Path(args.subtitle) if getattr(args, "subtitle", None) else (
+        lines_mod.subtitle_for(path, data)
+    )
+    if subtitle is None or not subtitle.is_file():
+        _out.error("lines：找不到字幕檔（用 --subtitle 指定）")
+        return exit_codes.ERROR
+    fresh = lines_mod.keep_translations(lines_mod.read_lines(subtitle), data.get("lines"))
+    if not fresh:
+        _out.error("lines：%s 沒有可用的字幕句" % subtitle.name)
+        return exit_codes.ERROR
+    data["lines"] = fresh
+    if data.get("schema_version") != SCHEMA_VERSION:
+        _out.say("info", "schema_version %s -> %s" % (data.get("schema_version"), SCHEMA_VERSION))
+        data["schema_version"] = SCHEMA_VERSION
+    write_json_atomic(path, data)
+    translated = sum(1 for line in fresh if "zh" in line)
+    _out.ok("lines: %s <- %s (%d lines, %d with zh)" % (
+        path.name, subtitle.name, len(fresh), translated
+    ))
+    return exit_codes.OK
+
+
+def cmd_triage_prompt(args: argparse.Namespace) -> int:
+    """`l2n triage-prompt <stem>.json --vault <dir>`: the triage brief.
+
+    Searches the vault on this machine for notes that may already cover each
+    segment and prints them as candidates. Deciding 新知/已知 is the model's
+    job; nothing here writes the document.
+    """
+    from lecture2notes.notes import triage as triage_mod
+
+    path, data = _load_document(getattr(args, "json_file", None), "triage-prompt")
+    if path is None:
+        return exit_codes.ERROR
+    vault = Path(args.vault) if getattr(args, "vault", None) else None
+    if vault is None or not vault.is_dir():
+        _out.error("triage-prompt：--vault 必須是存在的資料夾")
+        return exit_codes.ERROR
+    if not (data.get("segments") or []):
+        _out.error("triage-prompt：JSON 沒有 segments")
+        return exit_codes.ERROR
+    notes = triage_mod.scan_vault(vault, only_l3=not getattr(args, "any_note", False))
+    _out.line(triage_mod.triage_prompt(path, data, notes, top=args.top))
     return exit_codes.OK
 
 
@@ -1462,6 +1529,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="壓縮逐字稿每行涵蓋幾秒（預設 %d）" % condense_mod.DEFAULT_BUCKET_SEC,
     )
     p.set_defaults(func=cmd_scaffold)
+
+    p = sub.add_parser(
+        "lines", parents=[common], help="把字幕逐句寫進正式 JSON 的 lines（schema 2.1）"
+    )
+    p.add_argument("json_file", nargs="?", help="正式 JSON 路徑")
+    p.add_argument("--subtitle", default=None, help="字幕路徑（預設 source.subtitle.path 或 <stem>.srt）")
+    p.set_defaults(func=cmd_lines)
+
+    p = sub.add_parser(
+        "triage-prompt",
+        parents=[common],
+        help="印出分流交辦書：每段在 vault 裡可能已有的筆記",
+    )
+    p.add_argument("json_file", nargs="?", help="正式 JSON 路徑")
+    p.add_argument("--vault", default=None, help="Obsidian vault 資料夾（只在本機讀取）")
+    p.add_argument(
+        "--any-note", action="store_true", help="候選不限 L3 筆記（預設只看 tags 含 L3 的筆記）"
+    )
+    p.add_argument("--top", type=int, default=5, help="每段列出的候選筆記數（預設 5）")
+    p.set_defaults(func=cmd_triage_prompt)
 
     p = sub.add_parser("render", parents=[common], help="從正式 JSON 產出骨架筆記")
     p.add_argument("json_file", nargs="?", help="正式 JSON 路徑")

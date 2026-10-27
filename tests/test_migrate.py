@@ -180,7 +180,7 @@ def test_cli_migrate_is_idempotent(tmp_path):
 
     result = run_cli(["migrate", str(target)])
     assert result.returncode == 0
-    assert "already schema 2.0" in result.stdout
+    assert "already schema 2.1" in result.stdout
     assert target.read_bytes() == first
 
 

@@ -96,9 +96,9 @@ l2n run lecture.mp4 --lang zh
 
 ## 子命令
 
-`transcribe`、`calibrate-subs`、`frames`、`ocr`、`condense`、`scaffold`、`render`、
-`viewer`、`pbf`、`hub`、`publish`、`check`、`review-prompt`、`migrate`、`run`、`convert-model`、
-`profile`、`install-skill`（共 18 個）。
+`transcribe`、`calibrate-subs`、`frames`、`ocr`、`condense`、`scaffold`、`lines`、
+`triage-prompt`、`render`、`viewer`、`pbf`、`hub`、`publish`、`check`、`review-prompt`、`migrate`、
+`run`、`convert-model`、`profile`、`install-skill`（共 20 個）。
 
 每個子命令可獨立重跑且冪等（已有產物即跳過，`--force` 重做）。共用旗標：`--quiet`、
 `--json-progress`（每行一個 JSON 物件，給 agent 追蹤進度）、`--force`。
@@ -488,6 +488,19 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
   快取裡舊的文字也不再併入。
 - **`l2n frames` 重新併入時保留已挑好的 `frame`**：只填 `null` 的；要全部重設才加 `--force`。
 - **schema**：頂層選填 `editorial_notes_zh`（四段弧寫這裡），`render` 印在 Summary 的摺疊 callout。
+- **schema 2.1**：新增選填欄位 `lines`（逐句字幕，可帶 `zh`）、`segments[].question`
+  （每段一題，`answer_sec` 標講解處）、`segments[].triage`（新知／已知／複習）、
+  `triage_overall`（看之前的分流結論）。`check json` 同時接受 2.0 與 2.1；2.0 文件帶了這些欄位
+  會報錯，用 `l2n migrate` 升級（只改版本號、留 `.bak`）。
+- **`l2n lines`**、**`l2n triage-prompt`**：把字幕寫進 `lines`；用本機 vault 找每段可能已有的
+  筆記，印出分流交辦書。子命令由 18 個變成 20 個。
+- **字幕解析**：接受沒補零或沒有小時的時間碼、WebVTT 檔頭／cue 識別碼／NOTE 區塊／行內標籤；
+  新增 `dedupe_cues` 合併重複與捲動式字幕。
+
+> **舊版使用者請升級。** 這一版寫出的 JSON 是 `"schema_version": "2.1"`，舊版 `l2n check json`
+> 只認 `"2.0"`，會回報 `schema_version must be '2.0', got '2.1'`（exit 2）。這代表程式該升級，
+> **不要**把檔案的版本號改回 2.0 或刪掉新欄位：`pip install -U lecture2notes`
+> （或在 clone 裡 `git pull` 後 `pip install -e .`），再跑 `l2n install-skill` 更新 skill。
 
 ## 開發與測試
 

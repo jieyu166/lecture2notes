@@ -23,6 +23,7 @@ from lecture2notes.schema.model import (
     Finding,
     MAX_SUMMARY_CHARS,
     MIN_SUMMARY_CHARS,
+    ACCEPTED_SCHEMA_VERSIONS,
     SCHEMA_VERSION,
     validate_document,
 )
@@ -63,7 +64,7 @@ def messages(document: dict) -> str:
 
 def test_the_valid_fixture_has_no_findings():
     document = load_valid()
-    assert document["schema_version"] == SCHEMA_VERSION
+    assert document["schema_version"] in ACCEPTED_SCHEMA_VERSIONS
     assert validate_document(document) == []
 
 

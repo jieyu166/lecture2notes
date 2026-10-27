@@ -1,6 +1,6 @@
 <!-- Encoding: UTF-8 (no BOM). Windows PowerShell 5.1: Get-Content -Encoding UTF8 <file> -->
 
-# 參考：分段與正規 JSON v2
+# 參考：分段與正規 JSON（schema 2.1）
 
 任務是「把字幕切成導航章節」或「建立／修正正規 JSON」時，讀這一份。
 
@@ -40,7 +40,8 @@ l2n check json <stem>.json                 # 4. 驗收
 骨架本來就還沒寫完，為此報 error 只會把真正該修的結構問題蓋掉。
 刪掉 `draft` 之後這些規則恢復為 error。
 
-舊版（1.x）文件用 `l2n migrate <stem>.json` 原地升級到 v2，不要手動改 `schema_version`。
+舊版（1.x）與 2.0 文件都用 `l2n migrate <stem>.json` 原地升級到 2.1，不要手動改 `schema_version`。
+`check json` 回報 `got '2.1'` 之類的版本錯誤，代表**這台的 `l2n` 太舊**：升級程式，不要改檔案。
 
 ## 最小範例
 
@@ -48,7 +49,7 @@ l2n check json <stem>.json                 # 4. 驗收
 
 ```json
 {
-  "schema_version": "2.0",
+  "schema_version": "2.1",
   "stem": "sample-talk",
   "title": "範例講座標題",
   "duration_sec": 180,
@@ -178,6 +179,33 @@ l2n frames <video> --mode interval --every 45
 
 **一題只掛一段就失去意義**：翻到那一節就答得出來，那是重讀不是回看。出題請跨段（交錯），
 並至少寫一題問邊界的推論題（「若有 A 但沒有 B，結論還成立嗎」），不要寫「X 的定義是什麼」。
+
+## schema 2.1 的四個選填欄位
+
+全部選填；舊文件沒有這些欄位照常有效，viewer 也照常運作。寫了就要對，`l2n check json` 會驗。
+
+```bash
+l2n lines <stem>.json                        # 1. 把字幕逐句寫進 lines（機械，不要手寫）
+l2n triage-prompt <stem>.json --vault <vault> # 2. 印分流交辦書（只在本機讀 vault）
+#    3. 你（語言模型）寫每段 question、triage 與頂層 triage_overall
+l2n check json <stem>.json                   # 4. 驗收
+```
+
+| 欄位 | 形狀與規則 |
+| ---- | ---- |
+| `lines` | `[{"t": 秒, "end": 秒, "text": "...", "zh": "..."}]`，依 `t` 排序；`zh` 選填。由 `l2n lines` 產生（重複與捲動字幕已合併），`--force` 重建時保留未變動句的 `zh`。結尾早於最後一段開頭是 error（字幕被截斷）；頭尾空白超過 60 秒是 warning；字幕改過而 `lines` 沒重建是 warning `lines_stale` |
+| `segments[].question` | `{"q": "...", "a": "...", "answer_sec": 秒}`，一段一題。答案只能出自這一段講者說的話；`answer_sec` 是講者講解答案的地方，必須落在本段範圍內，附近 5 秒內要有字幕句。有一段寫了就每段都要寫 |
+| `segments[].triage` | `{"novelty": "新知"\|"已知"\|"複習", "reason": "...", "related_notes": ["[[筆記]]"]}`。`已知` 必須附上涵蓋它的筆記連結；候選來自 `triage-prompt`，**打開筆記確認內容真的涵蓋**才算，同名不算 |
+| `triage_overall` | `{"verdict": "全看"\|"只看新知段"\|"跳過", "must_watch": [段號], "est_minutes": 分鐘, "reason": "..."}`。`est_minutes` 是必看段時長加總。`reason` 要寫出哪幾段必看（「第 N 段」，跳過時免）、省下或需要幾分鐘（全看時免）、為什麼；泛泛的「內容實用」會被 `triage_vague` 擋下 |
+
+```json
+"triage_overall": {
+  "verdict": "只看新知段", "must_watch": [2], "est_minutes": 1,
+  "reason": "只需看第 2 段（共 1 分鐘，省下 2 分鐘）：第 2 段的判準 vault 沒有，第 1 段已由筆記涵蓋。"
+}
+```
+
+不得編造：題目、答案、分流理由都只能根據字幕與你打開的筆記；不確定的術語保留原文並加註「（可能為XXX）」。
 
 ## 四段弧檢查（寫 `overall_summary_zh` 時做）
 
