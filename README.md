@@ -499,6 +499,12 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
 - **雙語字幕 `l2n bilingual export|status|merge`**（與 `transcribe --bilingual`）：分批交給 LLM
   翻譯，合併時驗證每個 cue 剛好一句譯文、時間碼不變，產出 `.en.srt`／`.zh.srt`／`.bi.srt`
   （中上原下）並寫入 `lines[].zh`。術語用同名講義與錯字對照表校正；原文字幕不改。子命令變成 21 個。
+- **viewer 改版**：章節時間軸（已知段淡色）、影片上的雙語字幕（`C` 切換）、題目模式、分流與
+  「只播必看段」、續播位置、問 AI（`Q`，複製網址與前後逐字稿）、快捷鍵（`J/K`、`A/B`、`[ ]`、`S`、`?`），
+  手機改為影片固定在上、下方分頁。所有路徑仍是相對路徑，絕對網址由頁面自己算出。投影片時間改用
+  `frames.json` 的 `timestamp_sec`，`-0445b.png` 這類補抽檔名也讀得懂。
+- **`triage-prompt`**：`--out`（失敗不留檔、錯誤只到 stderr）、`--scope`、`L2N_VAULT`；排除本講座
+  自己產生的筆記；英文關鍵字改為整字比對。
 - **`l2n migrate` 拒絕非講座 JSON**：沒有 `segments` 的檔案（例如其他工具的 `*.timing-fixes.json`）
   不再被包成空的講座骨架，回報後原檔不動（exit 2）。版本號改為 `0.3.0.dev0`，從分支
   `pip install -U` 才會真的重裝。

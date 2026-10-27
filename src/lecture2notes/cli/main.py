@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -588,10 +589,10 @@ def cmd_viewer(args: argparse.Namespace) -> int:
     if not result["video"]:
         _out.warn("viewer：找不到影片檔，頁面的播放器沒有來源")
     _out.ok(
-        "viewer: %s (%d segments, %d blocks, %d estimated times, %d cues)"
+        "viewer: %s (%d segments, %d blocks, %d estimated times, %d cues, %d with zh)"
         % (
             result["path"].name, result["segments"], result["blocks"],
-            result["estimated"], result["cues"],
+            result["estimated"], result["cues"], result.get("translated", 0),
         )
     )
     return exit_codes.OK
@@ -725,18 +726,42 @@ def cmd_triage_prompt(args: argparse.Namespace) -> int:
     """
     from lecture2notes.notes import triage as triage_mod
 
-    path, data = _load_document(getattr(args, "json_file", None), "triage-prompt")
-    if path is None:
+    # Errors go to stderr: this command is usually redirected into a file, and
+    # an error message written there looks like a brief that says nothing.
+    def fail(message: str) -> int:
+        sys.stderr.write("[error] triage-prompt: %s\n" % message)
         return exit_codes.ERROR
-    vault = Path(args.vault) if getattr(args, "vault", None) else None
-    if vault is None or not vault.is_dir():
-        _out.error("triage-prompt：--vault 必須是存在的資料夾")
-        return exit_codes.ERROR
-    if not (data.get("segments") or []):
-        _out.error("triage-prompt：JSON 沒有 segments")
-        return exit_codes.ERROR
-    notes = triage_mod.scan_vault(vault, only_l3=not getattr(args, "any_note", False))
-    _out.line(triage_mod.triage_prompt(path, data, notes, top=args.top))
+
+    target = getattr(args, "json_file", None)
+    if not target or not Path(target).is_file():
+        return fail("no such JSON: %s" % target)
+    try:
+        data = read_json(Path(target))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return fail("JSON is unparseable: %s" % exc)
+    path = Path(target)
+    if not isinstance(data, dict) or not (data.get("segments") or []):
+        return fail("%s has no segments" % path.name)
+    profile = str(data.get("profile") or loader.BUILTIN_PROFILE)
+    settings = loader.outputs(profile).get("triage") if loader.profile_dir(profile).is_dir() else None
+    settings = settings if isinstance(settings, dict) else {}
+    vault_arg = getattr(args, "vault", None) or os.environ.get("L2N_VAULT") or settings.get("vault")
+    if not vault_arg or not Path(vault_arg).is_dir():
+        return fail(
+            "vault not found: %s (pass --vault, set L2N_VAULT, or [triage] vault in the overlay)"
+            % (vault_arg or "-")
+        )
+    scope = getattr(args, "scope", None) or settings.get("scope") or []
+    notes = triage_mod.scan_vault(
+        Path(vault_arg), only_l3=not getattr(args, "any_note", False), scope=list(scope)
+    )
+    brief = triage_mod.triage_prompt(path, data, notes, top=args.top)
+    out = getattr(args, "out", None)
+    if out:
+        Path(out).write_text(brief + "\n", encoding="utf-8", newline="\n")
+        _out.ok("triage-prompt: %s (%d notes compared)" % (Path(out).name, len(notes)))
+    else:
+        _out.line(brief)
     return exit_codes.OK
 
 
@@ -1655,7 +1680,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="印出分流交辦書：每段在 vault 裡可能已有的筆記",
     )
     p.add_argument("json_file", nargs="?", help="正式 JSON 路徑")
-    p.add_argument("--vault", default=None, help="Obsidian vault 資料夾（只在本機讀取）")
+    p.add_argument(
+        "--vault", default=None,
+        help="Obsidian vault 資料夾（只在本機讀取；預設取環境變數 L2N_VAULT 或 overlay 的 [triage] vault）",
+    )
+    p.add_argument(
+        "--scope", action="append", default=None,
+        help="只比對 vault 內這個子資料夾（可重複；預設取 overlay 的 [triage] scope）",
+    )
+    p.add_argument("--out", default=None, help="寫到這個檔案（只有成功才寫，失敗不留檔）")
     p.add_argument(
         "--any-note", action="store_true", help="候選不限 L3 筆記（預設只看 tags 含 L3 的筆記）"
     )

@@ -48,7 +48,7 @@ def frame_name(stem: str, sec: float, suffix: str = ".png") -> str:
 
 
 def frame_seconds(name: str, fallback: float = 0.0) -> float:
-    """Recover seconds from a ``<stem>-MMSS.png`` filename.
+    """Recover seconds from a ``<stem>-MMSS.png`` (or ``-MMSSb.png``) filename.
 
     The minute field grows past two digits once a recording passes 99 minutes
     (``-14901.png`` is 149:01), so the last two digits are always the seconds and
@@ -57,7 +57,9 @@ def frame_seconds(name: str, fallback: float = 0.0) -> float:
     """
     import re
 
-    match = re.search(r"-(\d+)\.\w+$", str(name))
+    # A letter after the digits (``-0445b.png``) marks a second frame captured
+    # in the same second; it is still that second.
+    match = re.search(r"-(\d+)[a-z]?\.\w+$", str(name))
     if not match:
         return fallback
     digits = match.group(1)

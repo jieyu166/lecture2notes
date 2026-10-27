@@ -85,3 +85,55 @@ def test_cli_requires_an_existing_vault(tmp_path):
     path = write_json_atomic(tmp_path / "sample-talk.json", document())
     result = run_cli(["triage-prompt", str(path), "--vault", str(tmp_path / "nope")])
     assert result.returncode == 2
+
+
+def test_notes_written_from_this_lecture_are_excluded(tmp_path):
+    vault = make_vault(tmp_path)
+    (vault / "sub" / "Series E1 note.md").write_text(
+        L3_NOTE.replace("# Note", 'source: "talk E1.mp4"\n# Note'), encoding="utf-8"
+    )
+    (vault / "sub" / "Series E11 note.md").write_text(
+        L3_NOTE.replace("# Note", 'source: "talk E11.mp4"\n# Note'), encoding="utf-8"
+    )
+    data = document()
+    data["source"]["video"] = "E1.mp4"
+    path = write_json_atomic(tmp_path / "E1.json", data)
+    result = run_cli(["triage-prompt", str(path), "--vault", str(vault)])
+    assert result.returncode == 0, result.stderr
+    assert "排除本講座自己產生的筆記 1 篇" in result.stdout
+    assert "[[Series E1 note]]" in result.stdout.split("## 各段")[0]
+    assert "[[Series E11 note]]" in result.stdout.split("## 各段")[1]
+
+
+def test_english_keywords_match_whole_words_only(tmp_path):
+    vault = tmp_path / "v"
+    vault.mkdir()
+    (vault / "Pets.md").write_text('---\ntags:\n  - "L3"\n---\npets and radiology everywhere\n', encoding="utf-8")
+    notes = triage.scan_vault(vault)
+    assert triage.candidates(["ETS", "Radio"], notes) == []
+
+
+def test_scope_limits_the_scan(tmp_path):
+    vault = make_vault(tmp_path)
+    assert triage.scan_vault(vault, scope=["nope"]) == []
+    assert [n.rel for n in triage.scan_vault(vault, scope=["sub"])] == ["sub/Gadget-RADS 分級.md"]
+
+
+def test_failure_writes_nothing_and_errors_go_to_stderr(tmp_path):
+    path = write_json_atomic(tmp_path / "sample-talk.json", document())
+    out = tmp_path / "sample-talk.triage.md"
+    result = run_cli(["triage-prompt", str(path), "--vault", str(tmp_path / "nope"), "--out", str(out)])
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "vault not found" in result.stderr
+    assert not out.exists()
+
+
+def test_out_writes_the_brief_and_vault_comes_from_env(tmp_path, monkeypatch):
+    vault = make_vault(tmp_path)
+    path = write_json_atomic(tmp_path / "sample-talk.json", document())
+    out = tmp_path / "sample-talk.triage.md"
+    monkeypatch.setenv("L2N_VAULT", str(vault))
+    result = run_cli(["triage-prompt", str(path), "--out", str(out)])
+    assert result.returncode == 0, result.stderr
+    assert "[[Gadget-RADS 分級]]" in out.read_text(encoding="utf-8")

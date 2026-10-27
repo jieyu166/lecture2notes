@@ -43,6 +43,9 @@ STOPWORDS = frozenset("""
 the and for with from that this these those are was were has have had not but
 can may will its into over under than then there their about which what when
 how why who all any one two use used using case cases also more most such
+english part parts chapter lecture lectures question questions answer answers
+example examples test tests practice review introduction summary section page
+slide slides note notes video course class lesson unit level basic advanced
 """.split())
 #: Chinese chunks that are structure, not topic.
 CJK_STOP = frozenset(("介紹", "總結", "結論", "概論", "簡介", "問答", "開場", "回顧", "案例", "討論"))
@@ -152,26 +155,76 @@ def _read_note(path: Path, vault: Path) -> Optional[VaultNote]:
     )
 
 
-def scan_vault(vault: Path, only_l3: bool = True) -> List[VaultNote]:
-    """Every note in ``vault`` (hidden folders skipped), L3 notes only by default."""
+def scan_vault(
+    vault: Path, only_l3: bool = True, scope: Sequence[str] = ()
+) -> List[VaultNote]:
+    """Every note in ``vault`` (hidden folders skipped), L3 notes only by default.
+
+    ``scope`` limits the scan to those subfolders of the vault: a language
+    course compared against a radiology vault otherwise matches every note
+    that happens to share an English word.
+    """
     vault = Path(vault)
+    roots = [vault / part for part in scope] if scope else [vault]
     notes: List[VaultNote] = []
-    for path in sorted(vault.rglob("*.md")):
-        if any(part.startswith(".") for part in path.relative_to(vault).parts):
+    seen = set()
+    for root in roots:
+        if not root.is_dir():
             continue
-        note = _read_note(path, vault)
-        if note is not None and (note.is_l3 or not only_l3):
-            notes.append(note)
-    return notes
+        for path in sorted(root.rglob("*.md")):
+            if path in seen or any(part.startswith(".") for part in path.relative_to(vault).parts):
+                continue
+            seen.add(path)
+            note = _read_note(path, vault)
+            if note is not None and (note.is_l3 or not only_l3):
+                notes.append(note)
+    return sorted(notes, key=lambda n: n.rel)
+
+
+def _own_names(json_path: Path, data: Mapping[str, Any]) -> List[str]:
+    """File names that identify this lecture: its video, document and subtitle."""
+    stem = Path(json_path).stem
+    names = {stem + ".json", stem + ".srt", stem + ".viewer.html"}
+    source = data.get("source")
+    if isinstance(source, Mapping):
+        if isinstance(source.get("video"), str) and source["video"]:
+            names.add(Path(source["video"]).name)
+        subtitle = source.get("subtitle")
+        if isinstance(subtitle, Mapping) and isinstance(subtitle.get("path"), str) and subtitle["path"]:
+            names.add(Path(subtitle["path"]).name)
+    return sorted(names)
+
+
+def is_own_note(note: VaultNote, stem: str, own_names: Sequence[str]) -> bool:
+    """Was this note written from this very lecture?
+
+    Such a note covers the segment by construction, so offering it as proof
+    that the reader already knows the material is circular. It is recognised
+    by its name (``<stem>.v4``) or by citing one of the lecture's own files.
+    """
+    if note.name == stem or note.name.startswith(stem + "."):
+        return True
+    text = note.body + " " + note.title
+    return any(
+        re.search(r"(?<![\w.])%s(?![\w])" % re.escape(name), text) for name in own_names
+    )
 
 
 def _snippet(body: str, term: str) -> str:
-    needle = term.lower()
+    pattern = _pattern(term)
     for line in body.split("\n"):
-        if needle in line.lower():
+        if pattern.search(line):
             line = " ".join(line.split())
             return line if len(line) <= SNIPPET_CHARS else line[:SNIPPET_CHARS] + "..."
     return ""
+
+
+def _pattern(keyword: str) -> "re.Pattern[str]":
+    """English terms match whole words only ("ETS" is not in "pets", "Radio"
+    is not "Radiology"); Chinese has no word boundaries and matches as is."""
+    if re.match(r"^[A-Za-z0-9+\-]+$", keyword):
+        return re.compile(r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(keyword), re.IGNORECASE)
+    return re.compile(re.escape(keyword), re.IGNORECASE)
 
 
 def candidates(
@@ -179,20 +232,20 @@ def candidates(
 ) -> List[Candidate]:
     """The notes most likely to cover a segment, best first."""
     found: List[Candidate] = []
+    patterns = [(keyword, _pattern(keyword)) for keyword in keywords]
     for note in notes:
-        heading = (note.name + " " + note.title).lower()
-        body = note.body.lower()
+        heading = note.name + " " + note.title
+        body = note.body
         score, matched = 0, []
-        for keyword in keywords:
-            key = keyword.lower()
-            if key in heading:
+        for keyword, pattern in patterns:
+            if pattern.search(heading):
                 score += TITLE_WEIGHT
                 matched.append(keyword)
-            elif key in body:
+            elif pattern.search(body):
                 score += 1
                 matched.append(keyword)
         if score >= MIN_SCORE:
-            body_hit = next((k for k in matched if k.lower() in body), "")
+            body_hit = next((k for k in matched if _pattern(k).search(body)), "")
             found.append(Candidate(
                 note, score, tuple(matched), _snippet(note.body, body_hit) if body_hit else ""
             ))
@@ -206,7 +259,11 @@ def triage_prompt(
     notes: Sequence[VaultNote],
     top: int = 5,
 ) -> str:
-    """The whole brief, as Markdown."""
+    """The whole brief, as Markdown. Notes written from this lecture are left out."""
+    stem = Path(json_path).stem
+    own = _own_names(json_path, data)
+    excluded = [note for note in notes if is_own_note(note, stem, own)]
+    notes = [note for note in notes if note not in excluded]
     segments = _segments(data)
     total = sum(_minutes(s) for s in segments)
     out: List[str] = [
@@ -214,6 +271,9 @@ def triage_prompt(
         "",
         "- 文件：`%s`" % Path(json_path).name,
         "- 全片 %.1f 分鐘，%d 段；比對了 %d 篇筆記" % (total, len(segments), len(notes)),
+        "- 排除本講座自己產生的筆記 %d 篇（用它判「已知」是循環論證）%s" % (
+            len(excluded), "：" + "、".join(n.link for n in excluded[:5]) if excluded else ""
+        ),
         "",
         "## 你要做的事",
         "",
@@ -278,6 +338,7 @@ __all__ = [
     "Candidate",
     "VaultNote",
     "candidates",
+    "is_own_note",
     "scan_vault",
     "segment_keywords",
     "triage_prompt",

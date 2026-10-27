@@ -186,10 +186,15 @@ l2n frames <video> --mode interval --every 45
 
 ```bash
 l2n lines <stem>.json                        # 1. 把字幕逐句寫進 lines（機械，不要手寫）
-l2n triage-prompt <stem>.json --vault <vault> # 2. 印分流交辦書（只在本機讀 vault）
+l2n triage-prompt <stem>.json --vault <vault> --out <stem>.triage.md  # 2. 分流交辦書（只在本機讀 vault）
 #    3. 你（語言模型）寫每段 question、triage 與頂層 triage_overall
 l2n check json <stem>.json                   # 4. 驗收
 ```
+
+`triage-prompt` 的 vault 依序取 `--vault`、環境變數 `L2N_VAULT`、overlay `outputs.toml` 的
+`[triage] vault`；`--scope <子資料夾>`（或 `[triage] scope`）限縮比對範圍。引用本講座自己
+檔案（影片、JSON、字幕）的筆記會被排除，因為用它判「已知」是循環論證。用 `--out` 寫檔：
+失敗時不留檔，錯誤只印到 stderr。
 
 | 欄位 | 形狀與規則 |
 | ---- | ---- |
