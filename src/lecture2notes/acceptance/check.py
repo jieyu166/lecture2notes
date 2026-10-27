@@ -774,6 +774,23 @@ def check_frames(path: Path) -> StageReport:
     return report
 
 
+#: Files beside a lecture that end in .json but are not one: the frame
+#: manifest, OCR cache, correction sidecar, publish record, bilingual
+#: manifest and the hub's own override files.
+SIDECAR_SUFFIXES = (
+    ".frames.json", ".frames_ocr.json", ".corrections.json", ".publish.json",
+    ".raw.json", ".bak",
+)
+
+
+def is_sidecar_json(path: Path) -> bool:
+    name = Path(path).name
+    return (
+        name.endswith(SIDECAR_SUFFIXES) or name.startswith("_")
+        or Path(path).parent.name.endswith(".bilingual")
+    )
+
+
 def check_json(path: Path, require_frames: bool = True) -> StageReport:
     """The ``json`` stage check over one canonical document.
 
@@ -783,6 +800,12 @@ def check_json(path: Path, require_frames: bool = True) -> StageReport:
     """
     target = Path(path)
     report = StageReport("json", target.name)
+    if is_sidecar_json(target):
+        # Run over a whole folder, `check json` meets these too. Each used to
+        # report an error for not being a lecture, which buried the real ones.
+        report.add("info", "not_lecture", target.name,
+                   "not a lecture JSON (a sidecar file); skipped")
+        return report
 
     raw = target.read_bytes()
     if raw[:3] == b"\xef\xbb\xbf":
@@ -824,6 +847,9 @@ def check_json(path: Path, require_frames: bool = True) -> StageReport:
             ))
         report.findings.extend(rules.frame_ocr_email_findings(data))
         report.findings.extend(rules.frame_ocr_url_id_findings(data))
+        report.findings.extend(rules.segment_number_findings(
+            data, spoken_by_segment(data, target.with_name(target.stem + ".srt"))
+        ))
     return report
 
 
@@ -1193,7 +1219,7 @@ def check_note_stage(
     regions = note_regions(lines)
 
     _rule_sections(lines, note_path, report)
-    _rule_embeds(text, note_path, report)
+    _rule_embeds(text, note_path, report, json_path)
     _rule_unverified(data, lines, regions, note_path, report)
     _rule_corrections(lines, regions, note_path, report)
     _rule_transcript_paste(
@@ -1595,10 +1621,21 @@ def _rule_sections(lines: Sequence[str], note: Path, report: StageReport) -> Non
         seen.append(position)
 
 
-def _rule_embeds(text: str, note: Path, report: StageReport) -> None:
-    """R2: every embed resolves to a file that exists beside the note."""
+def _rule_embeds(
+    text: str, note: Path, report: StageReport, json_path: Optional[Path] = None
+) -> None:
+    """R2: every embed resolves to a file beside the note or beside its document.
+
+    The second place matters for a note copied into a backup or vault folder:
+    the frames stay with the lecture, and the same note must not fail R2 in
+    one folder and pass it in another.
+    """
     for ref in sorted(set(match.group(1) for match in NOTE_EMBED.finditer(text))):
-        if not _resolve_embed(note, ref):
+        beside_document = (
+            json_path is not None
+            and _resolve_embed(Path(json_path).parent / Path(note).name, ref)
+        )
+        if not _resolve_embed(note, ref) and not beside_document:
             report.add("error", "R2", ref,
                        "the note embeds a file that does not exist")
 
@@ -1991,6 +2028,27 @@ def frontmatter_end(lines: Sequence[str]) -> int:
             if lines[position].strip() == "---":
                 return position + 1
     return 0
+
+
+def spoken_by_segment(data: Mapping[str, Any], transcript: Optional[Path]) -> List[str]:
+    """Each segment's spoken text: from ``lines`` (with ``zh``) when the
+    document has them, else from the subtitle beside it."""
+    lines = [l for l in (data.get("lines") or []) if isinstance(l, Mapping)]
+    segments = [s for s in (data.get("segments") or []) if isinstance(s, Mapping)]
+    if not lines:
+        return segment_transcripts(data, transcript)
+    out: List[str] = []
+    for segment in segments:
+        try:
+            start, end = float(segment.get("start_sec")), float(segment.get("end_sec"))
+        except (TypeError, ValueError):
+            out.append("")
+            continue
+        out.append(" ".join(
+            "%s %s" % (l.get("text") or "", l.get("zh") or "") for l in lines
+            if isinstance(l.get("t"), (int, float)) and start <= float(l["t"]) < end
+        ))
+    return out
 
 
 def segment_transcripts(

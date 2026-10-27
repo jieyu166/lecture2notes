@@ -41,6 +41,9 @@ l2n check json <stem>.json                 # 4. 驗收
 刪掉 `draft` 之後這些規則恢復為 error。
 
 舊版（1.x）與 2.0 文件都用 `l2n migrate <stem>.json` 原地升級到 2.1，不要手動改 `schema_version`。
+`migrate` 同時修早期資料的兩個問題（已是 2.1 也會修，並留 `.bak`）：`duration_sec` 與影片實際長度
+（ffprobe）差超過 1 秒就換成實際值，原本對齊舊值的最後一段一併調整；`bullets_zh[].kind` 不是
+synthesis／quote（早期的 `speaker`）就改成 synthesis。
 `check json` 回報 `got '2.1'` 之類的版本錯誤，代表**這台的 `l2n` 太舊**：升級程式，不要改檔案。
 
 ## 最小範例
@@ -194,7 +197,8 @@ l2n check json <stem>.json                   # 4. 驗收
 `triage-prompt` 的 vault 依序取 `--vault`、環境變數 `L2N_VAULT`、overlay `outputs.toml` 的
 `[triage] vault`；`--scope <子資料夾>`（或 `[triage] scope`）限縮比對範圍。引用本講座自己
 檔案（影片、JSON、字幕）的筆記會被排除，因為用它判「已知」是循環論證。用 `--out` 寫檔：
-失敗時不留檔，錯誤只印到 stderr。
+失敗時不留檔，錯誤只印到 stderr。筆記名稱或標題含本講座 `title` 的也會排除；手動複製、沒有
+source 的副本用 `--exclude "<檔名樣式>"`（或 overlay `[triage] exclude`）排除。
 
 | 欄位 | 形狀與規則 |
 | ---- | ---- |
@@ -241,6 +245,11 @@ l2n check json <stem>.json                   # 4. 驗收
 ```bash
 l2n check json <stem>.json
 ```
+
+`check json` 也會比對每段 `summary_zh`／`bullets_zh` 裡的數字（兩位數以上或小數）與本段字幕
+（有 `lines` 就用 `lines` 含 `zh`）：本段沒說、只在投影片上、或其實在別段說的，各報一條
+warning `number_unsupported`。早期 JSON 常見這三種錯（內容錯位、投影片數字寫成講者說的），
+逐條回字幕核對。`*.frames.json`、`*.corrections.json` 這類附屬檔會被認出並略過。
 
 exit code 0 才算完成。時間欄位一旦寫定，內容階段不得更動——`l2n check` 會比對時間簽章。
 

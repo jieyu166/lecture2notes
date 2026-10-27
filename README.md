@@ -512,6 +512,9 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
   R7 放過 PMID 與一般敘述；新增 R15（「」引文要找得到出處）與 `check json` 的 `frame_ocr_url_id`；
   `l2n render --refresh` 只更新 JSON 衍生區塊（Summary 重點、分流、References）並留 `.bak`；
   `l2n --where` 印出實際載入的安裝；課程首頁搜尋改用講題稱呼各場；擴寫交辦書把獨立驗收列為必做。
+- **早期資料升級（2024TSIR 實地回報）**：`migrate` 用 ffprobe 校正截斷的 `duration_sec` 並對齊最後一段、
+  把早期的 `kind: "speaker"` 轉成 synthesis；`check json` 新增 `number_unsupported`（摘要數字本段沒說、
+  只在投影片、或在別段）並略過附屬 JSON；R2 也到 JSON 所在資料夾找影格；`triage-prompt --exclude`。
 - **`l2n migrate` 拒絕非講座 JSON**：沒有 `segments` 的檔案（例如其他工具的 `*.timing-fixes.json`）
   不再被包成空的講座骨架，回報後原檔不動（exit 2）。版本號改為 `0.3.0.dev0`，從分支
   `pip install -U` 才會真的重裝。

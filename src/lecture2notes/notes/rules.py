@@ -392,8 +392,66 @@ def frame_ocr_url_id_findings(data: Mapping[str, Any]) -> List[Finding]:
     return findings
 
 
+#: A number worth checking against what was said: two or more digits, or a
+#: decimal. A lone digit is too often a list position or a count in prose.
+SEGMENT_NUMBER = re.compile(r"(?<![\d.])(\d+(?:[.,]\d+)+|\d{2,})(?![\d])")
+
+
+def _numbers(text: str) -> List[str]:
+    """Numbers as written, commas dropped. A zero-padded ``01`` is a label
+    (段落 01, 條列 01-A), not a value anyone said."""
+    out = []
+    for match in SEGMENT_NUMBER.finditer(text or ""):
+        value = match.group(1).replace(",", "")
+        if not (value.startswith("0") and len(value) > 1 and not value.startswith("0.")):
+            out.append(value)
+    return out
+
+
+def segment_number_findings(
+    data: Mapping[str, Any], transcripts: Sequence[str]
+) -> List[Finding]:
+    """Warn on a number in a segment's summary or bullets the segment never says.
+
+    ``transcripts`` is each segment's spoken text (parallel to ``segments``).
+    A number found only in the segment's slide OCR is reported as slide-only
+    -- a value on the slide is not a value the speaker stated -- and one found
+    only in another segment's speech names that segment, which is what a
+    summary written against the wrong stretch of the lecture looks like.
+    """
+    segments = [s for s in (data.get("segments") or []) if isinstance(s, Mapping)]
+    spoken = [set(_numbers(t)) for t in transcripts] + [set()] * (len(segments) - len(transcripts))
+    findings: List[Finding] = []
+    for number, segment in enumerate(segments, 1):
+        if not transcripts or number > len(transcripts) or not transcripts[number - 1].strip():
+            continue
+        bullets = [b.get("text") if isinstance(b, Mapping) else b for b in segment.get("bullets_zh") or []]
+        claimed = _numbers(" ".join([str(segment.get("summary_zh") or "")] + [str(b or "") for b in bullets]))
+        slides = set()
+        for entry in segment.get("frame_ocr") or []:
+            if isinstance(entry, Mapping):
+                slides.update(_numbers(str(entry.get("text") or "")))
+        for value in sorted(set(claimed), key=claimed.index):
+            if value in spoken[number - 1]:
+                continue
+            elsewhere = [i + 1 for i, said in enumerate(spoken) if value in said and i + 1 != number]
+            if value in slides:
+                why = "is on the segment's slide but the speaker does not say it"
+            elif elsewhere:
+                why = "is said in segment %s, not in this one" % ", ".join(str(i) for i in elsewhere[:3])
+            else:
+                why = "is not in this segment's transcript or slides"
+            findings.append(Finding(
+                "warn", "number_unsupported",
+                "segment %d: %s %s" % (number, value, why),
+                number, None, "segments[%d]" % number,
+            ))
+    return findings
+
+
 __all__ = [
     "EMAIL_PATTERN",
+    "segment_number_findings",
     "URL_ID_PATTERN",
     "frame_ocr_url_id_findings",
     "forbidden_term_findings",

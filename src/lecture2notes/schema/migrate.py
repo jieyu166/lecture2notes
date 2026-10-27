@@ -19,12 +19,13 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Union
 
 from lecture2notes.schema.io import write_json_atomic
 from lecture2notes.schema.model import (
+    BULLET_KINDS,
     SCHEMA_VERSION,
     Bullet,
     FrameOcr,
@@ -89,14 +90,16 @@ class MigrationResult:
     backup: Optional[Path]
     changed: bool
     segments: int = 0
+    repairs: List[str] = field(default_factory=list)
 
     @property
     def summary(self) -> str:
         if not self.changed:
             return "%s is already schema %s" % (self.path.name, SCHEMA_VERSION)
-        return "%s upgraded to schema %s (%d segments), backup %s" % (
+        return "%s upgraded to schema %s (%d segments), backup %s%s" % (
             self.path.name, SCHEMA_VERSION, self.segments,
             self.backup.name if self.backup else "-",
+            ("; repaired: " + "; ".join(self.repairs)) if self.repairs else "",
         )
 
 
@@ -260,6 +263,71 @@ def relabel(data: Mapping[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+#: How far ``duration_sec`` may sit from the media's own duration before it is
+#: replaced. Early documents stored a truncated value (498 for 500.5 s), which
+#: leaves the last segment and the transcript running past the end.
+DURATION_TOLERANCE_SEC = 1.0
+
+
+def probe_media_duration(video: Path) -> Optional[float]:
+    """The media's duration from ffprobe, or None (no file, no ffprobe, no answer)."""
+    import shutil
+    import subprocess
+
+    tool = shutil.which("ffprobe")
+    if tool is None or not Path(video).is_file():
+        return None
+    try:
+        done = subprocess.run(
+            [tool, "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(video)],
+            capture_output=True, text=True, timeout=60,
+        )
+        value = float(done.stdout.strip())
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return value if value > 0 else None
+
+
+def repair(payload: Dict[str, Any], folder: Path) -> List[str]:
+    """Fix what early documents got wrong, in place; say what was changed.
+
+    * a bullet ``kind`` other than synthesis/quote (early files wrote
+      ``speaker``) becomes ``synthesis``;
+    * a ``duration_sec`` more than a second off the video's real duration is
+      replaced by it, and a last segment that ended at the old floor is moved
+      to the new one.
+    """
+    notes: List[str] = []
+    odd = 0
+    for segment in payload.get("segments") or []:
+        if not isinstance(segment, dict):
+            continue
+        for bullet in segment.get("bullets_zh") or []:
+            if isinstance(bullet, dict) and bullet.get("kind") not in BULLET_KINDS:
+                bullet["kind"] = "synthesis"
+                odd += 1
+    if odd:
+        notes.append("%d bullet kind(s) -> synthesis" % odd)
+
+    source = payload.get("source") if isinstance(payload.get("source"), Mapping) else {}
+    video = source.get("video") if isinstance(source, Mapping) else None
+    probed = probe_media_duration(Path(folder) / str(video)) if isinstance(video, str) and video else None
+    old = finite_number(payload.get("duration_sec"))
+    if probed is not None and (old is None or abs(probed - old) > DURATION_TOLERANCE_SEC):
+        payload["duration_sec"] = round(probed, 3)
+        notes.append("duration_sec %s -> %.3f (ffprobe)" % (old, probed))
+        segments = [s for s in payload.get("segments") or [] if isinstance(s, dict)]
+        if segments and old is not None:
+            last = segments[-1]
+            end = finite_number(last.get("end_sec"))
+            if end is not None and abs(end - int(old)) <= 1e-6:
+                last["end_sec"] = int(probed)
+                last["end_time"] = format_clock(int(probed))
+                notes.append("last segment end_sec %d -> %d" % (int(old), int(probed)))
+    return notes
+
+
 def migrate_file(path: Union[str, Path]) -> MigrationResult:
     """Upgrade ``path`` in place, leaving the original bytes at ``<path>.bak``.
 
@@ -276,17 +344,18 @@ def migrate_file(path: Union[str, Path]) -> MigrationResult:
         raise NotALecture(
             "%s has no segments; it is not a lecture document, left untouched" % target.name
         )
-    if not is_legacy(data) and data.get("schema_version") == SCHEMA_VERSION:
-        return MigrationResult(target, None, False, len(data.get("segments") or []))
-
-    backup = target.with_name(target.name + ".bak")
-    backup.write_bytes(raw)
     if is_legacy(data):
         upgraded = normalize_legacy(data, stem=target.stem)
     else:
         upgraded = relabel(data)
+    repairs = repair(upgraded, target.parent)
+    if not is_legacy(data) and data.get("schema_version") == SCHEMA_VERSION and not repairs:
+        return MigrationResult(target, None, False, len(data.get("segments") or []))
+
+    backup = target.with_name(target.name + ".bak")
+    backup.write_bytes(raw)
     write_json_atomic(target, upgraded)
-    return MigrationResult(target, backup, True, len(upgraded.get("segments") or []))
+    return MigrationResult(target, backup, True, len(upgraded.get("segments") or []), repairs)
 
 
 __all__ = [
@@ -298,4 +367,6 @@ __all__ = [
     "migrate_file",
     "normalize_legacy",
     "relabel",
+    "repair",
+    "probe_media_duration",
 ]

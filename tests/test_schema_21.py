@@ -309,3 +309,60 @@ def test_migrate_refuses_a_json_that_is_not_a_lecture(tmp_path):
     assert "not a lecture" in result.stdout + result.stderr
     assert target.read_text(encoding="utf-8") == original
     assert not (tmp_path / "E1.timing-fixes.json.bak").exists()
+
+
+def test_migrate_repairs_a_truncated_duration_and_odd_bullet_kinds(tmp_path):
+    import shutil
+
+    if shutil.which("ffprobe") is None:
+        pytest.skip("ffprobe not installed")
+    shutil.copy(Path(__file__).parent / "fixtures" / "media" / "copyrightx-12-1-clip.mp4", tmp_path / "clip.mp4")
+    document = base()
+    document["source"]["video"] = "clip.mp4"
+    document["duration_sec"] = 23
+    document["segments"] = document["segments"][:1]
+    document["segments"][0].update({"end_sec": 23, "end_time": "00:00:23"})
+    document["segments"][0]["bullets_zh"][0]["kind"] = "speaker"
+    target = write_json_atomic(tmp_path / "clip.json", document)
+
+    result = migrate_file(target)
+    assert result.changed and result.backup.exists()
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data["duration_sec"] == 25.025
+    assert data["segments"][-1]["end_sec"] == 25 and data["segments"][-1]["end_time"] == "00:00:25"
+    assert data["segments"][0]["bullets_zh"][0]["kind"] == "synthesis"
+    assert any("ffprobe" in note for note in result.repairs)
+    assert not migrate_file(target).changed
+
+
+@pytest.mark.parametrize("name", ["talk.frames.json", "talk.corrections.json", "_titles.json"])
+def test_check_json_skips_sidecars(tmp_path, name):
+    target = tmp_path / name
+    target.write_text('{"frames": []}', encoding="utf-8")
+    report = check_json(target)
+    assert [f.code for f in report.findings] == ["not_lecture"]
+    assert report.findings[0].severity == "info"
+    result = run_cli(["check", "json", str(target)])
+    assert result.returncode == 0, result.stdout
+
+
+def test_numbers_in_a_summary_are_checked_against_the_segment(tmp_path):
+    from lecture2notes.notes import rules
+
+    document = full()
+    document["lines"] = [
+        {"t": 1.0, "end": 4.0, "text": "about 35.5 percent"},
+        {"t": 70.0, "end": 75.0, "text": "we follow up at 12 months"},
+        {"t": 130.0, "end": 178.0, "text": "nothing numeric here"},
+    ]
+    document["segments"][0]["summary_zh"] = "約 35.5% 會增強。"
+    document["segments"][2]["summary_zh"] = "12 個月追蹤；AFP 400 以上要注意；腫瘤 20 mm。"
+    document["segments"][2]["frame_ocr"] = [{"frame": "frames/x.png", "text": "AFP > 400 ng/mL"}]
+    from lecture2notes.acceptance.check import spoken_by_segment
+
+    found = rules.segment_number_findings(document, spoken_by_segment(document, None))
+    messages = [f.message for f in found]
+    assert not any("35.5" in m for m in messages)
+    assert "segment 3: 12 is said in segment 2, not in this one" in messages
+    assert "segment 3: 400 is on the segment's slide but the speaker does not say it" in messages
+    assert "segment 3: 20 is not in this segment's transcript or slides" in messages

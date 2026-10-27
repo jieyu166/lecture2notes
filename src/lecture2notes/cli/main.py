@@ -788,7 +788,8 @@ def cmd_triage_prompt(args: argparse.Namespace) -> int:
     notes = triage_mod.scan_vault(
         Path(vault_arg), only_l3=not getattr(args, "any_note", False), scope=list(scope)
     )
-    brief = triage_mod.triage_prompt(path, data, notes, top=args.top)
+    exclude = list(getattr(args, "exclude", None) or []) + list(settings.get("exclude") or [])
+    brief = triage_mod.triage_prompt(path, data, notes, top=args.top, exclude=exclude)
     out = getattr(args, "out", None)
     if out:
         Path(out).write_text(brief + "\n", encoding="utf-8", newline="\n")
@@ -1726,6 +1727,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="只比對 vault 內這個子資料夾（可重複；預設取 overlay 的 [triage] scope）",
     )
     p.add_argument("--out", default=None, help="寫到這個檔案（只有成功才寫，失敗不留檔）")
+    p.add_argument(
+        "--exclude", action="append", default=None,
+        help="排除檔名或路徑符合這個樣式的筆記（glob，可重複；例：\"20241102 TSIR*\"）",
+    )
     p.add_argument(
         "--any-note", action="store_true", help="候選不限 L3 筆記（預設只看 tags 含 L3 的筆記）"
     )

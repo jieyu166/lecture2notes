@@ -1517,3 +1517,18 @@ def test_r15_accepts_the_speakers_own_words(lecture):
     json_path, note_path = lecture
     _insert_into_first_section(note_path, "講者說「%s」(00:00:05)" % LONG_RUN[:20])
     assert "R15" not in _codes(check.check_note_stage(json_path, note_path))
+
+
+def test_r8_does_not_read_ptbd_as_tbd(lecture):
+    json_path, note_path = lecture
+    _insert_into_first_section(note_path, "- 處置：PTBD")
+    assert "R8" not in _codes(check.check_note_stage(json_path, note_path))
+
+
+def test_r2_finds_frames_beside_the_document_when_the_note_moved(lecture, tmp_path):
+    json_path, note_path = lecture
+    elsewhere = tmp_path / "backup"
+    elsewhere.mkdir()
+    moved = elsewhere / note_path.name
+    moved.write_text(note_path.read_text(encoding="utf-8"), encoding="utf-8")
+    assert _codes(check.check_note_stage(json_path, moved)) == _codes(check.check_note_stage(json_path, note_path))

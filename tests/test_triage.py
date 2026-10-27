@@ -137,3 +137,19 @@ def test_out_writes_the_brief_and_vault_comes_from_env(tmp_path, monkeypatch):
     result = run_cli(["triage-prompt", str(path), "--out", str(out)])
     assert result.returncode == 0, result.stderr
     assert "[[Gadget-RADS 分級]]" in out.read_text(encoding="utf-8")
+
+
+def test_hand_copied_notes_are_excluded_by_title_or_pattern(tmp_path):
+    vault = make_vault(tmp_path)
+    (vault / "sub" / "20241102 TSIR 肝癌介入.md").write_text(L3_NOTE, encoding="utf-8")
+    (vault / "sub" / "Series talk copy.md").write_text(
+        L3_NOTE.replace("Placeholder Grading Note", "佔位講座標題長版本"), encoding="utf-8"
+    )
+    data = document()
+    data["title"] = "佔位講座標題長版本"
+    path = write_json_atomic(tmp_path / "sample-talk.json", data)
+    result = run_cli(["triage-prompt", str(path), "--vault", str(vault), "--exclude", "20241102 TSIR*"])
+    assert result.returncode == 0, result.stderr
+    head = result.stdout.split("## 各段")[0]
+    assert "排除本講座自己產生的筆記 2 篇" in head
+    assert "[[20241102 TSIR 肝癌介入]]" in head and "[[Series talk copy]]" in head

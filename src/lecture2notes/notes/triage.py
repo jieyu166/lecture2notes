@@ -195,14 +195,29 @@ def _own_names(json_path: Path, data: Mapping[str, Any]) -> List[str]:
     return sorted(names)
 
 
-def is_own_note(note: VaultNote, stem: str, own_names: Sequence[str]) -> bool:
+#: A lecture title shorter than this is too generic to exclude notes by.
+OWN_TITLE_MIN_CHARS = 6
+
+
+def is_own_note(
+    note: VaultNote, stem: str, own_names: Sequence[str], title: str = "",
+    exclude: Sequence[str] = (),
+) -> bool:
     """Was this note written from this very lecture?
 
     Such a note covers the segment by construction, so offering it as proof
     that the reader already knows the material is circular. It is recognised
-    by its name (``<stem>.v4``) or by citing one of the lecture's own files.
+    by its name (``<stem>.v4``), by citing one of the lecture's own files, by
+    carrying the lecture's title in its name or title, or by matching one of
+    the ``exclude`` patterns (for copies made by hand, with no source field).
     """
+    import fnmatch
+
     if note.name == stem or note.name.startswith(stem + "."):
+        return True
+    if any(fnmatch.fnmatch(note.name, p) or fnmatch.fnmatch(note.rel, p) for p in exclude):
+        return True
+    if len(title) >= OWN_TITLE_MIN_CHARS and (title in note.name or title in note.title):
         return True
     text = note.body + " " + note.title
     return any(
@@ -258,11 +273,13 @@ def triage_prompt(
     data: Mapping[str, Any],
     notes: Sequence[VaultNote],
     top: int = 5,
+    exclude: Sequence[str] = (),
 ) -> str:
     """The whole brief, as Markdown. Notes written from this lecture are left out."""
     stem = Path(json_path).stem
     own = _own_names(json_path, data)
-    excluded = [note for note in notes if is_own_note(note, stem, own)]
+    title = str(data.get("title") or "").strip()
+    excluded = [note for note in notes if is_own_note(note, stem, own, title, exclude)]
     notes = [note for note in notes if note not in excluded]
     segments = _segments(data)
     total = sum(_minutes(s) for s in segments)
