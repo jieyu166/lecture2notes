@@ -512,6 +512,9 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
   R7 放過 PMID 與一般敘述；新增 R15（「」引文要找得到出處）與 `check json` 的 `frame_ocr_url_id`；
   `l2n render --refresh` 只更新 JSON 衍生區塊（Summary 重點、分流、References）並留 `.bak`；
   `l2n --where` 印出實際載入的安裝；課程首頁搜尋改用講題稱呼各場；擴寫交辦書把獨立驗收列為必做。
+- **影像串流晚於容器起點**（實檔：影像 3.8 秒、音訊與容器 0）：PySceneDetect 從第一個影像畫面起算，
+  換頁時間因此早了 3.8 秒、抽到的是換頁前的畫面；現在改用容器時間軸。之前產生的 `frames.json` 要用
+  `l2n frames --force` 重抓。`number_unsupported` 對整條標明「投影片」的條列不再逐數字報。
 - **`l2n render --upgrade`**：早期 v4.md 補上缺的必要章節、錯字對照表、分流與風格標記，既有內容不動、留 `.bak`。
 - **影片起點偏移**：實測 Chromium 對 start_time 3.8 秒的檔案從 3.8 秒起算，而 l2n 的時間都從第一個畫面起算；
   viewer 與 `render --media-base-url` 現在用 ffprobe 量出偏移並自動補上，`l2n frames` 的警告也改為說明這件事。

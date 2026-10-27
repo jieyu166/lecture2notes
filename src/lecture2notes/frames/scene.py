@@ -115,6 +115,9 @@ def get_duration(video_path: Path) -> float:
 #: frame times: a video stream that starts this long after the container, or a
 #: frame rate whose average is this far from the nominal one.
 START_OFFSET_WARN_SEC = 1.0
+#: A video stream starting this much after the container is corrected for in
+#: PySceneDetect's times; less is the encoder's usual first-frame delay.
+STREAM_SHIFT_MIN_SEC = 0.05
 VFR_WARN_RATIO = 0.02
 
 
@@ -180,9 +183,11 @@ def timing_warnings(timing: Mapping[str, Optional[float]]) -> List[str]:
         )
     elif video_start is not None and abs(video_start - (format_start or 0.0)) > START_OFFSET_WARN_SEC:
         warnings.append(
-            "the video stream starts %.2f s after the audio: frames and speech may "
-            "disagree by that much; spot-check a few frames against the video"
-            % (video_start - (format_start or 0.0))
+            "the video stream starts %.2f s after the container; scene times are "
+            "moved onto the container's clock (the one the transcript and players "
+            "use). frames.json written before 0.3.0.dev5 is %.2f s early: rerun "
+            "l2n frames --force" % (video_start - (format_start or 0.0),
+                                    video_start - (format_start or 0.0))
         )
     nominal, average = timing.get("nominal_fps"), timing.get("average_fps")
     if nominal and average and abs(nominal - average) / nominal > VFR_WARN_RATIO:
@@ -342,7 +347,21 @@ def detect_scenes(
         manager.detect_scenes(video=video)
     if state["emitted"]:
         progress.finish()
-    marks = [mark(start.get_seconds()) for start, _end in manager.get_scene_list()]
+    # PySceneDetect counts seconds from the first video frame. When the video
+    # stream starts after the container (a field file: video at 3.8 s, audio
+    # and container at 0), every cut was reported that much early -- and the
+    # frame extracted at that time was the slide before the change. ffmpeg's
+    # own timestamps, the transcript and the player all use the container's
+    # clock, so the cuts are moved onto it here.
+    timing = stream_timing(video_path)
+    shift = (timing.get("video_start") or 0.0) - (timing.get("format_start") or 0.0)
+    if abs(shift) < STREAM_SHIFT_MIN_SEC:
+        shift = 0.0
+    marks = [mark(round(start.get_seconds() + shift, 3)) for start, _end in manager.get_scene_list()]
+    if shift and marks and abs(marks[0]["timestamp_sec"] - shift) < 1e-6:
+        # The opening scene starts where the video does; it is the lecture's
+        # opening frame, not a cut, and the 0.0 mark below stands for it.
+        marks.pop(0)
     if not marks or marks[0]["timestamp_sec"] > 0.5:
         marks.insert(0, mark(0.0))
     return marks

@@ -477,11 +477,18 @@ def _numbers(text: str) -> List[str]:
     return out
 
 
-def claimed_numbers(text: str) -> List[str]:
+def claimed_numbers(text: str, whole: bool = False) -> List[str]:
     """The numbers a summary or bullet states as said: timecodes, years and
-    clauses that name a slide as their source are left out."""
+    clauses that name a slide as their source are left out.
+
+    ``whole`` treats ``text`` as one bullet: a slide named anywhere in it
+    covers every number in it ("（投影片）1 year: 72%; score 5.5 -> 2.8").
+    """
+    text = CLAIM_NOISE.sub(" ", text or "")
+    if whole and SLIDE_DECLARED.search(text):
+        return []
     out: List[str] = []
-    for clause in CLAUSE_BREAK.split(CLAIM_NOISE.sub(" ", text or "")):
+    for clause in CLAUSE_BREAK.split(text):
         if SLIDE_DECLARED.search(clause):
             continue
         out.extend(v for v in _numbers(clause) if not YEAR.match(v))
@@ -507,7 +514,9 @@ def segment_number_findings(
         if not transcripts or number > len(transcripts) or not transcripts[number - 1].strip():
             continue
         bullets = [b.get("text") if isinstance(b, Mapping) else b for b in segment.get("bullets_zh") or []]
-        claimed = claimed_numbers("\n".join([str(segment.get("summary_zh") or "")] + [str(b or "") for b in bullets]))
+        claimed = claimed_numbers(str(segment.get("summary_zh") or ""))
+        for bullet in bullets:
+            claimed.extend(claimed_numbers(str(bullet or ""), whole=True))
         slides = set()
         for entry in segment.get("frame_ocr") or []:
             if isinstance(entry, Mapping):

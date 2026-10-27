@@ -383,3 +383,11 @@ def test_spoken_numbers_in_words_count_as_said():
     text = rules.spoken_numbers_text("大概十五公分，三點四倍，一百二十秒；twenty five patients, two hundred cases")
     for value in ("15", "3.4", "120", "25", "200"):
         assert value in rules._numbers(text), value
+
+
+def test_a_bullet_that_names_a_slide_covers_all_its_numbers():
+    from lecture2notes.notes import rules
+
+    bullet = "（投影片）1 year：clinical success 72%（18/25）；bleeding score 5.5→2.8。"
+    assert rules.claimed_numbers(bullet, whole=True) == []
+    assert rules.claimed_numbers("講者說 12 個月；投影片列 72%", whole=False) == ["12"]

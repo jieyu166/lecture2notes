@@ -291,3 +291,27 @@ def test_timing_warnings_flag_start_offset_and_variable_frame_rate():
         {"video_start": 0.0, "format_start": 0.0, "nominal_fps": 30.0, "average_fps": 29.97}
     ) == []
     assert scene.timing_warnings({}) == []
+
+
+def test_scene_times_follow_the_container_clock_when_the_video_starts_late(tmp_path):
+    import shutil
+    import subprocess
+
+    pytest.importorskip("scenedetect")
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        pytest.skip("ffmpeg not installed")
+    from lecture2notes.frames import scene
+
+    video, audio, late = tmp_path / "v.mp4", tmp_path / "a.m4a", tmp_path / "late.mp4"
+    run = lambda *args: subprocess.run(["ffmpeg", "-v", "error", "-y", *args], check=True)
+    run("-f", "lavfi", "-i", "color=c=red:s=160x90:d=4:r=25", "-f", "lavfi", "-i",
+        "color=c=blue:s=160x90:d=4:r=25", "-filter_complex",
+        "[0][1]concat=n=2:v=1:a=0,format=yuv420p[v]", "-map", "[v]", "-c:v", "libx264", str(video))
+    run("-f", "lavfi", "-i", "sine=f=440:d=9", "-c:a", "aac", str(audio))
+    run("-itsoffset", "2.0", "-i", str(video), "-i", str(audio), "-map", "0:v", "-map", "1:a",
+        "-c", "copy", str(late))
+
+    times = [m["timestamp_sec"] for m in scene.detect_scenes(late, detector="content")]
+    assert times[0] == 0.0
+    assert any(abs(t - 6.0) < 0.2 for t in times), times  # blue at 4 s of video = 6 s of file
+    assert not any(abs(t - 4.0) < 0.2 for t in times), times
