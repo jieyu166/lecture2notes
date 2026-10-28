@@ -62,6 +62,25 @@ def test_a_skipped_frame_loses_text_an_earlier_run_cached(tmp_path: Path, no_s2t
     assert read_json(document)["segments"][1]["frame_ocr"] == []
 
 
+def test_a_skipped_frame_is_purged_from_the_ocr_cache(tmp_path: Path, no_s2t):
+    # `check json` warned about an e-mail in frame_ocr; clearing the JSON left
+    # the text in <stem>.frames_ocr.json, and the next scaffold merged it back.
+    document = build_lecture(tmp_path, frame_count=2)
+    first = ocr_mod.run_ocr(document, engine_factory=CountingEngine)
+    assert "frames/talk-0010.png" in ocr_mod.read_cache(first.cache_path)
+
+    engine = CountingEngine()
+    second = ocr_mod.run_ocr(
+        document, engine_factory=lambda: engine, skip_frames=["*-0010.png"]
+    )
+
+    cache = ocr_mod.read_cache(second.cache_path)
+    assert second.purged == ["frames/talk-0010.png"]
+    assert "frames/talk-0010.png" not in cache
+    assert "frames/talk-0000.png" in cache
+    assert engine.calls == []
+
+
 @pytest.mark.parametrize("pattern, frame, skipped", [
     ("frames/talk-00*.png", "frames/talk-0010.png", True),
     ("talk-0010.png", "frames/talk-0010.png", True),

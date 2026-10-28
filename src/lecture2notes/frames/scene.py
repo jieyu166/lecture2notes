@@ -51,7 +51,7 @@ SCAN_PROGRESS_INTERVAL = 5.0
 #: some builds and milliseconds in others, so the clock form is what is parsed.
 PROGRESS_OUT_TIME = re.compile(r"^out_time=(\d+):(\d{2}):(\d{2}(?:\.\d+)?)\s*$")
 SUBTITLE_SUFFIX = re.compile(r"\.(zh(-TW)?|en|orig)$")
-VIDEO_EXT = (".mp4", ".mkv", ".mov", ".webm", ".avi", ".m4v")
+VIDEO_EXT = (".mp4", ".mkv", ".mov", ".webm", ".avi", ".m4v", ".ts")
 
 
 def mark(sec: float) -> Dict[str, Any]:

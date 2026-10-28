@@ -382,7 +382,9 @@ OCR 不入文這一條沒有例外。OCR 會把 `L4-L5` 讀成 `14-15`、把 `T2
 
 - **OCR 前先排除**：`l2n ocr <stem>.json --skip-frames <glob 或時間範圍>`
   （例：`--skip-frames 00:52:00-00:58:30`），可重複給。
-- 已經做過 OCR 的，**併入後清空該影格的 `frame_ocr`**，再重跑 `l2n check json`。
+- 已經做過 OCR 的，**用同樣的 `--skip-frames` 再跑一次 `l2n ocr`**：符合的影格會從 `frame_ocr`
+  與 OCR 快取 `<stem>.frames_ocr.json` 一起清掉，再重跑 `l2n check json`。
+  只手動清空 JSON 的 `frame_ocr` 不夠，快取裡的文字下次 `l2n scaffold` 會再併回來。
 - `l2n check json` 看到 `frame_ocr` 裡有電子郵件樣式的文字會報 warning（`frame_ocr_email`）。
   人名它抓不到，靠這一條規則。
 

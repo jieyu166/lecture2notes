@@ -538,6 +538,14 @@ schema 2.1、雙語字幕、播放網頁改版、Obsidian 筆記的時間碼連�
 > **不要**把檔案的版本號改回 2.0 或刪掉新欄位：`pip install -U lecture2notes`
 > （或在 clone 裡 `git pull` 後 `pip install -e .`），再跑 `l2n install-skill` 更新 skill。
 
+### 未發版（main）
+
+- **`l2n ocr --skip-frames` 一併清掉快取**：被略過的影格在 `<stem>.frames_ocr.json` 裡的舊文字也刪除，
+  下次 `scaffold` 不會再把參與者面板、聊天室的文字併回 JSON。
+- **`l2n scaffold` 的 `source.video` 用字幕旁實際存在的影片**（.mkv、.webm、.mov、.ts 等），
+  不再一律寫成 `<stem>.mp4`。
+- **R7 病歷號樣式要求至少一個數字**：「假病歷號與生日」「病歷號或是生日」這類敘述不再誤報。
+
 ## 開發與測試
 
 ```bash

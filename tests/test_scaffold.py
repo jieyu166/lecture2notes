@@ -333,3 +333,41 @@ def test_the_scaffold_without_an_ocr_cache_reports_none(subtitle: Path):
 
     assert result.ocr_segments is None
     assert "ocr_meta" not in json.loads(result.document_path.read_text(encoding="utf-8"))
+
+
+# --------------------------------------------------------------------------
+# source.video names the recording actually there, not <stem>.mp4
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("ext", [".mkv", ".webm", ".ts"])
+def test_the_source_video_is_the_real_file_beside_the_subtitle(
+    tmp_path: Path, ext: str
+):
+    srt = write_srt(tmp_path / "talk.srt")
+    (tmp_path / ("talk" + ext)).write_bytes(b"")
+
+    result = scaffold.scaffold_file(srt, segments=2)
+
+    data = json.loads(result.document_path.read_text(encoding="utf-8"))
+    assert data["source"]["video"] == "talk" + ext
+
+
+def test_a_language_suffixed_subtitle_still_finds_the_mkv(tmp_path: Path):
+    srt = write_srt(tmp_path / "talk.zh.srt")
+    (tmp_path / "talk.mkv").write_bytes(b"")
+
+    result = scaffold.scaffold_file(srt, segments=2)
+
+    data = json.loads(result.document_path.read_text(encoding="utf-8"))
+    assert data["source"]["video"] == "talk.mkv"
+
+
+def test_the_rendered_note_cites_the_mkv(tmp_path: Path):
+    srt = write_srt(tmp_path / "talk.srt")
+    (tmp_path / "talk.mkv").write_bytes(b"")
+    result = scaffold.scaffold_file(srt, segments=2)
+
+    assert cli_entry(["render", str(result.document_path)]) == exit_codes.OK
+
+    note = (tmp_path / "talk.v4.md").read_text(encoding="utf-8")
+    assert "talk.mkv" in note
+    assert "talk.mp4" not in note
