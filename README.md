@@ -477,7 +477,7 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
 行為沒有其他改變：`render` 仍是確定性的，`install-skill --check` 的 drift hash 算法與
 既有的 `.installed.json` 相容。
 
-### v0.3.1（本版）
+### v0.3.1
 
 schema 2.1、雙語字幕、播放網頁改版、Obsidian 筆記的時間碼連結與分流，以及多輪實地使用的修正。
 **舊版使用者請升級**：這一版寫出 `"schema_version": "2.1"`，舊版 `l2n check json` 會拒絕它（見下方說明）。
@@ -538,7 +538,9 @@ schema 2.1、雙語字幕、播放網頁改版、Obsidian 筆記的時間碼連�
 > **不要**把檔案的版本號改回 2.0 或刪掉新欄位：`pip install -U lecture2notes`
 > （或在 clone 裡 `git pull` 後 `pip install -e .`），再跑 `l2n install-skill` 更新 skill。
 
-### 未發版（main）
+### v0.3.2（本版）
+
+補上三個在 0.3.1 發版前就寫好、卻沒有合併進 main 的修正。
 
 - **`l2n ocr --skip-frames` 一併清掉快取**：被略過的影格在 `<stem>.frames_ocr.json` 裡的舊文字也刪除，
   下次 `scaffold` 不會再把參與者面板、聊天室的文字併回 JSON。
