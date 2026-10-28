@@ -490,10 +490,7 @@ schema 2.1、雙語字幕、播放網頁改版、Obsidian 筆記的時間碼連�
 - **`check json`**：多兩條 warning——禁用譯名（`forbidden_term`）與 `frame_ocr` 裡的電子郵件
   樣式（`frame_ocr_email`）。
 - **`l2n ocr --skip-frames <glob 或時間範圍>`**：參與者面板、聊天室的影格不做 OCR，
-  快取 `<stem>.frames_ocr.json` 裡舊的文字也一併刪除。
-- **`l2n scaffold` 的 `source.video` 用字幕旁實際存在的影片**（.mkv、.webm、.mov、.ts 等），
-  不再一律寫成 `<stem>.mp4`。
-- **R7 病歷號樣式只認英數字**：「假病歷號與生日」不再誤報。
+  快取裡舊的文字也不再併入。
 - **`l2n frames` 重新併入時保留已挑好的 `frame`**：只填 `null` 的；要全部重設才加 `--force`。
 - **schema**：頂層選填 `editorial_notes_zh`（四段弧寫這裡），`render` 印在 Summary 的摺疊 callout。
 - **schema 2.1**：新增選填欄位 `lines`（逐句字幕，可帶 `zh`）、`segments[].question`
@@ -540,6 +537,14 @@ schema 2.1、雙語字幕、播放網頁改版、Obsidian 筆記的時間碼連�
 > 只認 `"2.0"`，會回報 `schema_version must be '2.0', got '2.1'`（exit 2）。這代表程式該升級，
 > **不要**把檔案的版本號改回 2.0 或刪掉新欄位：`pip install -U lecture2notes`
 > （或在 clone 裡 `git pull` 後 `pip install -e .`），再跑 `l2n install-skill` 更新 skill。
+
+### 未發版（main）
+
+- **`l2n ocr --skip-frames` 一併清掉快取**：被略過的影格在 `<stem>.frames_ocr.json` 裡的舊文字也刪除，
+  下次 `scaffold` 不會再把參與者面板、聊天室的文字併回 JSON。
+- **`l2n scaffold` 的 `source.video` 用字幕旁實際存在的影片**（.mkv、.webm、.mov、.ts 等），
+  不再一律寫成 `<stem>.mp4`。
+- **R7 病歷號樣式要求至少一個數字**：「假病歷號與生日」「病歷號或是生日」這類敘述不再誤報。
 
 ## 開發與測試
 
