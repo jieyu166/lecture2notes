@@ -1621,6 +1621,15 @@ def _rule_sections(lines: Sequence[str], note: Path, report: StageReport) -> Non
         seen.append(position)
 
 
+def _find_by_name(folder: Path, ref: str) -> bool:
+    """A bare ``![[name.png]]`` resolves by name anywhere under the lecture
+    folder, the way Obsidian resolves it anywhere in the vault."""
+    name = unquote(ref.strip())
+    if "/" in name or "\\" in name:
+        return False
+    return any(True for _ in Path(folder).rglob(name))
+
+
 def _rule_embeds(
     text: str, note: Path, report: StageReport, json_path: Optional[Path] = None
 ) -> None:
@@ -1631,9 +1640,9 @@ def _rule_embeds(
     one folder and pass it in another.
     """
     for ref in sorted(set(match.group(1) for match in NOTE_EMBED.finditer(text))):
-        beside_document = (
-            json_path is not None
-            and _resolve_embed(Path(json_path).parent / Path(note).name, ref)
+        beside_document = json_path is not None and (
+            _resolve_embed(Path(json_path).parent / Path(note).name, ref)
+            or _find_by_name(Path(json_path).parent, ref)
         )
         if not _resolve_embed(note, ref) and not beside_document:
             report.add("error", "R2", ref,

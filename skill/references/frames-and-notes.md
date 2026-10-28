@@ -120,6 +120,8 @@ l2n render <stem>.json --expand-prompt
   一字不動，舊檔留 `.bak`。沒標過風格的舊筆記標 concise（它不是照 faithful 每段一句引文寫的）；
   要照 faithful 驗收就加 `--style faithful`。補進來的章節帶 `<!-- ai-draft -->`，擴寫完再跑
   `check note`。順序錯的章節只回報不搬動；早期 `Q:`／`A:` 題目不改寫，R9 會提醒改成編號加摺疊答案。
+- **筆記不放在講座資料夾（vault）**：`render --embed-names`（或 overlay `[note] embed_names = true`）
+  讓嵌圖只寫檔名 `![[<stem>-HHMM.png]]`，Obsidian 會在整個 vault 依檔名找；影格要另外複製進 vault。
 - **JSON 改了以後**：`l2n render <stem>.json --refresh` 只替換 Summary 重點、`## 分流`、References
   這三塊（骨架裡用 `<!-- l2n:begin ... -->` 標記），擴寫內容不動，舊檔留 `.bak`。不要用 `--force`，
   那會把整份擴寫蓋回骨架。

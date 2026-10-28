@@ -397,7 +397,11 @@ def frame_ocr_url_id_findings(data: Mapping[str, Any]) -> List[Finding]:
 SEGMENT_NUMBER = re.compile(r"(?<![\d.])(\d+(?:[.,]\d+)+|\d{2,})(?![\d])")
 #: Removed from a claim before numbers are read from it: a timecode
 #: (``00:11:21`` is not the numbers 11 and 21) and a timecode link's URL.
-CLAIM_NOISE = re.compile(r"\[▶[^\]]*\]\([^)]*\)|\d{1,2}:\d{2}(?::\d{2})?")
+CLAIM_NOISE = re.compile(
+    r"\[▶[^\]]*\]\([^)]*\)|\d{1,2}:\d{2}(?::\d{2})?"
+    # Question and item numbers: 第 10 題, Q10, Q.10, 10 號, No. 10, #10.
+    r"|第\s*\d+\s*[題道]|(?<![A-Za-z])[Qq]\.?\s*\d+|\d+\s*號|\b[Nn]o\.?\s*\d+|#\d+"
+)
 #: A clause that says its value comes from a slide; its numbers are the
 #: writer's own declaration and are not reported.
 SLIDE_DECLARED = re.compile(r"投影片|簡報|[Ss]lide")
@@ -507,6 +511,10 @@ def segment_number_findings(
     summary written against the wrong stretch of the lecture looks like.
     """
     segments = [s for s in (data.get("segments") or []) if isinstance(s, Mapping)]
+    has_ocr = any(
+        isinstance(e, Mapping) and str(e.get("text") or "").strip()
+        for s in segments for e in (s.get("frame_ocr") or [])
+    )
     spoken = [set(_numbers(spoken_numbers_text(t))) for t in transcripts]
     spoken += [set()] * (len(segments) - len(transcripts))
     findings: List[Finding] = []
@@ -529,6 +537,9 @@ def segment_number_findings(
                 why = "is on the segment's slide but the speaker does not say it"
             elif elsewhere:
                 why = "is said in segment %s, not in this one" % ", ".join(str(i) for i in elsewhere[:3])
+            elif not has_ocr:
+                why = ("is not in this segment's transcript (no slide OCR to compare: "
+                       "check the frames, or run l2n ocr)")
             else:
                 why = "is not in this segment's transcript or slides"
             findings.append(Finding(

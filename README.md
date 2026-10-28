@@ -428,7 +428,7 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
 - **輸出**：時間同步 viewer、`pbf`、課程首頁 `hub`、`check --all` 四階段驗收。
 - **上游標示**：`ATTRIBUTION.md` 與 `NOTICE`，逐檔列出衍生關係。
 
-### v0.2.0（本版）
+### v0.2.0
 
 把 v0.1.0 的各個階段收成一個可以交付的東西：
 
@@ -442,7 +442,7 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
 - **檢查規則 R9 到 R11**：題目與 `[推論]`（R9）、骨架殘留比例（R10）、
   同一句跨章節重複（R11），外加 `unexpanded_segments` 與 `ai_draft_remaining` 兩個數字。
 - **`condense`／`scaffold`**：逐字稿壓成一分鐘一行；產出待填的 JSON 骨架。
-- **撰寫規範升到 1.3**（main 已再升到 1.4，見「未發版（main）」）。
+- **撰寫規範升到 1.3**（v0.3.1 已再升到 1.4，見「v0.3.1」）。
 
 - **Qwen3-ASR 真機實測**：0.6B＋ForcedAligner 已在 RTX 4060 Laptop 8 GB（Windows 11）實跑，
   數據見上方引擎相容表；實跑修掉四個缺陷（尾端極短分塊使整場失敗、未給對照表時簡轉繁
@@ -455,7 +455,7 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
 內容缺失——實測中漏掉 23.5 秒語音的字幕仍是 0 errors。重要場次請抽查逐字稿，或用第二個
 引擎對照。
 
-### v0.2.1（本版）
+### v0.2.1
 
 一個打包缺陷的修正。v0.2.0 的 wheel 不含 `skill/`、`docs/note-writing-guideline.md` 與
 `examples/overlay-minimal/`，因為這三者住在 repo 根目錄而不在套件裡。結果是用
@@ -477,7 +477,12 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
 行為沒有其他改變：`render` 仍是確定性的，`install-skill --check` 的 drift hash 算法與
 既有的 `.installed.json` 相容。
 
-### 未發版（main）
+### v0.3.1（本版）
+
+schema 2.1、雙語字幕、播放網頁改版、Obsidian 筆記的時間碼連結與分流，以及多輪實地使用的修正。
+**舊版使用者請升級**：這一版寫出 `"schema_version": "2.1"`，舊版 `l2n check json` 會拒絕它（見下方說明）。
+0.3.0 只以開發版號（0.3.0.devN）在分支上流通過，沒有獨立發版。
+
 
 - **撰寫規範 1.4**：讀者層級、名詞小辭典、正確性清單、台灣譯名對照表（附錄 C），
   機器規則 R12 到 R14，R5／R8 擴到 `# 閱片`，R9 檢查每題的收合答案（見上方「撰寫規範 1.4」）。
@@ -512,6 +517,9 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
   R7 放過 PMID 與一般敘述；新增 R15（「」引文要找得到出處）與 `check json` 的 `frame_ocr_url_id`；
   `l2n render --refresh` 只更新 JSON 衍生區塊（Summary 重點、分流、References）並留 `.bak`；
   `l2n --where` 印出實際載入的安裝；課程首頁搜尋改用講題稱呼各場；擴寫交辦書把獨立驗收列為必做。
+- **第六輪實地回報**：備份不再覆蓋舊的 `.bak`（改加時間戳）；`render --upgrade` 會替「就是 JSON 重點投影」的
+  舊 Summary 加 fence（自己寫的不加，並說明）；新增 `render --embed-names`（嵌圖只寫檔名，筆記放進 vault 不破圖，
+  R2 也照檔名找）；`number_unsupported` 略過題號（第 N 題、Q10、N 號），沒有投影片 OCR 時改說「無 OCR 可比對」。
 - **影像串流晚於容器起點**（實檔：影像 3.8 秒、音訊與容器 0）：PySceneDetect 從第一個影像畫面起算，
   換頁時間因此早了 3.8 秒、抽到的是換頁前的畫面；現在改用容器時間軸。之前產生的 `frames.json` 要用
   `l2n frames --force` 重抓。`number_unsupported` 對整條標明「投影片」的條列不再逐數字報。
@@ -523,8 +531,7 @@ clone（v0.2.1 起；v0.2.0 只有 editable 安裝才行）。沒安裝套件時
   把早期的 `kind: "speaker"` 轉成 synthesis；`check json` 新增 `number_unsupported`（摘要數字本段沒說、
   只在投影片、或在別段）並略過附屬 JSON；R2 也到 JSON 所在資料夾找影格；`triage-prompt --exclude`。
 - **`l2n migrate` 拒絕非講座 JSON**：沒有 `segments` 的檔案（例如其他工具的 `*.timing-fixes.json`）
-  不再被包成空的講座骨架，回報後原檔不動（exit 2）。版本號改為 `0.3.0.dev0`，從分支
-  `pip install -U` 才會真的重裝。
+  不再被包成空的講座骨架，回報後原檔不動（exit 2）。
 
 > **舊版使用者請升級。** 這一版寫出的 JSON 是 `"schema_version": "2.1"`，舊版 `l2n check json`
 > 只認 `"2.0"`，會回報 `schema_version must be '2.0', got '2.1'`（exit 2）。這代表程式該升級，

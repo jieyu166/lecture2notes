@@ -5,7 +5,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from conftest import run_cli
+from conftest import run_cli as _run_cli
+
+
+def run_cli(args, **kwargs):
+    """These tests read Chinese out of stdout; pin the child to UTF-8 so the
+    cp950 CI job compares text, not mojibake (the hub tests do the same)."""
+    env = {"PYTHONIOENCODING": "utf-8"}
+    env.update(kwargs.pop("env", None) or {})
+    return _run_cli(args, env=env, **kwargs)
 
 from lecture2notes.notes import triage
 from lecture2notes.schema.io import write_json_atomic

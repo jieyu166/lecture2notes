@@ -236,3 +236,50 @@ def test_upgrade_puts_the_correction_table_above_existing_references():
     assert "References correction table" in added
     section = text.split("### References")[1].split("## 題目")[0]
     assert section.index("| heard | correct | source |") < section.index("[^1]: 我自己的來源")
+
+
+def test_embed_names_write_bare_file_names_that_check_note_resolves(tmp_path):
+    data = json.loads((FIXTURES / "lecture_v2_valid.json").read_text(encoding="utf-8"))
+    text = render.render_skeleton(data, stem="sample-talk", profile="generic", embed_names=True)
+    assert "![[sample-talk-0001.png]]" in text and "![[frames/" not in text
+    path = write_json_atomic(tmp_path / "sample-talk.json", data)
+    (tmp_path / "frames" / "sample-talk").mkdir(parents=True)
+    for segment in data["segments"]:
+        for frame in set(segment["frames"] + [segment["frame"]]):
+            (tmp_path / "frames" / "sample-talk" / Path(frame).name).write_bytes(b"x")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    note = vault / "sample-talk.v4.md"
+    note.write_text(text, encoding="utf-8")
+    assert "R2" not in {f.code for f in check_note_stage(path, note, profile="generic").findings}
+
+
+def test_backups_never_overwrite_an_older_backup(tmp_path):
+    from lecture2notes.schema.io import backup_path
+
+    target = tmp_path / "talk.json"
+    target.write_text("{}", encoding="utf-8")
+    assert backup_path(target).name == "talk.json.bak"
+    (tmp_path / "talk.json.bak").write_text("august", encoding="utf-8")
+    second = backup_path(target)
+    assert second.name.startswith("talk.json.") and second.name.endswith(".bak") and second.name != "talk.json.bak"
+
+
+def test_upgrade_fences_a_summary_that_is_the_takeaway_projection_only():
+    data = json.loads((FIXTURES / "lecture_v2_valid.json").read_text(encoding="utf-8"))
+    fresh = render.render_skeleton(data, stem="sample-talk", profile="generic")
+    projected = EARLY_NOTE.replace(
+        "- **我自己寫的重點一**\n- 易混淆觀念：我自己寫的",
+        "\n".join("- %s" % t for t in data["takeaways_zh"]),
+    )
+    text, added, notes = render.upgrade_note(projected, fresh, "concise")
+    assert any("Summary fence" in a for a in added)
+    data["takeaways_zh"][0] = "更新後的第一條"
+    refreshed, replaced, _ = render.refresh_note(
+        text, render.render_skeleton(data, stem="sample-talk", profile="generic"))
+    assert "summary" in replaced and "- 更新後的第一條" in refreshed
+
+    own, added, notes = render.upgrade_note(EARLY_NOTE, fresh, "concise")
+    assert not any("Summary fence" in a for a in added)
+    assert any("writer's own list" in n for n in notes)
+    assert "我自己寫的重點一" in own

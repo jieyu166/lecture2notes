@@ -285,7 +285,7 @@ def test_cli_lines_writes_relabels_and_keeps_translations(tmp_path):
     (tmp_path / "sample-talk.srt").write_text(SRT.replace("line three", "line 3"), encoding="utf-8")
     assert "lines_stale" in [f.code for f in check_json(path).findings]
 
-    assert "已有 lines" in run_cli(["lines", str(path)]).stdout
+    assert "已有 lines" in run_cli(["lines", str(path)], env={"PYTHONIOENCODING": "utf-8"}).stdout
     assert run_cli(["lines", str(path), "--force"]).returncode == 0
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["lines"][1]["zh"] == "第二句"
@@ -391,3 +391,20 @@ def test_a_bullet_that_names_a_slide_covers_all_its_numbers():
     bullet = "（投影片）1 year：clinical success 72%（18/25）；bleeding score 5.5→2.8。"
     assert rules.claimed_numbers(bullet, whole=True) == []
     assert rules.claimed_numbers("講者說 12 個月；投影片列 72%", whole=False) == ["12"]
+
+
+def test_question_numbers_are_not_claims():
+    from lecture2notes.notes import rules
+
+    assert rules.claimed_numbers("第 10 題答案是 B；Q12 選 C；15 號題；No. 20；#31") == []
+
+
+def test_without_ocr_the_message_says_slides_were_not_compared():
+    from lecture2notes.notes import rules
+
+    document = full()
+    for segment in document["segments"]:
+        segment["frame_ocr"] = []
+    document["segments"][2]["summary_zh"] = "73% 的病人有改善。"
+    found = rules.segment_number_findings(document, ["", "", "nothing numeric"])
+    assert found and "no slide OCR to compare" in found[0].message
