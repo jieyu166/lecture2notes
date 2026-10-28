@@ -185,7 +185,7 @@ def timing_warnings(timing: Mapping[str, Optional[float]]) -> List[str]:
         warnings.append(
             "the video stream starts %.2f s after the container; scene times are "
             "moved onto the container's clock (the one the transcript and players "
-            "use). frames.json written before 0.3.0.dev5 is %.2f s early: rerun "
+            "use). frames.json written before 0.3.1 is %.2f s early: rerun "
             "l2n frames --force" % (video_start - (format_start or 0.0),
                                     video_start - (format_start or 0.0))
         )
