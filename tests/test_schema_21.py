@@ -285,7 +285,7 @@ def test_cli_lines_writes_relabels_and_keeps_translations(tmp_path):
     (tmp_path / "sample-talk.srt").write_text(SRT.replace("line three", "line 3"), encoding="utf-8")
     assert "lines_stale" in [f.code for f in check_json(path).findings]
 
-    assert "已有 lines" in run_cli(["lines", str(path)]).stdout
+    assert "已有 lines" in run_cli(["lines", str(path)], env={"PYTHONIOENCODING": "utf-8"}).stdout
     assert run_cli(["lines", str(path), "--force"]).returncode == 0
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["lines"][1]["zh"] == "第二句"
