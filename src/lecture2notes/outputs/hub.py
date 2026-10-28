@@ -190,11 +190,14 @@ def build_card(
     segments = data.get("segments") or []
     card = apply_titles(json_path.stem, titles)
     # A stem the filename patterns cannot read (``20241207``) leaves the stem as
-    # the topic; the document's own title says more, unless an override spoke.
+    # the topic, and one they misread (``5-1-1``) leaves a bare number; either
+    # way the document's own title says more, unless an override spoke.
     title = str(data.get("title") or "").strip()
     override = titles.get(json_path.stem) if isinstance(titles, Mapping) else None
     has_topic = isinstance(override, Mapping) and "topic" in override
-    if not has_topic and card.get("topic") == json_path.stem and title and title != json_path.stem:
+    topic = str(card.get("topic") or "")
+    says_nothing = topic == json_path.stem or topic.isdigit()
+    if not has_topic and says_nothing and title and title != json_path.stem:
         card["topic"] = title
     frames = [frame for segment in segments for frame in (segment.get("frames") or [])]
     card.update({
