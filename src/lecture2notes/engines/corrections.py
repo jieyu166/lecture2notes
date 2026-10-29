@@ -28,8 +28,13 @@ from lecture2notes.schema.io import write_json_atomic
 #: section is deliberately never applied: those need a human or an LLM to judge.
 AUTO_SECTIONS = ("deterministic", "radiology")
 
-#: OpenCC configuration for Simplified to Traditional with Taiwanese word choice.
-S2T_CONFIG = "s2twp"
+#: OpenCC configuration for Simplified to Traditional: characters only, with
+#: Taiwanese glyph variants. Phrase conversion (``s2twp``) rewrites words a
+#: Taiwanese speaker really said -- 腳本 becomes 指令碼, 對象 物件, 優化 最佳化 --
+#: so it is opt-in (:data:`S2T_PHRASE_CONFIG`, ``--s2t-phrases``), for a
+#: recording whose speaker uses mainland vocabulary.
+S2T_CONFIG = "s2tw"
+S2T_PHRASE_CONFIG = "s2twp"
 
 Pair = Tuple[str, str, str]  # (heard, correct, source)
 
@@ -78,7 +83,7 @@ def apply_corrections(text: str, pairs: Iterable[Pair]) -> Tuple[str, List[Dict[
     return text, hits
 
 
-def convert_simplified(text: str) -> Tuple[str, bool]:
+def convert_simplified(text: str, config: str = S2T_CONFIG) -> Tuple[str, bool]:
     """Convert Simplified to Traditional if OpenCC is installed; never fail hard.
 
     Missing OpenCC is a degradation the user can see, not a reason to refuse to
@@ -101,7 +106,7 @@ def convert_simplified(text: str) -> Tuple[str, bool]:
             )
             _opencc_missing_warned = True
         return text, False
-    return OpenCC(S2T_CONFIG).convert(text), True
+    return OpenCC(config).convert(text), True
 
 
 def backup_raw(path: Path) -> Optional[Path]:
@@ -123,6 +128,7 @@ def build_sidecar(
     table_path: Optional[str] = None,
     generated_at: Optional[str] = None,
     s2t_skipped_reason: Optional[str] = None,
+    s2t_config: str = S2T_CONFIG,
 ) -> Dict[str, Any]:
     """Build the audit record. Kept pure so its shape can be asserted directly.
 
@@ -133,7 +139,7 @@ def build_sidecar(
     """
     s2t_block: Dict[str, Any] = {
         "applied": bool(s2t_applied),
-        "converter": S2T_CONFIG if s2t_applied else None,
+        "converter": s2t_config if s2t_applied else None,
     }
     if not s2t_applied and s2t_skipped_reason:
         s2t_block["skipped_reason"] = s2t_skipped_reason
@@ -168,6 +174,7 @@ def correct_file(
     sidecar: bool = True,
     table_path: Optional[str] = None,
     always: bool = False,
+    s2t_config: str = S2T_CONFIG,
 ) -> Dict[str, Any]:
     """Correct a subtitle or transcript file in place, preserving its structure.
 
@@ -183,7 +190,7 @@ def correct_file(
     source = Path(path)
     text = read_subtitle_text(source).replace("\r", "")
     original = text
-    text, s2t_applied = convert_simplified(text) if s2t else (text, False)
+    text, s2t_applied = convert_simplified(text, s2t_config) if s2t else (text, False)
     s2t_skipped_reason: Optional[str] = None
     if not s2t_applied:
         s2t_skipped_reason = "disabled" if not s2t else "opencc missing"
@@ -216,6 +223,7 @@ def correct_file(
             s2t_applied,
             table_path,
             s2t_skipped_reason=s2t_skipped_reason,
+            s2t_config=s2t_config,
         )
         result["sidecar"] = str(write_sidecar(destination, payload))
     _out.ok("%d rules applied, %d replacements" % (len(hits), sum(h["count"] for h in hits)))
@@ -225,6 +233,7 @@ def correct_file(
 __all__ = [
     "AUTO_SECTIONS",
     "S2T_CONFIG",
+    "S2T_PHRASE_CONFIG",
     "apply_corrections",
     "backup_raw",
     "build_sidecar",

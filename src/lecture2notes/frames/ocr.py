@@ -87,7 +87,7 @@ def load_engine():
     return module.RapidOCR()
 
 
-def load_s2t(enabled: bool = True):
+def load_s2t(enabled: bool = True, config: str = "s2tw"):
     """Optional Simplified-to-Traditional pass over the OCR output.
 
     The model often reads a Traditional glyph as its Simplified counterpart.
@@ -102,7 +102,9 @@ def load_s2t(enabled: bool = True):
         _out.say("warn", "opencc not installed; OCR text is left as recognised")
         _out.say("info", "install: %s" % _deps.INSTALL_HINTS["opencc"])
         return None
-    return OpenCC("s2twp").convert
+    # Characters only by default: the slide's own words are the record, and
+    # s2twp would turn a Taiwanese slide's 腳本 into 指令碼.
+    return OpenCC(config).convert
 
 
 def lines_from_result(result: Any, min_conf: float = DEFAULT_MIN_CONF) -> str:
@@ -454,6 +456,7 @@ def run_ocr(
     min_conf: float = DEFAULT_MIN_CONF,
     s2t: bool = True,
     force: bool = False,
+    s2t_config: str = "s2tw",
     engine_factory: Optional[Callable[[], Any]] = None,
     progress_interval: float = 5.0,
     stem: Optional[str] = None,
@@ -549,7 +552,7 @@ def run_ocr(
 
     if todo:
         engine = (engine_factory or load_engine)()
-        convert = load_s2t(s2t)
+        convert = load_s2t(s2t, s2t_config)
         progress = _out.Progress("ocr", len(todo), interval=progress_interval)
         for frame in todo:
             path = Path(base_dir) / unquote(frame)

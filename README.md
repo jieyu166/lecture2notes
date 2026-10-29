@@ -281,6 +281,9 @@ cue 長度中位數約 6 s、32 字，沒有出現逐字一 cue 或超長 cue。
 - **簡轉繁**：Qwen3-ASR 輸出**簡體中文**（Breeze-ASR-25 輸出繁體）。轉錄階段預設會做簡轉繁，
   但需要 `pip install opencc-python-reimplemented`；沒裝時會印 `[warn]` 並在
   `<stem>.corrections.json` 記下 `skipped_reason: "opencc missing"`。跑中文素材前請先裝。
+  預設只轉字形（OpenCC `s2tw`）；要連詞彙一起換成台灣用語（`s2twp`，例如「視頻」換成「影片」）
+  加 `--s2t-phrases`。台灣講者的錄音不要加：`s2twp` 會把講者說的「腳本」「對象」「優化」
+  改成「指令碼」「物件」「最佳化」。
 
 **仍未實測**：`language="Japanese"` 是否為上游接受的字串（文件只逐字出現
 Chinese / English / Cantonese）、1.7B 權重、vLLM 後端。
@@ -538,7 +541,7 @@ schema 2.1、雙語字幕、播放網頁改版、Obsidian 筆記的時間碼連�
 > **不要**把檔案的版本號改回 2.0 或刪掉新欄位：`pip install -U lecture2notes`
 > （或在 clone 裡 `git pull` 後 `pip install -e .`），再跑 `l2n install-skill` 更新 skill。
 
-### v0.3.2（本版）
+### v0.3.2
 
 補上三個在 0.3.1 發版前就寫好、卻沒有合併進 main 的修正。
 
@@ -547,6 +550,23 @@ schema 2.1、雙語字幕、播放網頁改版、Obsidian 筆記的時間碼連�
 - **`l2n scaffold` 的 `source.video` 用字幕旁實際存在的影片**（.mkv、.webm、.mov、.ts 等），
   不再一律寫成 `<stem>.mp4`。
 - **R7 病歷號樣式要求至少一個數字**：「假病歷號與生日」「病歷號或是生日」這類敘述不再誤報。
+
+### v0.3.3（本版）
+
+處理 3 小時以上長講座與台灣講者素材時發現的問題。
+
+- **faster-whisper 家族（含 `breeze_ct2`）超過 1 小時自動切 30 分鐘一窗**：這兩個引擎會把整段
+  音訊的特徵一次算進記憶體，3.4 小時要 3.42 GiB，記憶體不夠就 `MemoryError`。沒切窗時
+  記憶體不足會提示 `--chunk-sec 1800`。`l2n run` 也接受 `--chunk-sec`。
+- **切窗接縫不再斷句、重複**：相鄰兩窗重疊（最多 30 秒、窗長的一成），每窗只保留起點在
+  重疊中點自己這一側的 cue，窗首窗尾被切斷的句子、重複短句與零碎字幕都落在被丟掉的那側。
+  同一場轉錄的各窗共用一次載入的模型。
+- **簡轉繁預設只轉字形（`s2tw`）**：轉錄與 OCR 原本用 `s2twp`，會把台灣講者說的
+  「腳本」「對象」「優化」改成「指令碼」「物件」「最佳化」。詞彙轉換改成 `--s2t-phrases` 選配。
+- **`check note` R15 不再掃 `## 分流` 與 References 區塊**：分流理由引用的是 vault 其他筆記，
+  References 引用的是論文，都不是講者的話，也無法在筆記端修。段落標題裡的「」也不再判讀。
+- **`l2n run` 停在 scaffold（JSON 還沒寫）時回 exit 1**：機械階段都成功、等語言模型接手，
+  不算失敗；exit 2 只留給產物有錯。
 
 ## 開發與測試
 

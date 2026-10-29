@@ -47,7 +47,7 @@ l2n ocr <stem>.frames.json   # 還沒有 <stem>.json 時；只 OCR 這場講座�
 l2n ocr <frames 資料夾>       # 只有在同層剛好一場講座時才可用
 ```
 
-旗標：`--min-conf`（低於此信心值直接丟棄）、`--no-s2t`（預設會簡轉繁）、
+旗標：`--min-conf`（低於此信心值直接丟棄）、`--no-s2t`（預設會簡轉繁，只轉字形；`--s2t-phrases` 才換詞彙）、
 `--skip-frames <glob 或時間範圍>`（略過不做 OCR，可重複給）。
 
 **畫面含參與者面板或聊天室的影格，OCR 前先排除**，例如

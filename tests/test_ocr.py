@@ -43,7 +43,7 @@ class CountingEngine:
 @pytest.fixture()
 def no_s2t(monkeypatch):
     """OpenCC would rewrite the fake text; it is not what this file tests."""
-    monkeypatch.setattr(ocr_mod, "load_s2t", lambda enabled=True: None)
+    monkeypatch.setattr(ocr_mod, "load_s2t", lambda enabled=True, config=None: None)
 
 
 def build_lecture(tmp_path: Path, frame_count: int = 3) -> Path:
