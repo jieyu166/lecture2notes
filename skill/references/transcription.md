@@ -18,7 +18,8 @@ l2n transcribe --list-engines
 ```
 
 常用旗標：`--engine`、`--model`、`--model-dir`、`--corrections <對照表.json>`、
-`--no-s2t`（預設會簡轉繁）、`--chunk-sec`、`--allow-cloud`（預設拒絕非本機引擎）。
+`--no-s2t`（預設會簡轉繁，只轉字形）、`--s2t-phrases`（連詞彙換成台灣用語；台灣講者別加，
+會把「腳本」改成「指令碼」）、`--chunk-sec`（faster-whisper 家族超過 1 小時自動切 30 分鐘）、`--allow-cloud`（預設拒絕非本機引擎）。
 `whisper_cpp` 另需 `--whisper-cpp-bin` 與 `--whisper-cpp-model`；`qwen3_asr` 的時間戳
 來自另一份權重，用 `--aligner-dir` 指定，後端用 `--backend` 選。
 

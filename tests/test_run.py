@@ -218,13 +218,14 @@ def test_a_warning_only_check_lets_the_run_finish_with_exit_one(
 
 
 def test_a_missing_document_stops_the_run_at_scaffold(ready, capsys):
+    """Waiting for the language model is not a failure: exit 1, not 2."""
     ready.document.unlink()
 
     code = _run(ready, "--mode", "interval", "--every", "5")
     printed = capsys.readouterr().out
 
-    assert code == exit_codes.ERROR
-    assert "[scaffold] error:" in printed
+    assert code == exit_codes.WARN
+    assert "[scaffold] pending:" in printed
     assert "lecture2notes skill" in printed
     assert "[render]" not in printed
 

@@ -1532,3 +1532,42 @@ def test_r2_finds_frames_beside_the_document_when_the_note_moved(lecture, tmp_pa
     moved = elsewhere / note_path.name
     moved.write_text(note_path.read_text(encoding="utf-8"), encoding="utf-8")
     assert _codes(check.check_note_stage(json_path, moved)) == _codes(check.check_note_stage(json_path, note_path))
+
+
+def test_r15_skips_the_rendered_triage_and_references_blocks(lecture):
+    """A triage reason quotes another vault note; References quote papers."""
+    json_path, note_path = lecture
+    text = note_path.read_text(encoding="utf-8")
+    text += (
+        "\n<!-- l2n:begin triage -->\n## 分流\n"
+        "- 第 1 段：已知，另一篇筆記寫過「這是別篇筆記裡的一句很長的話喔」\n"
+        "<!-- l2n:end triage -->\n"
+    )
+    note_path.write_text(text, encoding="utf-8")
+    assert "R15" not in _codes(check.check_note_stage(json_path, note_path))
+
+
+def test_r15_skips_an_unfenced_triage_section_up_to_the_next_heading(lecture):
+    json_path, note_path = lecture
+    text = note_path.read_text(encoding="utf-8")
+    note_path.write_text(
+        text + "\n## 分流\n- 理由：「這是別篇筆記裡的一句很長的話喔」\n", encoding="utf-8"
+    )
+    assert "R15" not in _codes(check.check_note_stage(json_path, note_path))
+    note_path.write_text(
+        text + "\n## 分流\n- 理由\n## 其他\n講者說「這是一句講者從來沒有說過的話而且很長」\n",
+        encoding="utf-8",
+    )
+    assert "R15" in _codes(check.check_note_stage(json_path, note_path))
+
+
+def test_r15_does_not_judge_a_quotation_inside_a_segment_title(lecture):
+    json_path, note_path = lecture
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    data["segments"][0]["title"] = "提示結構：「動詞加上主題物件加上限制條件」"
+    json_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    note_path.write_text(
+        render_skeleton(data, style="faithful", stem=STEM), encoding="utf-8", newline="\n"
+    )
+    _insert_into_first_section(note_path, "這段講「動詞加上主題物件加上限制條件」的寫法")
+    assert "R15" not in _codes(check.check_note_stage(json_path, note_path))

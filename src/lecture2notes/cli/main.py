@@ -193,6 +193,23 @@ def resolve_engine(args: argparse.Namespace) -> Engine:
         raise SystemExit(exit_codes.ERROR)
 
 
+def s2t_config(args: argparse.Namespace) -> str:
+    """Characters only by default; ``--s2t-phrases`` adds the word conversion."""
+    if getattr(args, "s2t_phrases", False):
+        return corrections_mod.S2T_PHRASE_CONFIG
+    return corrections_mod.S2T_CONFIG
+
+
+def add_s2t_phrases(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--s2t-phrases",
+        action="store_true",
+        dest="s2t_phrases",
+        help="簡轉繁時連詞彙一起換成台灣用語（OpenCC s2twp，例如「視頻」換成「影片」）；"
+        "預設只轉字形，台灣講者說的「腳本」「對象」「優化」不會被改成「指令碼」「物件」「最佳化」",
+    )
+
+
 def load_corrections(args: argparse.Namespace):
     """Read the correction table, or return None when none was asked for."""
     table = getattr(args, "corrections", None)
@@ -232,6 +249,7 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
         pairs=pairs,
         table_path=table_path,
         s2t=not getattr(args, "no_s2t", False),
+        s2t_config=s2t_config(args),
         force=getattr(args, "force", False),
         # An engine that cannot take an arbitrarily long input says so itself;
         # --chunk-sec overrides that, and no engine forces chunking on the rest.
@@ -397,6 +415,7 @@ def cmd_ocr(args: argparse.Namespace) -> int:
             path,
             min_conf=getattr(args, "min_conf", ocr_mod.DEFAULT_MIN_CONF),
             s2t=not getattr(args, "no_s2t", False),
+            s2t_config=s2t_config(args),
             force=getattr(args, "force", False),
             skip_frames=getattr(args, "skip_frames", None),
         )
@@ -1239,6 +1258,7 @@ def _run_transcribe(args, paths: RunPaths, lang: str, force: bool) -> Optional[s
         pipeline.transcribe_video(
             paths.video, lang, engine,
             pairs=pairs, table_path=table_path, force=force,
+            s2t_config=s2t_config(args),
             chunk_sec=getattr(args, "chunk_sec", None)
             or getattr(engine, "chunk_sec", None),
         )
@@ -1402,7 +1422,13 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     _out.stage("scaffold", SCAFFOLD_SKIP)
     if not paths.document.is_file():
-        return runner.failed("scaffold", SCAFFOLD_MISSING % paths.document.name)
+        # Not a failure: every mechanical stage before it succeeded and the next
+        # step belongs to the language model. Exit 1, like a clean run that
+        # hands over a skeleton note, so a batch script does not count the
+        # lecture as broken (exit 2 is for an artefact that is wrong).
+        _out.stage("scaffold", "pending: " + SCAFFOLD_MISSING % paths.document.name)
+        _out.warn("run: 機械階段完成，等語言模型寫 %s" % paths.document.name)
+        return max(runner.worst, exit_codes.WARN)
     if not runner.accept("scaffold", check.check_json(paths.document)):
         return runner.worst
 
@@ -1600,6 +1626,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--no-s2t", action="store_true", help="不做簡轉繁（預設會轉）"
     )
+    add_s2t_phrases(p)
     p.add_argument(
         "--bilingual",
         action="store_true",
@@ -1612,7 +1639,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         dest="chunk_sec",
-        help="把音訊切成這麼長的區塊逐段轉錄（給無法吃長音訊的後端）",
+        help="把音訊切成這麼長的區塊逐段轉錄（給無法吃長音訊的後端；"
+        "faster-whisper 家族超過 1 小時會自動切 30 分鐘）",
     )
     p.add_argument(
         "--list-engines",
@@ -1680,6 +1708,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="低於此信心值的辨識結果直接丟棄",
     )
     p.add_argument("--no-s2t", action="store_true", help="不做簡轉繁（預設會轉）")
+    add_s2t_phrases(p)
     p.add_argument(
         "--skip-frames",
         action="append",
@@ -1897,6 +1926,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--every", type=float, default=None, help="interval 模式的取樣秒數"
     )
+    p.add_argument(
+        "--chunk-sec", type=float, default=None, dest="chunk_sec",
+        help="轉錄時把音訊切成這麼長的區塊（faster-whisper 家族超過 1 小時會自動切 30 分鐘）",
+    )
+    add_s2t_phrases(p)
     p.add_argument(
         "--preflight",
         action="store_true",

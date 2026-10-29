@@ -19,7 +19,7 @@ of failing the run. An explicitly requested device is never second-guessed.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 from lecture2notes import _deps, _out
 from lecture2notes.engines.base import Cue, DependencyStatus, Engine, EngineMeta
@@ -53,6 +53,11 @@ class FasterWhisperEngine(Engine):
         default_model=DEFAULT_MODEL,
         extra="runs on CPU, faster with CUDA",
     )
+    #: faster-whisper builds the features of the whole input in one array, about
+    #: 1 GiB per hour of audio; past an hour the transcribe stage hands it
+    #: half-hour windows instead (see ``pipeline.auto_chunk_sec``).
+    long_audio_sec = 3600.0
+    long_audio_chunk_sec = 1800.0
 
     def __init__(
         self,
@@ -71,6 +76,7 @@ class FasterWhisperEngine(Engine):
         self.beam_size = int(beam_size)
         self.vad = bool(vad)
         self.condition = bool(condition)
+        self._loaded: Optional[Tuple[str, Any]] = None
 
     # -- dependency ------------------------------------------------------
     def check(self) -> None:
@@ -99,12 +105,15 @@ class FasterWhisperEngine(Engine):
         return self.compute_type
 
     def run_on(self, module, device: str, audio: Path, lang: str) -> List[Cue]:
-        """Load the model on *device* and drain a whole transcription from it."""
-        whisper_model = module.WhisperModel(
-            self._model_reference(),
-            device=device,
-            compute_type=self.compute_type_for(device),
-        )
+        """Load the model on *device* (once per device, so the windows of a
+        chunked run share it) and drain a whole transcription from it."""
+        if self._loaded is None or self._loaded[0] != device:
+            self._loaded = (device, module.WhisperModel(
+                self._model_reference(),
+                device=device,
+                compute_type=self.compute_type_for(device),
+            ))
+        whisper_model = self._loaded[1]
         segments, info = whisper_model.transcribe(
             str(audio),
             language=None if str(lang).lower() == "auto" else lang,
@@ -142,6 +151,10 @@ class FasterWhisperEngine(Engine):
                 "faster_whisper: device %s could not be used (%s); "
                 "retrying on the CPU" % (AUTO_DEVICE, exc)
             )
+        # The rest of a chunked run goes straight to the CPU instead of failing
+        # on the GPU once per window.
+        self.device = CPU_DEVICE
+        self._loaded = None
         return self.run_on(module, CPU_DEVICE, audio, lang)
 
 

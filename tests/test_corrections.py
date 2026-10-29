@@ -303,7 +303,7 @@ def test_the_s2t_conversion_actually_reaches_the_srt_without_a_table(tmp_path, m
     it to fail loudly.
     """
     monkeypatch.setattr(
-        corrections_mod, "convert_simplified", lambda text: (text.replace("佔位", "轉換"), True)
+        corrections_mod, "convert_simplified", lambda text, config=None: (text.replace("佔位", "轉換"), True)
     )
     video = tmp_path / "lecture.mp4"
     video.write_bytes(b"x")
@@ -343,7 +343,7 @@ def test_chunked_transcription_shifts_each_window_onto_the_real_clock(tmp_path):
     engine = FakeEngine(cues=[Cue(0.0, 5.0, "window"), Cue(5.0, 10.0, "window")])
     cues = pipeline.transcribe_audio(
         engine, video, "zh", tmp_path / "work",
-        chunk_sec=60.0, duration_sec=150.0, extract=fake_extract,
+        chunk_sec=60.0, duration_sec=150.0, extract=fake_extract, overlap_sec=0,
     )
     assert [round(c.start, 3) for c in cues] == [0.0, 5.0, 60.0, 65.0, 120.0, 125.0]
     assert len(engine.calls) == 3
@@ -374,7 +374,7 @@ def test_the_sliver_window_is_never_handed_to_the_engine(tmp_path):
     engine = FakeEngine(cues=[Cue(0.0, 5.0, "window")])
     pipeline.transcribe_audio(
         engine, video, "zh", tmp_path / "work",
-        chunk_sec=120.0, duration_sec=360.033, extract=fake_extract,
+        chunk_sec=120.0, duration_sec=360.033, extract=fake_extract, overlap_sec=0,
     )
     assert len(engine.calls) == 3
 
@@ -393,3 +393,64 @@ def test_a_wav_input_is_handed_to_the_engine_directly(tmp_path):
     )
     assert cues
     assert engine.calls[0][0] == source
+
+
+def test_s2t_converts_characters_only_unless_phrases_are_asked_for():
+    """s2twp rewrote a Taiwanese speaker's own words: 腳本→指令碼, 對象→物件."""
+    pytest.importorskip("opencc")
+    text, applied = corrections_mod.convert_simplified("脚本 对象 优化")
+    assert applied and text == "腳本 對象 優化"
+    text, _ = corrections_mod.convert_simplified("视频", corrections_mod.S2T_PHRASE_CONFIG)
+    assert text == "影片"
+    assert corrections_mod.build_sidecar("a", "b", None, [], True)["s2t"]["converter"] == "s2tw"
+
+
+def test_windows_overlap_and_each_keeps_its_side_of_the_seam(tmp_path):
+    """Chunk 0 keeps cues before the middle of the overlap, chunk 1 the rest:
+    no cue is cut at a window edge and none is transcribed twice."""
+    video = tmp_path / "long.mp4"
+    video.write_bytes(b"x")
+    engine = FakeEngine(cues=[Cue(0.0, 4.0, "a"), Cue(52.0, 56.0, "b"), Cue(57.5, 59.0, "c")])
+    cues = pipeline.transcribe_audio(
+        engine, video, "zh", tmp_path / "work",
+        chunk_sec=60.0, duration_sec=100.0, extract=fake_extract,
+    )
+    # overlap 6 s: the second window starts at 54 and the seam is at 57
+    assert [round(c.start, 3) for c in cues] == [0.0, 52.0, 106.0, 111.5]
+    assert [call[0].name for call in engine.calls] == ["long-chunk000.wav", "long-chunk001.wav"]
+
+
+def test_faster_whisper_chunks_a_long_recording_by_itself(tmp_path):
+    video = tmp_path / "long.mp4"
+    video.write_bytes(b"x")
+    engine = FakeEngine(cues=[Cue(0.0, 5.0, "w")])
+    engine.long_audio_sec, engine.long_audio_chunk_sec = 3600.0, 1800.0
+    pipeline.transcribe_audio(
+        engine, video, "zh", tmp_path / "work", duration_sec=3 * 3600.0, extract=fake_extract,
+    )
+    assert len(engine.calls) == 7  # 1800 s windows stepping 1770 s over 3 h
+    short = FakeEngine(cues=[Cue(0.0, 5.0, "w")])
+    short.long_audio_sec, short.long_audio_chunk_sec = 3600.0, 1800.0
+    pipeline.transcribe_audio(
+        short, video, "zh", tmp_path / "work2", duration_sec=1800.0, extract=fake_extract,
+    )
+    assert len(short.calls) == 1
+    from lecture2notes.engines.faster_whisper import FasterWhisperEngine
+    assert pipeline.auto_chunk_sec(FasterWhisperEngine(), 3 * 3600.0) == 1800.0
+
+
+def test_running_out_of_memory_names_the_chunk_option(tmp_path):
+    class Hungry(FakeEngine):
+        def transcribe(self, audio, lang):
+            raise MemoryError("Unable to allocate 3.42 GiB")
+
+    source = tmp_path / "talk.wav"
+    source.write_bytes(b"x")
+    with pytest.raises(RuntimeError, match="--chunk-sec 1800"):
+        pipeline.transcribe_audio(Hungry(cues=[]), source, "zh", tmp_path / "w", extract=fake_extract)
+
+
+def test_no_window_is_planned_that_only_repeats_the_previous_tail():
+    # 60 s windows stepping 54 s: the second already reaches 114 s
+    assert audio_mod.plan_chunks(113.0, 60.0, 6.0) == [0.0, 54.0]
+    assert audio_mod.plan_chunks(115.0, 60.0, 6.0) == [0.0, 54.0, 108.0]

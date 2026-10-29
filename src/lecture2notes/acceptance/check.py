@@ -1735,6 +1735,36 @@ def quote_sources(data: Mapping[str, Any], transcript: Optional[Path]) -> str:
     return rules.comparison_text("".join(parts))
 
 
+#: Rendered blocks R15 does not read: 分流 quotes the vault's notes (a triage
+#: reason cites what another note says) and References quotes papers. Neither
+#: is the writer's claim about the speaker, and neither can be fixed in the note.
+R15_SKIPPED_BLOCKS = ("triage", "references")
+
+
+def projected_lines(lines: Sequence[str]) -> List[bool]:
+    """True for each line inside a managed 分流 or References block, or under
+    an unfenced ``## 分流`` heading up to the next heading of level 1 or 2."""
+    mask = [False] * len(lines)
+    inside: Optional[str] = None
+    for position, raw in enumerate(lines):
+        line = raw.strip()
+        if inside is None:
+            for name in R15_SKIPPED_BLOCKS:
+                if line == render.MANAGED_BEGIN % name:
+                    inside = name
+            if inside is None and line == render.TRIAGE_HEADING:
+                inside = "heading"
+            mask[position] = inside is not None
+            continue
+        if inside == "heading" and re.match(r"#{1,2} ", line) and line != render.TRIAGE_HEADING:
+            inside = None
+            continue
+        mask[position] = True
+        if inside != "heading" and line == render.MANAGED_END % inside:
+            inside = None
+    return mask
+
+
 def _rule_quote_source(
     lines: Sequence[str],
     data: Mapping[str, Any],
@@ -1760,21 +1790,30 @@ def _rule_quote_source(
     # rule is about the ones a writer adds.
     # Segment titles are quoted by the renderer's own drafts (speaker outline,
     # drafted questions); that is typography, not a claim about speech.
+    # A title the renderer writes into the note brings its own 「」 along: a
+    # quotation inside a title is the title's, not a claim about speech.
     declared = set()
+    titles: List[str] = []
     for segment in data.get("segments") or []:
         if isinstance(segment, Mapping):
-            declared.add(rules.comparison_text(str(segment.get("title") or "")))
+            titles.append(rules.comparison_text(str(segment.get("title") or "")))
+            declared.add(titles[-1])
             for item in render.quote_items(segment) + [
                 b for b in render.bullet_items(segment) if b["kind"] == "quote"
             ]:
                 declared.add(rules.comparison_text(item["text"]))
     evergreen = note_regions(lines).get("Evergreen Note")
+    projected = projected_lines(lines)
     for position, line in enumerate(lines):
         if evergreen and evergreen[0] <= position < evergreen[1]:
+            continue
+        if projected[position]:
             continue
         for match in QUOTED_SPAN.finditer(line):
             quote = rules.comparison_text(match.group(0)[1:-1])
             if len(quote) < R15_MIN_CHARS or quote in declared:
+                continue
+            if any(quote in title for title in titles):
                 continue
             wanted = _grams(quote)
             share = len(wanted & have) / float(len(wanted) or 1)

@@ -148,6 +148,10 @@ def plan_chunks(duration_sec: float, chunk_sec: float, overlap_sec: float = 0.0)
         # anything that fits in one window.
         if starts and duration_sec - position < MIN_TAIL_SEC:
             break
+        # With overlap the previous window already reaches ``position +
+        # overlap``; a window that would only repeat its tail is not planned.
+        if starts and overlap_sec > 0 and duration_sec - position <= overlap_sec:
+            break
         starts.append(round(position, 3))
         position += step
     return starts

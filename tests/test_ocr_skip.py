@@ -24,7 +24,7 @@ from lecture2notes.schema.io import read_json  # noqa: E402
 
 @pytest.fixture()
 def no_s2t(monkeypatch):
-    monkeypatch.setattr(ocr_mod, "load_s2t", lambda enabled=True: None)
+    monkeypatch.setattr(ocr_mod, "load_s2t", lambda enabled=True, config=None: None)
 
 
 def test_a_glob_skips_the_frame_and_its_text(tmp_path: Path, no_s2t):
