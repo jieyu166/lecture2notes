@@ -47,6 +47,9 @@ DERIVED_SUFFIXES = (".frames.json", ".frames_ocr.json", ".corrections.json")
 UNNUMBERED_SORT_KEY = "zz"
 #: The generated page's filename, in the reader's language.
 HUB_FILENAME = "課程首頁.html"
+#: Subfolders that hold a lecture's own assets, never a lecture: ``--subdirs``
+#: does not descend into them.
+ASSET_DIRS = ("frames",)
 
 #: ``<course>-<no>-<speaker with a title>-<topic>``
 NAMED_PATTERN = re.compile(
@@ -78,6 +81,8 @@ def load_titles(folder: Path) -> Dict[str, Dict[str, str]]:
     """Read the optional ``_titles.json`` override map.
 
     Shape: ``{"<stem>": {"no": "01", "speaker": "...", "topic": "..."}}``.
+    A lecture found in a subfolder by ``--subdirs`` is keyed ``"<subdir>/<stem>"``
+    (forward slash) and falls back to its bare stem; see :func:`title_override`.
     A missing or unparseable file means no overrides, not a failure: the hub must
     still build from filenames alone.
     """
@@ -144,14 +149,43 @@ def render_course(course: Mapping[str, Any]) -> str:
     return '<section class="course"><dl>%s</dl></section>\n' % body
 
 
-def apply_titles(stem: str, titles: Mapping[str, Any]) -> Dict[str, str]:
+def lecture_key(stem: str, subdir: str = "") -> str:
+    """How a lecture is named relative to the course folder: ``<subdir>/<stem>``.
+
+    Always a forward slash, whatever the platform, because the same string is
+    the ``_titles.json`` key and the prefix of every link the page emits.
+    """
+    return "%s/%s" % (subdir, stem) if subdir else stem
+
+
+def title_override(
+    titles: Mapping[str, Any], stem: str, subdir: str = ""
+) -> Optional[Mapping[str, Any]]:
+    """The ``_titles.json`` entry for one lecture, or ``None``.
+
+    The qualified ``<subdir>/<stem>`` key wins over the bare stem, so two
+    subfolders that both hold a ``lecture.json`` can still be told apart, while
+    a course whose stems are already unique (dates, usually) can use the stem.
+    """
+    if not isinstance(titles, Mapping):
+        return None
+    for key in (lecture_key(stem, subdir), stem):
+        override = titles.get(key)
+        if isinstance(override, Mapping):
+            return override
+    return None
+
+
+def apply_titles(
+    stem: str, titles: Mapping[str, Any], subdir: str = ""
+) -> Dict[str, str]:
     """Derive a card's fields from the filename, then let the override win.
 
     Only the keys present in the override are replaced, so a file can fix just
     the topic and keep the derived number.
     """
     card = parse_name(stem)
-    override = titles.get(stem) or {}
+    override = title_override(titles, stem, subdir) or {}
     if isinstance(override, Mapping):
         for key in ("no", "speaker", "topic"):
             if key in override:
@@ -160,7 +194,12 @@ def apply_titles(stem: str, titles: Mapping[str, Any]) -> Dict[str, str]:
 
 
 def card_sort_key(card: Mapping[str, Any]) -> tuple:
-    """Order by ``(no, stem)`` compared as strings, as the contract states."""
+    """Order by ``(no, stem)`` compared as strings, as the contract states.
+
+    Two lectures with the same stem in two subfolders tie here; :func:`collect`
+    reads folders in name order and the sort is stable, so they still come out
+    the same way on every run.
+    """
     return (card.get("no") or UNNUMBERED_SORT_KEY, card.get("stem") or "")
 
 
@@ -182,18 +221,30 @@ def lecture_label(card: Mapping[str, Any]) -> str:
     return ("%s %s" % (no, topic)).strip() if topic != no else no
 
 
+def _prefixed(subdir: str, relative: str) -> str:
+    """A path relative to the lecture, made relative to the course folder."""
+    relative = str(relative).replace("\\", "/")
+    return "%s/%s" % (subdir, relative) if subdir else relative
+
+
 def build_card(
-    json_path: Path, data: Mapping[str, Any], titles: Mapping[str, Any]
+    json_path: Path, data: Mapping[str, Any], titles: Mapping[str, Any], subdir: str = ""
 ) -> Dict[str, Any]:
-    """One lecture's card data."""
+    """One lecture's card data.
+
+    ``subdir`` is the lecture's folder relative to the course folder ('' for the
+    course folder itself). The viewer and the thumbnail, and through the viewer
+    every search hit, are prefixed with it, because the hub page sits in the
+    course folder and the lecture's files sit one level down.
+    """
     json_path = Path(json_path)
     segments = data.get("segments") or []
-    card = apply_titles(json_path.stem, titles)
+    card = apply_titles(json_path.stem, titles, subdir)
     # A stem the filename patterns cannot read (``20241207``) leaves the stem as
     # the topic, and one they misread (``5-1-1``) leaves a bare number; either
     # way the document's own title says more, unless an override spoke.
     title = str(data.get("title") or "").strip()
-    override = titles.get(json_path.stem) if isinstance(titles, Mapping) else None
+    override = title_override(titles, json_path.stem, subdir)
     has_topic = isinstance(override, Mapping) and "topic" in override
     topic = str(card.get("topic") or "")
     says_nothing = topic == json_path.stem or topic.isdigit()
@@ -202,10 +253,12 @@ def build_card(
     frames = [frame for segment in segments for frame in (segment.get("frames") or [])]
     card.update({
         "stem": json_path.stem,
-        "viewer": "%s.viewer.html" % json_path.stem,
+        "dir": subdir,
+        "key": lecture_key(json_path.stem, subdir),
+        "viewer": _prefixed(subdir, "%s.viewer.html" % json_path.stem),
         "segments": segments,
         "frames": frames,
-        "thumb": frames[0] if frames else None,
+        "thumb": _prefixed(subdir, frames[0]) if frames else None,
         "minutes": round(float(segments[-1].get("end_sec") or 0) / 60) if segments else 0,
         "summary": (data.get("overall_summary_zh") or "")[:150],
         "takeaways": data.get("takeaways_zh") or [],
@@ -226,28 +279,60 @@ def triage_line(data: Mapping[str, Any]) -> str:
     return verdict
 
 
-def collect(folder: Path, require_viewer: bool = True) -> List[Dict[str, Any]]:
+def lecture_dirs(folder: Path, subdirs: bool = False) -> List[tuple]:
+    """``(path, subdir)`` for every folder that may hold lectures.
+
+    The course folder always, as ``''``; with ``subdirs`` also each immediate
+    subfolder, one level only. Asset folders (``frames``) and names starting
+    with ``_`` or ``.`` are not lecture folders and are skipped.
+    """
+    folder = Path(folder)
+    found: List[tuple] = [(folder, "")]
+    if subdirs:
+        for child in sorted(folder.iterdir(), key=lambda p: p.name):
+            name = child.name
+            if name.startswith(("_", ".")) or name in ASSET_DIRS:
+                continue
+            if child.is_dir():
+                found.append((child, name))
+    return found
+
+
+def collect(
+    folder: Path, require_viewer: bool = True, subdirs: bool = False
+) -> List[Dict[str, Any]]:
     """Every lecture in the folder, as sorted cards.
 
     ``require_viewer`` is off for the hub itself: a lecture whose viewer has not
     been built yet must still produce a card, so that the link check can name the
     missing file instead of the lecture quietly vanishing from the page.
+
+    ``subdirs`` also reads the lectures one folder down. Their cards are mixed
+    with the course folder's and sorted by the same :func:`card_sort_key`; the
+    overrides still come from the course folder's ``_titles.json`` only.
     """
     folder = Path(folder)
     titles = load_titles(folder)
     cards: List[Dict[str, Any]] = []
-    for json_path in sorted(folder.glob("*.json")):
-        if not is_lecture_json(json_path):
-            continue
-        if require_viewer and not (folder / ("%s.viewer.html" % json_path.stem)).exists():
-            continue
-        try:
-            data = load_json(json_path)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            continue
-        if not isinstance(data, Mapping) or not (data.get("segments") or []):
-            continue
-        cards.append(build_card(json_path, data, titles))
+    for directory, subdir in lecture_dirs(folder, subdirs):
+        for json_path in sorted(directory.glob("*.json")):
+            if not is_lecture_json(json_path):
+                continue
+            viewer = directory / ("%s.viewer.html" % json_path.stem)
+            if require_viewer and not viewer.exists():
+                continue
+            try:
+                data = load_json(json_path)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if not isinstance(data, Mapping):
+                continue
+            # A sidecar report (``<stem>.lecture_v4_report.json``) can carry a
+            # ``segments`` count; only a list of segments makes a lecture.
+            segments = data.get("segments")
+            if not isinstance(segments, list) or not segments:
+                continue
+            cards.append(build_card(json_path, data, titles, subdir))
     return sorted(cards, key=card_sort_key)
 
 
@@ -452,7 +537,7 @@ def render(
             '<div class="stat">%d 分　·　%d 段　·　%d 張投影片%s</div></div></a>'
             % (
                 html.escape(quote(str(card["viewer"])), quote=True),
-                html.escape(str(card.get("stem") or ""), quote=True),
+                html.escape(str(card.get("key") or card.get("stem") or ""), quote=True),
                 thumb,
                 html.escape(str(card.get("no") or "")),
                 html.escape(str(card.get("topic") or "")),
@@ -490,21 +575,50 @@ def render(
 # --------------------------------------------------------------------------
 # file-system layer
 # --------------------------------------------------------------------------
-def hub_path(folder: Path) -> Path:
-    return Path(folder) / HUB_FILENAME
+def valid_output_name(name: str) -> bool:
+    """Whether ``name`` is a bare file name the hub may be written as.
+
+    The page's links are relative to the course folder, so the page has to be
+    written into it: a name with a directory part would produce a page whose
+    every link is dead.
+    """
+    name = str(name or "").strip()
+    if not name or name in (".", ".."):
+        return False
+    return not any(sep in name for sep in ("/", "\\", ":"))
 
 
-def preflight(folder: Path) -> List[PlannedFile]:
+def hub_path(folder: Path, name: Optional[str] = None) -> Path:
+    """Where the hub goes: ``name`` (default :data:`HUB_FILENAME`) in the folder."""
+    return Path(folder) / (name or HUB_FILENAME)
+
+
+def preflight(folder: Path, name: Optional[str] = None) -> List[PlannedFile]:
     """What ``l2n hub`` would write. Reads the filesystem, writes nothing."""
-    return plan_for([hub_path(folder)])
+    return plan_for([hub_path(folder, name)])
+
+
+def viewer_report(folder: Path, cards: Sequence[Mapping[str, Any]]) -> List[tuple]:
+    """``(viewer, exists)`` per card: what ``--preflight`` lists under the plan.
+
+    The plan says which file the hub replaces; this says which lectures the page
+    would show, and which of them would come out as dead links.
+    """
+    folder = Path(folder)
+    return [
+        (str(card["viewer"]), (folder / str(card["viewer"])).exists()) for card in cards
+    ]
 
 
 def build(
-    folder: Path, title: Optional[str] = None, out: Optional[Path] = None
+    folder: Path,
+    title: Optional[str] = None,
+    out: Optional[Path] = None,
+    subdirs: bool = False,
 ) -> Dict[str, Any]:
     """Write the course hub and report its cards, index size and dead links."""
     folder = Path(folder)
-    cards = collect(folder, require_viewer=False)
+    cards = collect(folder, require_viewer=False, subdirs=subdirs)
     index = build_index(cards)
     destination = Path(out) if out else hub_path(folder)
     page = render(cards, index, title or folder.name, load_course(folder))
@@ -533,6 +647,7 @@ __all__ = [
     "NO_COMMON_THREAD",
     "TITLES_FILE",
     "UNNUMBERED_SORT_KEY",
+    "ASSET_DIRS",
     "apply_titles",
     "build",
     "build_card",
@@ -544,6 +659,11 @@ __all__ = [
     "collect",
     "hub_path",
     "is_lecture_json",
+    "lecture_dirs",
+    "lecture_key",
+    "title_override",
+    "valid_output_name",
+    "viewer_report",
     "course_lines",
     "load_course",
     "load_json",
