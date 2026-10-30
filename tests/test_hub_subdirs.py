@@ -93,6 +93,19 @@ def test_only_one_level_is_scanned_and_asset_folders_are_skipped(course: Path) -
     assert len(keys) == 3
 
 
+def test_a_report_json_with_a_segment_count_is_not_a_lecture(course: Path) -> None:
+    # Seen in the wild: a pipeline report beside the lecture, whose
+    # ``segments`` is a number, not a list.
+    (course / DATED / ("%s.lecture_v4_report.json" % DATED)).write_text(
+        json.dumps({"video": "x.mp4", "segments": 12}), encoding="utf-8"
+    )
+
+    keys = [card["key"] for card in hub.collect(course, subdirs=True)]
+
+    assert len(keys) == 3
+    assert not any("report" in key for key in keys)
+
+
 def test_subfolder_cards_carry_the_folder_prefix(course: Path) -> None:
     card = _by_key(hub.collect(course, subdirs=True))["%s/%s" % (DATED, DATED)]
 

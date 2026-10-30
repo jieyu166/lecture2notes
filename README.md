@@ -591,6 +591,8 @@ l2n hub ./course-folder --subdirs --output index.html
 - **排序**：子資料夾講座與根目錄講座混在一起，沿用同一個排序：先比 `no`、再比 stem，都以
   字串比較；沒有 `no` 的排在所有有編號的之後。日期當 stem 的講座因此依日期先後排列；
   想穿插在編號講座之間，就在 `_titles.json` 給它 `no`（位數要對齊，`"10"` 會排在 `"2"` 前面）。
+- **只有 `segments` 是非空清單的 JSON 才算講座**：旁邊的報告檔（例如
+  `<stem>.lecture_v4_report.json`，`segments` 是數字）不再讓 hub 當掉。
 - **`--preflight` 也列出將收錄的講座**：每場一行
   `hub lecture <viewer 相對路徑> (ok | viewer missing)`，只讀檔，不寫任何東西。
 

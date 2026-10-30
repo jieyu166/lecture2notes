@@ -325,7 +325,12 @@ def collect(
                 data = load_json(json_path)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 continue
-            if not isinstance(data, Mapping) or not (data.get("segments") or []):
+            if not isinstance(data, Mapping):
+                continue
+            # A sidecar report (``<stem>.lecture_v4_report.json``) can carry a
+            # ``segments`` count; only a list of segments makes a lecture.
+            segments = data.get("segments")
+            if not isinstance(segments, list) or not segments:
                 continue
             cards.append(build_card(json_path, data, titles, subdir))
     return sorted(cards, key=card_sort_key)
