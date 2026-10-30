@@ -568,6 +568,32 @@ schema 2.1、雙語字幕、播放網頁改版、Obsidian 筆記的時間碼連�
 - **`l2n run` 停在 scaffold（JSON 還沒寫）時回 exit 1**：機械階段都成功、等語言模型接手，
   不算失敗；exit 2 只留給產物有錯。
 
+### Unreleased（0.3.4.dev1）
+
+課程資料夾裡有一部分講座放在子資料夾（`<日期>/<日期>.json`、`<日期>/<日期>.viewer.html`、
+`<日期>/frames/…`）時，首頁也能收錄。
+
+```bash
+l2n hub ./course-folder --subdirs --output index.html --preflight   # 先看會寫什麼、收哪些講座
+l2n hub ./course-folder --subdirs --output index.html
+```
+
+- **`l2n hub --subdirs`**：除了課程資料夾本身，也掃描下一層子資料夾（只一層；`frames`
+  與 `_`、`.` 開頭的資料夾略過）。子資料夾講座的 viewer、縮圖連結，以及跨講座搜尋結果的
+  深連結（`<子資料夾>/<stem>.viewer.html?t=秒`）都加上 `<子資料夾>/` 前綴，空白與全形字元
+  照舊以百分比編碼。寫完後的連結檢查同樣涵蓋子資料夾，viewer 還沒建好的講座會被點名、回 exit 2。
+- **`l2n hub --output NAME`**：首頁檔名（預設 `課程首頁.html`），例如 `index.html`。只接受檔名，
+  不接受路徑，因為頁面上的連結都相對於課程資料夾。原本沒有設定檔名的 profile／overlay 鍵，
+  所以用旗標。
+- **`_titles.json` 的 key**：仍放在課程資料夾根目錄。子資料夾講座用 `"<子資料夾>/<stem>"`
+  （一律正斜線，例如 `"20250315/20250315"`）；找不到時退回只用 `"<stem>"`。兩者都有時以
+  含子資料夾的 key 為準。
+- **排序**：子資料夾講座與根目錄講座混在一起，沿用同一個排序：先比 `no`、再比 stem，都以
+  字串比較；沒有 `no` 的排在所有有編號的之後。日期當 stem 的講座因此依日期先後排列；
+  想穿插在編號講座之間，就在 `_titles.json` 給它 `no`（位數要對齊，`"10"` 會排在 `"2"` 前面）。
+- **`--preflight` 也列出將收錄的講座**：每場一行
+  `hub lecture <viewer 相對路徑> (ok | viewer missing)`，只讀檔，不寫任何東西。
+
 ## 開發與測試
 
 ```bash

@@ -240,10 +240,10 @@ def _declared_version() -> str:
     return match.group(1)
 
 
-def test_the_project_is_at_0_3_3():
+def test_the_project_is_at_0_3_4_dev1():
     # Bumped with schema 2.1: an unchanged number let `pip install -U` from the
     # branch skip the reinstall and leave the 2.0-only l2n in place.
-    assert _declared_version() == "0.3.3"
+    assert _declared_version() == "0.3.4.dev1"
 
 
 def test_the_source_fallback_matches_pyproject():

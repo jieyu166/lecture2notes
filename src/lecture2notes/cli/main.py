@@ -888,9 +888,25 @@ def cmd_hub(args: argparse.Namespace) -> int:
     if not root.is_dir():
         _out.error("hub：不是資料夾 %s" % root)
         return exit_codes.ERROR
+    name = getattr(args, "output", None)
+    if name is not None and not hub_mod.valid_output_name(name):
+        # The page's links are relative to the course folder; written anywhere
+        # else, every one of them would be dead.
+        _out.error("hub：--output 只能是檔名（不含資料夾）%s" % name)
+        return exit_codes.ERROR
+    subdirs = bool(getattr(args, "subdirs", False))
     if getattr(args, "preflight", False):
-        return _emit_plan("hub", hub_mod.preflight(root))
-    result = hub_mod.build(root, title=getattr(args, "title", None))
+        code = _emit_plan("hub", hub_mod.preflight(root, name))
+        cards = hub_mod.collect(root, require_viewer=False, subdirs=subdirs)
+        for viewer, exists in hub_mod.viewer_report(root, cards):
+            _out.line("hub lecture %s (%s)" % (viewer, "ok" if exists else "viewer missing"))
+        return code
+    result = hub_mod.build(
+        root,
+        title=getattr(args, "title", None),
+        out=hub_mod.hub_path(root, name),
+        subdirs=subdirs,
+    )
     if not result["cards"]:
         _out.error("hub：資料夾裡沒有可用的正式 JSON")
         return exit_codes.ERROR
@@ -1850,9 +1866,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("folder", nargs="?", help="課程資料夾")
     p.add_argument("--title", default=None, help="課程名稱（預設用資料夾名）")
     p.add_argument(
+        "--subdirs",
+        action="store_true",
+        help="一併收錄下一層子資料夾裡的講座（連結加上子資料夾前綴）",
+    )
+    p.add_argument(
+        "--output",
+        default=None,
+        metavar="NAME",
+        help="首頁檔名，寫在課程資料夾裡（預設 %s）" % hub_mod.HUB_FILENAME,
+    )
+    p.add_argument(
         "--preflight",
         action="store_true",
-        help="只列出將建立或覆蓋的檔案，不寫入任何東西",
+        help="只列出將建立或覆蓋的檔案與將收錄的講座，不寫入任何東西",
     )
     p.set_defaults(func=cmd_hub)
 
