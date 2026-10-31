@@ -315,3 +315,75 @@ def test_scene_times_follow_the_container_clock_when_the_video_starts_late(tmp_p
     assert times[0] == 0.0
     assert any(abs(t - 6.0) < 0.2 for t in times), times  # blue at 4 s of video = 6 s of file
     assert not any(abs(t - 4.0) < 0.2 for t in times), times
+
+
+# -- a video that changes size --------------------------------------------------
+def _concat_sizes(tmp_path: Path, first: str, seconds: float) -> Path:
+    """``first`` for ``seconds``, then 160x80 blue with a white box from 2 s on."""
+    import subprocess
+
+    run = lambda *args: subprocess.run(["ffmpeg", "-v", "error", "-y", *args], check=True)
+    a, b, out = tmp_path / "a.ts", tmp_path / "b.ts", tmp_path / "mixed.mp4"
+    run("-f", "lavfi", "-i", "color=c=red:s=%s:d=%s:r=25" % (first, seconds),
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(a))
+    run("-f", "lavfi", "-i",
+        "color=c=blue:s=160x80:d=4:r=25,drawbox=w=80:h=40:c=white@1:t=fill:enable='gte(t,2)'",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(b))
+    run("-i", "concat:%s|%s" % (a, b), "-c", "copy", str(out))
+    return out
+
+
+def test_a_size_change_at_the_start_is_seen_by_the_probe(tmp_path):
+    """Field file: the first two frames were 2468x1280, the stream and the rest 2468x1186."""
+    video = _concat_sizes(tmp_path, "160x96", 0.08)
+    changed = scene.size_change(scene.frame_sizes(video))
+    assert changed and "160x96" in changed and "160x80" in changed
+    plain = _concat_sizes(tmp_path, "160x80", 0.08)
+    assert scene.size_change(scene.frame_sizes(plain)) is None
+
+
+def test_size_change_reads_the_stream_and_the_frames():
+    assert scene.size_change({"stream": (4, 3), "frames": [(4, 3), (4, 3)]}) is None
+    assert scene.size_change({"stream": (4, 2), "frames": [(4, 3), (4, 2)]}) == "4x2 -> 4x3"
+    assert scene.size_change({"stream": None, "frames": []}) is None
+
+
+def test_a_size_change_hands_the_scan_to_ffmpeg(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("scenedetect")
+    video = _concat_sizes(tmp_path, "160x96", 0.08)
+    calls = []
+    monkeypatch.setattr(scene, "detect_ffmpeg", lambda path, *a, **k: calls.append(path) or [scene.mark(0.0)])
+    assert scene.detect_scenes(video) == [scene.mark(0.0)]
+    assert calls == [video]
+    assert "changes size (160x96 -> 160x80)" in capsys.readouterr().out
+
+
+def test_scenedetects_size_errors_also_hand_the_scan_to_ffmpeg(tmp_path, monkeypatch, capsys):
+    """A change past the probed opening: PySceneDetect logs, skips and finds nothing."""
+    pytest.importorskip("scenedetect")
+    import logging
+
+    import scenedetect
+
+    video = _concat_sizes(tmp_path, "160x80", 0.08)
+    real = scenedetect.SceneManager.detect_scenes
+
+    def noisy(self, *args, **kwargs):
+        logging.getLogger("pyscenedetect").error(
+            "ERROR: Frame at 00:00:00.067 has incorrect size and cannot be processed"
+        )
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(scenedetect.SceneManager, "detect_scenes", noisy)
+    calls = []
+    monkeypatch.setattr(scene, "detect_ffmpeg", lambda path, *a, **k: calls.append(path) or [scene.mark(0.0)])
+    scene.detect_scenes(video)
+    assert calls == [video]
+    assert "1 frames of another size" in capsys.readouterr().out
+    assert not any(isinstance(h, scene._SizeErrors) for h in logging.getLogger("pyscenedetect").handlers)
+
+
+def test_the_ffmpeg_scan_finds_the_cut_after_a_size_change(tmp_path):
+    video = _concat_sizes(tmp_path, "160x96", 0.08)
+    times = [m["timestamp_sec"] for m in scene.detect_scenes(video)]
+    assert any(abs(t - 2.08) < 0.2 for t in times), times

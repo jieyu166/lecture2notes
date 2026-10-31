@@ -14,6 +14,7 @@ transition animation rather than in the middle of one.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -165,6 +166,77 @@ def stream_timing(video_path: Path) -> Dict[str, Optional[float]]:
     return out
 
 
+#: Frames ffprobe reads from the start of the file to see whether their size
+#: matches the stream's. Cheap (no full decode of the file) and enough for the
+#: case seen in the field: a webm-to-mp4 live recording whose first two frames
+#: were 2468x1280 and every later one 2468x1186.
+SIZE_PROBE_FRAMES = 30
+RESOLUTION_MESSAGE = (
+    "the video changes size (%s); PySceneDetect skips every frame that differs "
+    "from the first and finds no cut, so the ffmpeg scene filter is used instead"
+)
+
+
+def frame_sizes(video_path: Path, count: int = SIZE_PROBE_FRAMES) -> Dict[str, Any]:
+    """The stream's declared size and the sizes of its first ``count`` frames.
+
+    ``{"stream": (w, h) or None, "frames": [(w, h), ...]}``. Never raises: a
+    file ffprobe cannot read just reports nothing.
+    """
+    import json as _json
+
+    out: Dict[str, Any] = {"stream": None, "frames": []}
+    try:
+        ffprobe = _deps.require_ffprobe()
+        done = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0",
+             "-read_intervals", "%%+#%d" % int(count),
+             "-show_entries", "stream=width,height:frame=width,height",
+             "-of", "json", str(video_path)],
+            capture_output=True, text=True, timeout=120,
+        )
+        data = _json.loads(done.stdout or "{}")
+    except (OSError, ValueError, subprocess.SubprocessError, SystemExit):
+        return out
+
+    def size(entry: Any) -> Optional[tuple]:
+        try:
+            return (int(entry["width"]), int(entry["height"]))
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    out["stream"] = size((data.get("streams") or [{}])[0])
+    out["frames"] = [s for s in (size(f) for f in data.get("frames") or []) if s]
+    return out
+
+
+def size_change(sizes: Mapping[str, Any]) -> Optional[str]:
+    """``"2468x1280 -> 2468x1186"`` when the probed sizes disagree, else None."""
+    seen: List[tuple] = []
+    for item in [sizes.get("stream")] + list(sizes.get("frames") or []):
+        if item and item not in seen:
+            seen.append(item)
+    if len(seen) < 2:
+        return None
+    return " -> ".join("%dx%d" % item for item in seen)
+
+
+class _SizeErrors(logging.Handler):
+    """Counts PySceneDetect's "frame has incorrect size" log records.
+
+    The backstop for a size change past the probed opening: PySceneDetect logs
+    it, skips the frame and carries on, and returns a scan with no cuts.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.count = 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if "incorrect size" in record.getMessage():
+            self.count += 1
+
+
 def timing_warnings(timing: Mapping[str, Optional[float]]) -> List[str]:
     """What about this file's clock could make scene times disagree with a player.
 
@@ -310,6 +382,13 @@ def detect_scenes(
             video_path, DEFAULT_FFMPEG_THRESHOLD, progress_interval=progress_interval
         )
 
+    changed = size_change(frame_sizes(video_path))
+    if changed:
+        _out.warn(RESOLUTION_MESSAGE % changed)
+        return detect_ffmpeg(
+            video_path, DEFAULT_FFMPEG_THRESHOLD, progress_interval=progress_interval
+        )
+
     video = open_video(str(video_path))
     minimum = max(int(round(min_scene_len * video.frame_rate)), 1)
     manager = SceneManager()
@@ -341,10 +420,23 @@ def detect_scenes(
             progress.advance(scanned - state["emitted"])
             state["emitted"] = scanned
 
+    size_errors = _SizeErrors()
+    scenedetect_log = logging.getLogger("pyscenedetect")
+    scenedetect_log.addHandler(size_errors)
     try:
-        manager.detect_scenes(video=video, callback=on_cut)
-    except TypeError:  # pragma: no cover - PySceneDetect without a callback arg
-        manager.detect_scenes(video=video)
+        try:
+            manager.detect_scenes(video=video, callback=on_cut)
+        except TypeError:  # pragma: no cover - PySceneDetect without a callback arg
+            manager.detect_scenes(video=video)
+    finally:
+        scenedetect_log.removeHandler(size_errors)
+    if size_errors.count:
+        if state["emitted"]:
+            progress.finish()
+        _out.warn(RESOLUTION_MESSAGE % ("%d frames of another size" % size_errors.count))
+        return detect_ffmpeg(
+            video_path, DEFAULT_FFMPEG_THRESHOLD, progress_interval=progress_interval
+        )
     if state["emitted"]:
         progress.finish()
     # PySceneDetect counts seconds from the first video frame. When the video
@@ -394,7 +486,11 @@ __all__ = [
     "scan_progress_seconds",
     "DEFAULT_WIDTH",
     "SEEK_PADDING",
+    "RESOLUTION_MESSAGE",
+    "SIZE_PROBE_FRAMES",
     "detect_ffmpeg",
+    "frame_sizes",
+    "size_change",
     "detect_scenes",
     "extract_frame",
     "stream_timing",
