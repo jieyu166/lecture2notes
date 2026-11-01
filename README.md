@@ -612,7 +612,7 @@ l2n hub ./course-folder --subdirs --output index.html
 
 - **影格率不固定（VFR）的影片也改掃固定 10 fps 的副本**：實檔（r_frame_rate 60、
   avg_frame_rate 29.8 的 Zoom 錄影）直接掃描時，部分 PySceneDetect 版本用「格數 ÷ 名目 fps」
-  換算時間，講座中段的換頁比瀏覽器晚 7–11 秒，抽出的投影片也跟著錯。副本是固定影格率，
+  換算時間，講座中段的換頁比瀏覽器早 7–11 秒，抽出的投影片也跟著錯。副本是固定影格率，
   格數換算出的時間就是播放器的時間。`l2n frames` 的 VFR 警告改為說明這件事：0.3.5 以前
   在這類檔案上產生的 frames.json 可能偏早，請 `l2n frames --force` 重抓。
 - 實測確認：副本掃出的 8 個換頁時間，在 Chromium 播原檔時都在 T+0～2 秒內出現；

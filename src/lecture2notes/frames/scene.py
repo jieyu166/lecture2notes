@@ -276,7 +276,7 @@ def is_vfr(timing: Mapping[str, Optional[float]]) -> bool:
 
     PySceneDetect versions that turn a frame number into seconds by dividing by
     the nominal rate drift on such a file: a field recording (r 60, avg 29.8)
-    came out 7 to 11 s late in the middle, against the browser.
+    came out 7 to 11 s early in the middle, against the browser.
     """
     nominal, average = timing.get("nominal_fps"), timing.get("average_fps")
     return bool(nominal and average and abs(nominal - average) / nominal > VFR_WARN_RATIO)
