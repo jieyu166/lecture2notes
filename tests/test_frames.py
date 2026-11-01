@@ -434,3 +434,56 @@ def test_the_copy_keeps_the_container_shift_of_a_late_video(tmp_path):
     times = [m["timestamp_sec"] for m in scene.detect_scenes(late)]
     assert any(abs(t - 4.08) < 0.2 for t in times), times
     assert not any(abs(t - 6.08) < 0.2 for t in times), times
+
+
+def test_a_gap_in_the_video_timestamps_is_kept_on_every_path(tmp_path, monkeypatch):
+    """A live recording that lost its video for 30 s (audio continuous): the cut
+    after the gap stays at its own timestamp, not 30 s early or late."""
+    import subprocess
+
+    pytest.importorskip("scenedetect")
+    video = tmp_path / "gap.mp4"
+    subprocess.run([
+        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=red:s=160x90:d=55:r=25,"
+        "drawbox=w=80:h=45:c=white@1:t=fill:enable='between(t,5,40)'",
+        "-f", "lavfi", "-i", "sine=d=55",
+        "-vf", "select='not(between(t,10,40))'", "-fps_mode", "passthrough",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(video),
+    ], check=True)
+    near = lambda times, t: any(abs(x - t) < 0.2 for x in times)
+
+    direct = [m["timestamp_sec"] for m in scene.detect_scenes(video)]
+    by_filter = [m["timestamp_sec"] for m in scene.detect_ffmpeg(video)]
+    monkeypatch.setattr(scene, "frame_sizes", lambda p, count=30: {"stream": (1, 1), "frames": [(2, 2)]})
+    by_copy = [m["timestamp_sec"] for m in scene.detect_scenes(video)]
+    for times in (direct, by_filter, by_copy):
+        assert near(times, 5.0) and near(times, 40.0), times
+        assert not near(times, 10.0), times
+
+
+def test_a_variable_frame_rate_video_is_scanned_from_the_constant_rate_copy(tmp_path, monkeypatch):
+    """Field file r 60 / avg 29.8: PySceneDetect versions that divide frame
+    numbers by the nominal rate put mid-lecture cuts 7-11 s late."""
+    import subprocess
+
+    pytest.importorskip("scenedetect")
+    video = tmp_path / "vfr.mp4"
+    subprocess.run([
+        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=red:s=160x90:d=20:r=30,"
+        "drawbox=w=80:h=45:c=white@1:t=fill:enable='gte(t,15)'",
+        "-vf", "select='not(between(t,4,10))'", "-fps_mode", "passthrough",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(video),
+    ], check=True)
+    assert scene.is_vfr(scene.stream_timing(video))
+    calls = _spy_copy(monkeypatch)
+    times = [m["timestamp_sec"] for m in scene.detect_scenes(video)]
+    assert calls == [video]
+    assert any(abs(t - 15.0) < 0.2 for t in times), times
+
+
+def test_vfr_reads_the_two_rates():
+    assert scene.is_vfr({"nominal_fps": 60.0, "average_fps": 29.8})
+    assert not scene.is_vfr({"nominal_fps": 30.0, "average_fps": 29.97})
+    assert not scene.is_vfr({"nominal_fps": None, "average_fps": 29.8})

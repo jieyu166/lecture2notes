@@ -261,13 +261,25 @@ def timing_warnings(timing: Mapping[str, Optional[float]]) -> List[str]:
             "l2n frames --force" % (video_start - (format_start or 0.0),
                                     video_start - (format_start or 0.0))
         )
-    nominal, average = timing.get("nominal_fps"), timing.get("average_fps")
-    if nominal and average and abs(nominal - average) / nominal > VFR_WARN_RATIO:
+    if is_vfr(timing):
         warnings.append(
-            "variable frame rate (r_frame_rate %.3f, avg_frame_rate %.3f): times counted "
-            "in frames drift; prefer --detector ffmpeg or --mode interval" % (nominal, average)
+            "variable frame rate (r_frame_rate %.3f, avg_frame_rate %.3f): scene mode "
+            "scans a constant-rate copy so cut times follow the player's clock; "
+            "frames.json written by l2n 0.3.5 or earlier may be several seconds early "
+            "on this file, rerun l2n frames --force" % (timing["nominal_fps"], timing["average_fps"])
         )
     return warnings
+
+
+def is_vfr(timing: Mapping[str, Optional[float]]) -> bool:
+    """Whether r_frame_rate and avg_frame_rate disagree by more than 2 %.
+
+    PySceneDetect versions that turn a frame number into seconds by dividing by
+    the nominal rate drift on such a file: a field recording (r 60, avg 29.8)
+    came out 7 to 11 s late in the middle, against the browser.
+    """
+    nominal, average = timing.get("nominal_fps"), timing.get("average_fps")
+    return bool(nominal and average and abs(nominal - average) / nominal > VFR_WARN_RATIO)
 
 
 def scan_progress_seconds(line: str) -> Optional[float]:
@@ -489,13 +501,18 @@ def detect_scenes(
         )
 
     sizes = frame_sizes(video_path)
+    timing = stream_timing(video_path)
     changed = size_change(sizes)
-    if not changed:
+    variable = is_vfr(timing)
+    if variable and not changed:
+        _out.say("info", "variable frame rate: scanning a constant-rate copy")
+    if not changed and not variable:
         starts, errors = scan(video_path)
         if errors:
             changed = "%d frames of another size" % errors
-    if changed:
-        _out.warn(RESOLUTION_MESSAGE % changed)
+    if changed or variable:
+        if changed:
+            _out.warn(RESOLUTION_MESSAGE % changed)
         with tempfile.TemporaryDirectory(prefix="l2n-scan-") as scratch:
             copy = normalized_copy(video_path, Path(scratch), sizes)
             if copy is None:
@@ -510,7 +527,6 @@ def detect_scenes(
     # frame extracted at that time was the slide before the change. ffmpeg's
     # own timestamps, the transcript and the player all use the container's
     # clock, so the cuts are moved onto it here.
-    timing = stream_timing(video_path)
     shift = (timing.get("video_start") or 0.0) - (timing.get("format_start") or 0.0)
     if abs(shift) < STREAM_SHIFT_MIN_SEC:
         shift = 0.0
@@ -557,6 +573,7 @@ __all__ = [
     "SIZE_PROBE_FRAMES",
     "detect_ffmpeg",
     "frame_sizes",
+    "is_vfr",
     "normalized_copy",
     "size_change",
     "detect_scenes",
