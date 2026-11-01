@@ -596,7 +596,7 @@ l2n hub ./course-folder --subdirs --output index.html
 - **`--preflight` 也列出將收錄的講座**：每場一行
   `hub lecture <viewer 相對路徑> (ok | viewer missing)`，只讀檔，不寫任何東西。
 
-### v0.3.5（本版）
+### v0.3.5
 
 - **影片中途改變解析度時 `l2n frames` 不再整段抓不到圖**：webm 轉 mp4 的直播錄影，
   前兩格 2468x1280、之後都是 2468x1186。PySceneDetect 以第一格的尺寸為準，之後每格都
@@ -607,6 +607,17 @@ l2n hub ./course-folder --subdirs --output index.html
   也改掃副本。副本的時間從第一個影像畫面起算，和直接掃原檔相同，容器起點的位移照舊補上；
   固定影格率也讓 VFR 檔的時間不再隨影格數漂移。副本建不出來時才退回 ffmpeg scene filter
   （實測它在同一支片只找到 PySceneDetect 76 個換頁裡的 40 個）。不需要再先手動重新編碼。
+
+### v0.3.6（本版）
+
+- **影格率不固定（VFR）的影片也改掃固定 10 fps 的副本**：實檔（r_frame_rate 60、
+  avg_frame_rate 29.8 的 Zoom 錄影）直接掃描時，部分 PySceneDetect 版本用「格數 ÷ 名目 fps」
+  換算時間，講座中段的換頁比瀏覽器晚 7–11 秒，抽出的投影片也跟著錯。副本是固定影格率，
+  格數換算出的時間就是播放器的時間。`l2n frames` 的 VFR 警告改為說明這件事：0.3.5 以前
+  在這類檔案上產生的 frames.json 可能偏早，請 `l2n frames --force` 重抓。
+- 實測確認：副本掃出的 8 個換頁時間，在 Chromium 播原檔時都在 T+0～2 秒內出現；
+  抽圖用的 `ffmpeg -ss <秒> -i 原檔`（-ss 在 -i 前）取到的也是瀏覽器在該時間的畫面。
+- 新增回歸測試：影像中斷 30 秒（音訊連續）時，三條偵測路徑都保留空隙後的正確時間。
 
 ## 開發與測試
 

@@ -460,3 +460,30 @@ def test_a_gap_in_the_video_timestamps_is_kept_on_every_path(tmp_path, monkeypat
     for times in (direct, by_filter, by_copy):
         assert near(times, 5.0) and near(times, 40.0), times
         assert not near(times, 10.0), times
+
+
+def test_a_variable_frame_rate_video_is_scanned_from_the_constant_rate_copy(tmp_path, monkeypatch):
+    """Field file r 60 / avg 29.8: PySceneDetect versions that divide frame
+    numbers by the nominal rate put mid-lecture cuts 7-11 s late."""
+    import subprocess
+
+    pytest.importorskip("scenedetect")
+    video = tmp_path / "vfr.mp4"
+    subprocess.run([
+        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=red:s=160x90:d=20:r=30,"
+        "drawbox=w=80:h=45:c=white@1:t=fill:enable='gte(t,15)'",
+        "-vf", "select='not(between(t,4,10))'", "-fps_mode", "passthrough",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(video),
+    ], check=True)
+    assert scene.is_vfr(scene.stream_timing(video))
+    calls = _spy_copy(monkeypatch)
+    times = [m["timestamp_sec"] for m in scene.detect_scenes(video)]
+    assert calls == [video]
+    assert any(abs(t - 15.0) < 0.2 for t in times), times
+
+
+def test_vfr_reads_the_two_rates():
+    assert scene.is_vfr({"nominal_fps": 60.0, "average_fps": 29.8})
+    assert not scene.is_vfr({"nominal_fps": 30.0, "average_fps": 29.97})
+    assert not scene.is_vfr({"nominal_fps": None, "average_fps": 29.8})
