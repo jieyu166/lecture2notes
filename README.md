@@ -601,10 +601,12 @@ l2n hub ./course-folder --subdirs --output index.html
 - **影片中途改變解析度時 `l2n frames` 不再整段抓不到圖**：webm 轉 mp4 的直播錄影，
   前兩格 2468x1280、之後都是 2468x1186。PySceneDetect 以第一格的尺寸為準，之後每格都
   報 incorrect size 並略過，最後一個換頁也沒找到，而且沒有錯誤可以讓 `l2n run` 停下。
-  現在 scene 模式先用 ffprobe 抽查開頭 30 格與串流宣告的寬高，不一致就印出
-  `[warn]` 並改用 ffmpeg scene filter（它會跟著尺寸變化重設，時間軸照舊是容器時間）；
-  變化發生在更後面時，PySceneDetect 一回報 incorrect size 也一樣改用 ffmpeg 重掃。
-  不需要再先重新編碼成固定尺寸。
+  現在 scene 模式先用 ffprobe 抽查開頭 30 格與串流宣告的寬高，不一致就印出 `[warn]`，
+  用 ffmpeg 轉出一份固定尺寸（寬 640）、固定 10 fps、無聲的暫存副本，再用同一套
+  PySceneDetect 偵測器與門檻掃它；變化發生在更後面時，PySceneDetect 一回報 incorrect size
+  也改掃副本。副本的時間從第一個影像畫面起算，和直接掃原檔相同，容器起點的位移照舊補上；
+  固定影格率也讓 VFR 檔的時間不再隨影格數漂移。副本建不出來時才退回 ffmpeg scene filter
+  （實測它在同一支片只找到 PySceneDetect 76 個換頁裡的 40 個）。不需要再先手動重新編碼。
 
 ## 開發與測試
 

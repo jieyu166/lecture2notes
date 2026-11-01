@@ -348,17 +348,32 @@ def test_size_change_reads_the_stream_and_the_frames():
     assert scene.size_change({"stream": None, "frames": []}) is None
 
 
-def test_a_size_change_hands_the_scan_to_ffmpeg(tmp_path, monkeypatch, capsys):
+def _spy_copy(monkeypatch):
+    calls = []
+    real = scene.normalized_copy
+
+    def spy(path, workdir, sizes=None):
+        calls.append(path)
+        return real(path, workdir, sizes)
+
+    monkeypatch.setattr(scene, "normalized_copy", spy)
+    return calls
+
+
+def test_a_size_change_is_scanned_from_a_fixed_size_copy(tmp_path, monkeypatch, capsys):
+    """Same detector and threshold as any other file, so no cut is lost to a
+    coarser fallback (the ffmpeg scene filter missed 36 of 76 cuts on the field file)."""
     pytest.importorskip("scenedetect")
     video = _concat_sizes(tmp_path, "160x96", 0.08)
-    calls = []
-    monkeypatch.setattr(scene, "detect_ffmpeg", lambda path, *a, **k: calls.append(path) or [scene.mark(0.0)])
-    assert scene.detect_scenes(video) == [scene.mark(0.0)]
+    calls = _spy_copy(monkeypatch)
+    times = [m["timestamp_sec"] for m in scene.detect_scenes(video)]
     assert calls == [video]
     assert "changes size (160x96 -> 160x80)" in capsys.readouterr().out
+    assert times[0] == 0.0
+    assert any(abs(t - 2.08) < 0.2 for t in times), times
 
 
-def test_scenedetects_size_errors_also_hand_the_scan_to_ffmpeg(tmp_path, monkeypatch, capsys):
+def test_scenedetects_size_errors_also_switch_to_the_copy(tmp_path, monkeypatch, capsys):
     """A change past the probed opening: PySceneDetect logs, skips and finds nothing."""
     pytest.importorskip("scenedetect")
     import logging
@@ -375,15 +390,47 @@ def test_scenedetects_size_errors_also_hand_the_scan_to_ffmpeg(tmp_path, monkeyp
         return real(self, *args, **kwargs)
 
     monkeypatch.setattr(scenedetect.SceneManager, "detect_scenes", noisy)
-    calls = []
-    monkeypatch.setattr(scene, "detect_ffmpeg", lambda path, *a, **k: calls.append(path) or [scene.mark(0.0)])
-    scene.detect_scenes(video)
+    calls = _spy_copy(monkeypatch)
+    times = [m["timestamp_sec"] for m in scene.detect_scenes(video)]
     assert calls == [video]
     assert "1 frames of another size" in capsys.readouterr().out
+    assert any(abs(t - 2.08) < 0.2 for t in times), times
     assert not any(isinstance(h, scene._SizeErrors) for h in logging.getLogger("pyscenedetect").handlers)
 
 
-def test_the_ffmpeg_scan_finds_the_cut_after_a_size_change(tmp_path):
+def test_the_copy_has_one_size_and_a_constant_rate(tmp_path):
     video = _concat_sizes(tmp_path, "160x96", 0.08)
+    source = scene.frame_sizes(video)
+    copy = scene.normalized_copy(video, tmp_path, source)
+    sizes = scene.frame_sizes(copy, count=200)
+    assert scene.size_change(sizes) is None
+    width, height = source["stream"]  # the declared aspect, whatever the frames say
+    assert sizes["stream"] == (scene.NORMALIZED_WIDTH, scene.NORMALIZED_WIDTH * height // width)
+    timing = scene.stream_timing(copy)
+    assert timing["nominal_fps"] == timing["average_fps"] == scene.NORMALIZED_FPS
+
+
+def test_a_failed_copy_falls_back_to_the_ffmpeg_scene_filter(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("scenedetect")
+    video = _concat_sizes(tmp_path, "160x96", 0.08)
+    monkeypatch.setattr(scene, "normalized_copy", lambda *a, **k: None)
     times = [m["timestamp_sec"] for m in scene.detect_scenes(video)]
+    assert "ffmpeg scene filter" in capsys.readouterr().out
     assert any(abs(t - 2.08) < 0.2 for t in times), times
+
+
+def test_the_copy_keeps_the_container_shift_of_a_late_video(tmp_path):
+    """Video starting 2 s into the container and changing size: the box at
+    2.08 s of video is 4.08 s of file, counted once, not twice."""
+    import subprocess
+
+    pytest.importorskip("scenedetect")
+    video = _concat_sizes(tmp_path, "160x96", 0.08)
+    audio, late = tmp_path / "a.m4a", tmp_path / "late.mp4"
+    run = lambda *args: subprocess.run(["ffmpeg", "-v", "error", "-y", *args], check=True)
+    run("-f", "lavfi", "-i", "sine=f=440:d=8", "-c:a", "aac", str(audio))
+    run("-itsoffset", "2.0", "-i", str(video), "-i", str(audio), "-map", "0:v", "-map", "1:a",
+        "-c", "copy", str(late))
+    times = [m["timestamp_sec"] for m in scene.detect_scenes(late)]
+    assert any(abs(t - 4.08) < 0.2 for t in times), times
+    assert not any(abs(t - 6.08) < 0.2 for t in times), times
