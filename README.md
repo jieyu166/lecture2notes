@@ -568,7 +568,7 @@ schema 2.1、雙語字幕、播放網頁改版、Obsidian 筆記的時間碼連�
 - **`l2n run` 停在 scaffold（JSON 還沒寫）時回 exit 1**：機械階段都成功、等語言模型接手，
   不算失敗；exit 2 只留給產物有錯。
 
-### v0.3.4（本版）
+### v0.3.4
 
 課程資料夾裡有一部分講座放在子資料夾（`<日期>/<日期>.json`、`<日期>/<日期>.viewer.html`、
 `<日期>/frames/…`）時，首頁也能收錄。
@@ -595,6 +595,18 @@ l2n hub ./course-folder --subdirs --output index.html
   `<stem>.lecture_v4_report.json`，`segments` 是數字）不再讓 hub 當掉。
 - **`--preflight` 也列出將收錄的講座**：每場一行
   `hub lecture <viewer 相對路徑> (ok | viewer missing)`，只讀檔，不寫任何東西。
+
+### v0.3.5（本版）
+
+- **影片中途改變解析度時 `l2n frames` 不再整段抓不到圖**：webm 轉 mp4 的直播錄影，
+  前兩格 2468x1280、之後都是 2468x1186。PySceneDetect 以第一格的尺寸為準，之後每格都
+  報 incorrect size 並略過，最後一個換頁也沒找到，而且沒有錯誤可以讓 `l2n run` 停下。
+  現在 scene 模式先用 ffprobe 抽查開頭 30 格與串流宣告的寬高，不一致就印出 `[warn]`，
+  用 ffmpeg 轉出一份固定尺寸（寬 640）、固定 10 fps、無聲的暫存副本，再用同一套
+  PySceneDetect 偵測器與門檻掃它；變化發生在更後面時，PySceneDetect 一回報 incorrect size
+  也改掃副本。副本的時間從第一個影像畫面起算，和直接掃原檔相同，容器起點的位移照舊補上；
+  固定影格率也讓 VFR 檔的時間不再隨影格數漂移。副本建不出來時才退回 ffmpeg scene filter
+  （實測它在同一支片只找到 PySceneDetect 76 個換頁裡的 40 個）。不需要再先手動重新編碼。
 
 ## 開發與測試
 

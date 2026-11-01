@@ -14,6 +14,7 @@ transition animation rather than in the middle of one.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -165,6 +166,77 @@ def stream_timing(video_path: Path) -> Dict[str, Optional[float]]:
     return out
 
 
+#: Frames ffprobe reads from the start of the file to see whether their size
+#: matches the stream's. Cheap (no full decode of the file) and enough for the
+#: case seen in the field: a webm-to-mp4 live recording whose first two frames
+#: were 2468x1280 and every later one 2468x1186.
+SIZE_PROBE_FRAMES = 30
+RESOLUTION_MESSAGE = (
+    "the video changes size (%s); PySceneDetect skips every frame that differs "
+    "from the first and finds no cut, so it scans a fixed-size copy instead"
+)
+
+
+def frame_sizes(video_path: Path, count: int = SIZE_PROBE_FRAMES) -> Dict[str, Any]:
+    """The stream's declared size and the sizes of its first ``count`` frames.
+
+    ``{"stream": (w, h) or None, "frames": [(w, h), ...]}``. Never raises: a
+    file ffprobe cannot read just reports nothing.
+    """
+    import json as _json
+
+    out: Dict[str, Any] = {"stream": None, "frames": []}
+    try:
+        ffprobe = _deps.require_ffprobe()
+        done = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0",
+             "-read_intervals", "%%+#%d" % int(count),
+             "-show_entries", "stream=width,height:frame=width,height",
+             "-of", "json", str(video_path)],
+            capture_output=True, text=True, timeout=120,
+        )
+        data = _json.loads(done.stdout or "{}")
+    except (OSError, ValueError, subprocess.SubprocessError, SystemExit):
+        return out
+
+    def size(entry: Any) -> Optional[tuple]:
+        try:
+            return (int(entry["width"]), int(entry["height"]))
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    out["stream"] = size((data.get("streams") or [{}])[0])
+    out["frames"] = [s for s in (size(f) for f in data.get("frames") or []) if s]
+    return out
+
+
+def size_change(sizes: Mapping[str, Any]) -> Optional[str]:
+    """``"2468x1280 -> 2468x1186"`` when the probed sizes disagree, else None."""
+    seen: List[tuple] = []
+    for item in [sizes.get("stream")] + list(sizes.get("frames") or []):
+        if item and item not in seen:
+            seen.append(item)
+    if len(seen) < 2:
+        return None
+    return " -> ".join("%dx%d" % item for item in seen)
+
+
+class _SizeErrors(logging.Handler):
+    """Counts PySceneDetect's "frame has incorrect size" log records.
+
+    The backstop for a size change past the probed opening: PySceneDetect logs
+    it, skips the frame and carries on, and returns a scan with no cuts.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.count = 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if "incorrect size" in record.getMessage():
+            self.count += 1
+
+
 def timing_warnings(timing: Mapping[str, Optional[float]]) -> List[str]:
     """What about this file's clock could make scene times disagree with a player.
 
@@ -278,6 +350,105 @@ def detect_ffmpeg(
     return marks
 
 
+#: The fixed-size copy a size-changing video is scanned from: small (detectors
+#: downscale to about this anyway) and at a constant 10 fps, so a frame number
+#: divided by the rate is an exact time even when the source is VFR.
+NORMALIZED_WIDTH = 640
+NORMALIZED_FPS = 10
+
+
+def normalized_copy(
+    video_path: Path, workdir: Path, sizes: Optional[Mapping[str, Any]] = None
+) -> Optional[Path]:
+    """A fixed-size, constant-rate, silent copy of ``video_path`` for scanning.
+
+    Every frame is scaled to one size (the stream's declared aspect at
+    :data:`NORMALIZED_WIDTH`), so PySceneDetect sees no size change and runs
+    with its own detectors and thresholds. Time 0 of the copy is the source's
+    first video frame, the same origin PySceneDetect uses on the source, so the
+    caller's container shift still applies. None when ffmpeg fails.
+    """
+    ffmpeg = _deps.require_ffmpeg()
+    sizes = sizes or {}
+    declared = sizes.get("stream") or (list(sizes.get("frames") or []) or [None])[0]
+    width = NORMALIZED_WIDTH
+    height = width * 9 // 16
+    if declared and declared[0]:
+        height = int(round(width * declared[1] / float(declared[0]) / 2.0)) * 2
+    out = Path(workdir) / "scan.mp4"
+    done = subprocess.run(
+        [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(video_path),
+         "-an", "-sn", "-vf",
+         # setpts first: time 0 of the copy is the first video frame, whatever
+         # the container start; otherwise fps pads from the container start.
+         "setpts=PTS-STARTPTS,scale=%d:%d,setsar=1,fps=%d" % (width, max(height, 2), NORMALIZED_FPS),
+         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p",
+         str(out)],
+        capture_output=True, text=True,
+    )
+    if done.returncode != 0 or not out.is_file():
+        _out.say("warn", "ffmpeg: %s" % (done.stderr or "").strip()[-300:])
+        return None
+    return out
+
+
+def _scan_pyscenedetect(
+    video_path: Path,
+    SceneManager: Any,
+    open_video: Any,
+    AdaptiveDetector: Any,
+    ContentDetector: Any,
+    detector: str,
+    threshold: Optional[float],
+    min_scene_len: float,
+    progress_interval: float,
+    total_sec: int,
+) -> tuple:
+    """One PySceneDetect pass: ``(scene start seconds, incorrect-size frames)``."""
+    video = open_video(str(video_path))
+    minimum = max(int(round(min_scene_len * video.frame_rate)), 1)
+    manager = SceneManager()
+    if detector == "content":
+        manager.add_detector(ContentDetector(
+            threshold=DEFAULT_CONTENT_THRESHOLD if threshold is None else threshold,
+            min_scene_len=minimum,
+        ))
+    else:
+        manager.add_detector(AdaptiveDetector(
+            adaptive_threshold=DEFAULT_ADAPTIVE_THRESHOLD if threshold is None else threshold,
+            min_scene_len=minimum,
+        ))
+    # PySceneDetect has no per-frame hook, but it does call back on every cut it
+    # finds, and a cut carries the frame number it happened at. That is enough
+    # to turn a silent scan into one that says how far through the media it has
+    # read. The total is in seconds, so the line reads scanned/total.
+    progress = _out.Progress("frames", total_sec, interval=progress_interval)
+    state = {"emitted": 0}
+
+    def on_cut(_image: Any, frame_num: int) -> None:
+        try:
+            scanned = int(frame_num / float(video.frame_rate))
+        except (TypeError, ValueError, ZeroDivisionError):
+            return
+        if scanned > state["emitted"]:
+            progress.advance(scanned - state["emitted"])
+            state["emitted"] = scanned
+
+    size_errors = _SizeErrors()
+    scenedetect_log = logging.getLogger("pyscenedetect")
+    scenedetect_log.addHandler(size_errors)
+    try:
+        try:
+            manager.detect_scenes(video=video, callback=on_cut)
+        except TypeError:  # pragma: no cover - PySceneDetect without a callback arg
+            manager.detect_scenes(video=video)
+    finally:
+        scenedetect_log.removeHandler(size_errors)
+    if state["emitted"]:
+        progress.finish()
+    return [start.get_seconds() for start, _end in manager.get_scene_list()], size_errors.count
+
+
 def detect_scenes(
     video_path: Path,
     detector: str = "adaptive",
@@ -310,43 +481,29 @@ def detect_scenes(
             video_path, DEFAULT_FFMPEG_THRESHOLD, progress_interval=progress_interval
         )
 
-    video = open_video(str(video_path))
-    minimum = max(int(round(min_scene_len * video.frame_rate)), 1)
-    manager = SceneManager()
-    if detector == "content":
-        manager.add_detector(ContentDetector(
-            threshold=DEFAULT_CONTENT_THRESHOLD if threshold is None else threshold,
-            min_scene_len=minimum,
-        ))
-    else:
-        manager.add_detector(AdaptiveDetector(
-            adaptive_threshold=DEFAULT_ADAPTIVE_THRESHOLD if threshold is None else threshold,
-            min_scene_len=minimum,
-        ))
-    # PySceneDetect has no per-frame hook, but it does call back on every cut it
-    # finds, and a cut carries the frame number it happened at. That is enough
-    # to turn a silent scan into one that says how far through the media it has
-    # read. The total is in seconds, so the line reads scanned/total.
-    progress = _out.Progress(
-        "frames", max(int(get_duration(video_path)), 0), interval=progress_interval
-    )
-    state = {"emitted": 0}
+    def scan(path: Path) -> tuple:
+        return _scan_pyscenedetect(
+            path, SceneManager, open_video, AdaptiveDetector, ContentDetector,
+            detector, threshold, min_scene_len, progress_interval,
+            max(int(get_duration(video_path)), 0),
+        )
 
-    def on_cut(_image: Any, frame_num: int) -> None:
-        try:
-            scanned = int(frame_num / float(video.frame_rate))
-        except (TypeError, ValueError, ZeroDivisionError):
-            return
-        if scanned > state["emitted"]:
-            progress.advance(scanned - state["emitted"])
-            state["emitted"] = scanned
-
-    try:
-        manager.detect_scenes(video=video, callback=on_cut)
-    except TypeError:  # pragma: no cover - PySceneDetect without a callback arg
-        manager.detect_scenes(video=video)
-    if state["emitted"]:
-        progress.finish()
+    sizes = frame_sizes(video_path)
+    changed = size_change(sizes)
+    if not changed:
+        starts, errors = scan(video_path)
+        if errors:
+            changed = "%d frames of another size" % errors
+    if changed:
+        _out.warn(RESOLUTION_MESSAGE % changed)
+        with tempfile.TemporaryDirectory(prefix="l2n-scan-") as scratch:
+            copy = normalized_copy(video_path, Path(scratch), sizes)
+            if copy is None:
+                _out.warn("could not build the fixed-size copy; using the ffmpeg scene filter")
+                return detect_ffmpeg(
+                    video_path, DEFAULT_FFMPEG_THRESHOLD, progress_interval=progress_interval
+                )
+            starts, _ = scan(copy)
     # PySceneDetect counts seconds from the first video frame. When the video
     # stream starts after the container (a field file: video at 3.8 s, audio
     # and container at 0), every cut was reported that much early -- and the
@@ -357,7 +514,7 @@ def detect_scenes(
     shift = (timing.get("video_start") or 0.0) - (timing.get("format_start") or 0.0)
     if abs(shift) < STREAM_SHIFT_MIN_SEC:
         shift = 0.0
-    marks = [mark(round(start.get_seconds() + shift, 3)) for start, _end in manager.get_scene_list()]
+    marks = [mark(round(start + shift, 3)) for start in starts]
     if shift and marks and abs(marks[0]["timestamp_sec"] - shift) < 1e-6:
         # The opening scene starts where the video does; it is the lecture's
         # opening frame, not a cut, and the 0.0 mark below stands for it.
@@ -394,7 +551,14 @@ __all__ = [
     "scan_progress_seconds",
     "DEFAULT_WIDTH",
     "SEEK_PADDING",
+    "RESOLUTION_MESSAGE",
+    "NORMALIZED_FPS",
+    "NORMALIZED_WIDTH",
+    "SIZE_PROBE_FRAMES",
     "detect_ffmpeg",
+    "frame_sizes",
+    "normalized_copy",
+    "size_change",
     "detect_scenes",
     "extract_frame",
     "stream_timing",
