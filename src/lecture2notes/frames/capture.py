@@ -26,6 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from urllib.parse import unquote
 
 from lecture2notes import _deps, _out
 from lecture2notes.frames import interval as interval_mode
@@ -34,7 +35,9 @@ from lecture2notes.frames.manifest import (
     FRAMES_DIRNAME,
     frame_name,
     merge_frames_into_segments,
+    read_manifest,
     record_for_file,
+    sha256_file,
     write_manifest,
 )
 from lecture2notes.schema.io import read_json, write_json_atomic
@@ -45,6 +48,30 @@ STAGING_DIRNAME = "staging"
 MANIFEST_SUFFIX = ".frames.json"
 CURATION_SUFFIX = ".curation.json"
 DOCUMENT_SUFFIX = ".json"
+#: Scene mode that finds fewer frames than one per this many seconds has most
+#: likely missed low-contrast slides (field: six lectures of 40-60 min with 1 to
+#: 9 frames each, all fine with ``--mode interval --every 30``).
+SPARSE_SCENE_SEC = 600.0
+#: Lectures shorter than this are not judged sparse: a 10-minute talk on one
+#: slide is plausible.
+SPARSE_MIN_DURATION = 1200.0
+
+
+def is_network_path(path: Path) -> bool:
+    """A UNC path (``\\\\server\\share``, or ``//server/share``)."""
+    text = str(path)
+    return text.startswith("\\\\") or text.startswith("//")
+
+
+NETWORK_WARNING = (
+    "%s is on a network share; ffmpeg decoding over SMB has failed mid-file "
+    "with 'partial file' at random offsets in the field. If frames stop early "
+    "or come out missing, copy the video to a local disk and run there"
+)
+
+
+def in_ranges(second: float, ranges: Sequence[Tuple[float, float]]) -> bool:
+    return any(start <= second <= end for start, end in ranges)
 
 
 @dataclass
@@ -163,12 +190,20 @@ def capture(
     force: bool = False,
     extract: Optional[Callable[..., bool]] = None,
     progress_interval: float = 5.0,
+    ranges: Optional[Sequence[Tuple[float, float]]] = None,
 ) -> CaptureResult:
     """Capture frames from ``video`` and write the manifest.
 
     With ``stage=True`` the frames go to ``staging/frames/`` and the canonical
     document is left alone: an unproven candidate must never be referenced by
     the JSON that the note and the viewer are built from.
+
+    ``ranges`` (``[(start_sec, end_sec), ...]``) is a top-up: only sample times
+    inside them are grabbed, every frame and manifest row already there is
+    kept, a file that already exists is never overwritten or deleted, and the
+    document keeps its chosen lead frames. A full re-run used to rewrite the
+    manifest and could delete a frame a reviewer had picked, when interval
+    dedup dropped a new grab that had landed on the same file name.
     """
     if mode not in MODES:
         raise ValueError("unknown capture mode: %s" % mode)
@@ -185,10 +220,31 @@ def capture(
     # Planned before anything is created: a mode that refuses to plan (see
     # DurationUnknown) must not leave an empty frames/ behind as evidence of a
     # run that never happened.
+    if is_network_path(source):
+        _out.warn("frames: " + NETWORK_WARNING % source)
     planned = plan_frames(stem, plan_seconds(source, mode, every, detector, threshold))
     if mode == "scene":
         for warning in scene_mode.timing_warnings(scene_mode.stream_timing(source)):
             _out.warn("frames: %s" % warning)
+        if not ranges:
+            duration = scene_mode.get_duration(source)
+            if duration >= SPARSE_MIN_DURATION and len(planned) < duration / SPARSE_SCENE_SEC:
+                _out.warn(
+                    "frames: scene mode found %d frames in %d min; low-contrast slides are "
+                    "often missed, try --mode interval --every 30"
+                    % (len(planned), round(duration / 60))
+                )
+    existing: List[Dict[str, Any]] = []
+    manifest_file = manifest_path_for(root, stem)
+    if ranges:
+        planned = [(second, name) for second, name in planned if in_ranges(second, ranges)]
+        if manifest_file.is_file():
+            existing = read_manifest(manifest_file)
+        taken = {unquote(str(row.get("frame") or "")).rsplit("/", 1)[-1] for row in existing}
+        planned = [
+            (second, name) for second, name in planned
+            if name not in taken and not (frames_dir / name).exists()
+        ]
 
     frames_dir.mkdir(parents=True, exist_ok=True)
     grab = extract or scene_mode.extract_frame
@@ -224,7 +280,14 @@ def capture(
     # No progress.finish(): advance() already emits on the final unit, and with
     # nothing planned a "0/0" line would be noise the stage summary repeats.
 
-    write_manifest(result.manifest_path, result.records)
+    rows = result.records
+    if ranges:
+        mine = {str(row["frame"]) for row in result.records}
+        rows = sorted(
+            [row for row in existing if str(row.get("frame")) not in mine] + result.records,
+            key=lambda row: float(row.get("timestamp_sec") or 0),
+        )
+    write_manifest(result.manifest_path, rows)
     _out.stage("frames", result.summary())
     if result.failed:
         _out.warn("frames: %d sample points produced no image" % result.failed)
@@ -235,10 +298,33 @@ def capture(
         )
         if target_document.is_file():
             merge_into_document(
-                target_document, result.records, keep_existing=not force
+                target_document, rows, keep_existing=bool(ranges) or not force
             )
             result.merged_into = target_document
     return result
+
+
+def rehash_manifest(manifest_path: Path, base_dir: Path) -> Tuple[int, List[str]]:
+    """Recompute ``sha256`` for every manifest row whose file is on disk.
+
+    For frames edited on purpose (a name blacked out): ``check frames`` compares
+    the hash with the file and would otherwise report each of them. Returns
+    ``(rows updated, frames missing)``; missing rows are left as they are.
+    """
+    rows = read_manifest(manifest_path)
+    updated, missing = 0, []
+    for row in rows:
+        relative = unquote(str(row.get("frame") or ""))
+        target = Path(base_dir) / relative
+        if not target.is_file():
+            missing.append(relative)
+            continue
+        digest = sha256_file(target)
+        if row.get("sha256") != digest:
+            row["sha256"] = digest
+            updated += 1
+    write_manifest(manifest_path, rows)
+    return updated, missing
 
 
 def merge_into_document(
@@ -275,4 +361,7 @@ __all__ = [
     "merge_into_document",
     "plan_frames",
     "plan_seconds",
+    "rehash_manifest",
+    "is_network_path",
+    "in_ranges",
 ]

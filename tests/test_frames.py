@@ -487,3 +487,82 @@ def test_vfr_reads_the_two_rates():
     assert scene.is_vfr({"nominal_fps": 60.0, "average_fps": 29.8})
     assert not scene.is_vfr({"nominal_fps": 30.0, "average_fps": 29.97})
     assert not scene.is_vfr({"nominal_fps": None, "average_fps": 29.8})
+
+
+# -- topping up a range, rehashing, warnings ------------------------------------
+def test_a_range_tops_up_and_keeps_every_existing_frame(workdir: Path):
+    """Field: a full interval re-run deleted a reviewer's 1000.png."""
+    first = capture.capture(workdir, mode="interval", every=10, width=320)
+    before = {row["frame"]: row["sha256"] for row in read_manifest(first.manifest_path)}
+    assert set(before) == {"frames/lecture-0000.png", "frames/lecture-0010.png", "frames/lecture-0020.png"}
+    kept = workdir.parent / "frames" / "lecture-0010.png"
+    kept.write_bytes(kept.read_bytes() + b"edited")  # a chosen, edited frame
+
+    result = capture.capture(workdir, mode="interval", every=5, width=320, ranges=[(4.0, 16.0)])
+
+    rows = read_manifest(result.manifest_path)
+    frames = [row["frame"] for row in rows]
+    assert frames == [
+        "frames/lecture-0000.png", "frames/lecture-0005.png", "frames/lecture-0010.png",
+        "frames/lecture-0015.png", "frames/lecture-0020.png",
+    ]
+    assert kept.read_bytes().endswith(b"edited")
+    assert {row["frame"]: row["sha256"] for row in rows}["frames/lecture-0010.png"] == before["frames/lecture-0010.png"]
+    assert [row["frame"] for row in result.records] == ["frames/lecture-0005.png", "frames/lecture-0015.png"]
+
+
+def test_a_range_keeps_the_documents_chosen_frames(workdir: Path):
+    import json
+
+    capture.capture(workdir, mode="interval", every=10, width=320)
+    document = workdir.with_suffix(".json")
+    document.write_text(json.dumps({"segments": [
+        {"start_sec": 0, "end_sec": 30, "frame": "frames/lecture-0020.png"},
+    ]}), encoding="utf-8")
+    capture.capture(workdir, mode="interval", every=5, width=320, ranges=[(4.0, 6.0)], force=True)
+    segment = json.loads(document.read_text(encoding="utf-8"))["segments"][0]
+    assert segment["frame"] == "frames/lecture-0020.png"
+    assert "frames/lecture-0005.png" in segment["frames"]
+
+
+def test_rehash_updates_edited_frames_only(workdir: Path):
+    from lecture2notes.frames.manifest import verify_manifest
+
+    result = capture.capture(workdir, mode="interval", every=10, width=320)
+    edited = workdir.parent / "frames" / "lecture-0010.png"
+    edited.write_bytes(edited.read_bytes() + b"blacked out")
+    assert [p["code"] for p in verify_manifest(result.manifest_path, workdir.parent)] == ["sha256"]
+    updated, missing = capture.rehash_manifest(result.manifest_path, workdir.parent)
+    assert (updated, missing) == (1, [])
+    assert verify_manifest(result.manifest_path, workdir.parent) == []
+
+
+def test_unc_paths_are_network_paths():
+    assert capture.is_network_path(Path("\\\\jieyu-nas\\web\\talk.mp4"))
+    assert capture.is_network_path("//server/share/talk.mp4")
+    assert not capture.is_network_path(Path("C:/Videos/talk.mp4"))
+
+
+def test_a_sparse_scene_result_suggests_interval(workdir: Path, monkeypatch, capsys):
+    monkeypatch.setattr(scene, "get_duration", lambda path: 3600.0)
+    monkeypatch.setattr(scene, "detect_scenes", lambda *a, **k: [scene.mark(0.0), scene.mark(600.0)])
+    capture.capture(workdir, mode="scene", width=320, merge=False)
+    assert "try --mode interval --every 30" in capsys.readouterr().out
+
+
+def test_cli_range_and_rehash(workdir: Path):
+    from conftest import run_cli
+
+    env = {"PYTHONIOENCODING": "utf-8"}
+    assert run_cli(["frames", str(workdir), "--mode", "interval", "--every", "10"], env=env).returncode == 0
+    topped = run_cli(["frames", str(workdir), "--mode", "interval", "--every", "5",
+                      "--range", "0:04-0:06"], env=env)
+    assert topped.returncode == 0, topped.stdout + topped.stderr
+    assert len(read_manifest(workdir.with_suffix(".frames.json"))) == 4
+    again = run_cli(["frames", str(workdir), "--mode", "interval", "--every", "5",
+                     "--range", "0:04-0:06"], env=env)
+    assert again.returncode == 1  # nothing new; existing frames kept
+    bad = run_cli(["frames", str(workdir), "--range", "frames/*.png"], env=env)
+    assert bad.returncode == 2
+    rehash = run_cli(["frames", str(workdir), "--rehash"], env=env)
+    assert rehash.returncode == 0 and "0 rows updated" in rehash.stdout

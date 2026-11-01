@@ -362,6 +362,29 @@ def cmd_frames(args: argparse.Namespace) -> int:
     if getattr(args, "curate", False):
         return _curate_frames(source, args)
 
+    if getattr(args, "rehash", False):
+        root = source.parent
+        manifest = capture_mod.manifest_path_for(root, scene_mod.video_stem(source))
+        if not manifest.is_file():
+            _out.error("frames --rehash: no manifest %s" % manifest.name)
+            return exit_codes.ERROR
+        updated, missing = capture_mod.rehash_manifest(manifest, root)
+        _out.ok("frames --rehash: %d rows updated in %s" % (updated, manifest.name))
+        for frame in missing:
+            _out.warn("frames --rehash: missing %s (row kept)" % frame)
+        return exit_codes.WARN if missing else exit_codes.OK
+
+    ranges = None
+    if getattr(args, "ranges", None):
+        try:
+            ranges = ocr_mod.SkipFrames(args.ranges).ranges
+        except ocr_mod.OcrTargetError as exc:
+            _out.error("frames: %s" % exc.message.replace("--skip-frames", "--range"))
+            return exit_codes.ERROR
+        if len(ranges) != len(args.ranges):
+            _out.error("frames --range takes times only, e.g. 56:00-58:30")
+            return exit_codes.ERROR
+
     try:
         result = capture_mod.capture(
             source,
@@ -373,6 +396,7 @@ def cmd_frames(args: argparse.Namespace) -> int:
             # A segment whose `frame` was already chosen keeps it; only
             # --force puts every lead frame back to what the capture found.
             force=getattr(args, "force", False),
+            ranges=ranges,
         )
     except capture_mod.DurationUnknown as exc:
         # Nothing was written: an unknown duration is a usage-level error, not
@@ -380,6 +404,9 @@ def cmd_frames(args: argparse.Namespace) -> int:
         _out.error("frames: %s" % exc)
         return exit_codes.ERROR
     if not result.kept:
+        if ranges:
+            _out.warn("frames --range: nothing new in the range (existing frames kept)")
+            return exit_codes.WARN
         _out.error("frames: capture produced no frames")
         return exit_codes.ERROR
     _out.ok("frames: %s" % result.manifest_path.name)
@@ -1711,6 +1738,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=curation_mod.DEFAULT_MAX_PER_SEGMENT,
         dest="max_per_segment",
         help="策展時每段最多晉升幾張影格",
+    )
+    p.add_argument(
+        "--range",
+        action="append",
+        default=None,
+        dest="ranges",
+        metavar="START-END",
+        help="只補抓這段時間（56:00-58:30，可重複）：保留既有影格與 manifest，"
+        "已存在的檔案不覆寫也不刪除，JSON 已挑好的 frame 不動",
+    )
+    p.add_argument(
+        "--rehash",
+        action="store_true",
+        help="影格改過（例如塗黑個資）後，重算 manifest 的 sha256，不重新抓圖",
     )
     p.set_defaults(func=cmd_frames)
 

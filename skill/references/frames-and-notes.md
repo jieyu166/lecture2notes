@@ -13,7 +13,19 @@ l2n frames <video> --mode interval --every 45
 
 旗標：`--mode scene|interval`、`--every`（interval 取樣間隔秒）、`--diff-min`（相鄰
 去重門檻）、`--width`（影格寬度像素）、`--stage`（候選先寫進 `staging/`）、
-`--curate`（策展 staging 內的候選）、`--max-per-segment`（每段最多晉升幾張）。
+`--curate`（策展 staging 內的候選）、`--max-per-segment`（每段最多晉升幾張）、
+`--range START-END`（只補抓這段，可重複）、`--rehash`（影格改過後重算 sha256）。
+
+**補抓漏掉的時段用 `--range`，不要整場 `--force` 重跑。** 例如
+`l2n frames <video> --mode interval --every 10 --range 56:00-58:30`：只在範圍內取樣，
+既有影格與 manifest 全部保留，同名檔案不覆寫也不刪除，JSON 已挑好的 `frame` 不動，
+新影格併入各段的 `frames`。
+
+**塗黑影格上的個資之後跑 `l2n frames <video> --rehash`**，manifest 的 sha256 才會和檔案一致，
+`check frames` 不再報 sha256 不符。不會重新抓圖。
+
+**影片在網路磁碟（`\\server\share`）上時先複製到本機再抓。** ffmpeg 經 SMB 解碼大檔
+曾在隨機位置出現 `partial file` 而中斷；`l2n frames` 偵測到 UNC 路徑會警告。
 
 建議流程：先 `--stage` 產候選，再 `--curate --max-per-segment 4` 晉升。
 使用者已經自己截好圖時**沿用他的圖**，不要重抓。只有音檔時整個階段跳過。
@@ -25,6 +37,8 @@ l2n frames <video> --mode interval --every 45
 ### 抓到幾張，不決定切幾段
 
 **scene 抓到的張數少於你預計的段數時，改用 interval，不要為了湊圖去改分段。**
+低對比投影片常被 scene 漏抓；20 分鐘以上的講座平均每 10 分鐘不到 1 張時，
+`l2n frames` 會建議改用 `--mode interval --every 30`。
 20 分鐘的講座在 scene 模式下只抓到 9 張是正常的（講者一張投影片講很久），
 那不表示這場只能切 9 段。
 
