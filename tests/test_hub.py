@@ -70,14 +70,25 @@ def test_cards_are_built_from_the_folder(course: Path) -> None:
     assert [len(card["frames"]) for card in cards] == [2, 2]
 
 
-def test_cards_sort_by_number_then_stem_as_strings() -> None:
+def test_cards_sort_by_number_then_stem_in_natural_order() -> None:
     cards = [
         {"no": "10", "stem": "b"}, {"no": "2", "stem": "a"},
         {"no": "", "stem": "z"}, {"no": "2", "stem": "b"},
     ]
-    assert [hub.card_sort_key(card) for card in sorted(cards, key=hub.card_sort_key)] == [
-        ("10", "b"), ("2", "a"), ("2", "b"), (hub.UNNUMBERED_SORT_KEY, "z"),
+    assert [(c["no"], c["stem"]) for c in sorted(cards, key=hub.card_sort_key)] == [
+        ("2", "a"), ("2", "b"), ("10", "b"), ("", "z"),
     ]
+
+
+def test_numbered_stems_sort_as_numbers() -> None:
+    """Field folder: 2016-1 ... 2016-11 came out 1, 10, 11, 2, ... 9."""
+    stems = ["2016-%d 講題" % n for n in (10, 2, 11, 1, 9)]
+    cards = [{"no": "", "stem": stem} for stem in stems]
+    assert [c["stem"] for c in sorted(cards, key=hub.card_sort_key)] == [
+        "2016-%d 講題" % n for n in (1, 2, 9, 10, 11)
+    ]
+    assert sorted(["20250315", "20241207"], key=hub.natural_key) == ["20241207", "20250315"]
+    assert sorted(["a10", "a2", "b1"], key=hub.natural_key) == ["a2", "a10", "b1"]
 
 
 def test_derived_json_and_underscore_files_are_not_lectures() -> None:

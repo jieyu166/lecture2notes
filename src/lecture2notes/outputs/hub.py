@@ -193,14 +193,33 @@ def apply_titles(
     return card
 
 
+#: A run of digits, the unit :func:`natural_key` compares as a number.
+DIGITS = re.compile(r"(\d+)")
+
+
+def natural_key(text: str) -> tuple:
+    """``text`` split so its digit runs compare as numbers: 2016-2 before 2016-10.
+
+    Each piece is ``(0, number, digits)`` or ``(1, 0, text)``, so a number and a
+    word never meet in one comparison, and "02" and "2" stay distinct.
+    """
+    return tuple(
+        (0, int(piece), piece) if piece.isdigit() else (1, 0, piece)
+        for piece in DIGITS.split(str(text or "")) if piece
+    )
+
+
 def card_sort_key(card: Mapping[str, Any]) -> tuple:
-    """Order by ``(no, stem)`` compared as strings, as the contract states.
+    """Order by ``no``, then stem, both in natural order; unnumbered last.
+
+    String order put a series named 2016-1 ... 2016-11 as 1, 10, 11, 2, ... 9.
 
     Two lectures with the same stem in two subfolders tie here; :func:`collect`
     reads folders in name order and the sort is stable, so they still come out
     the same way on every run.
     """
-    return (card.get("no") or UNNUMBERED_SORT_KEY, card.get("stem") or "")
+    no = str(card.get("no") or "")
+    return (0 if no else 1, natural_key(no), natural_key(card.get("stem") or ""))
 
 
 def is_lecture_json(path: Path) -> bool:
@@ -656,6 +675,7 @@ __all__ = [
     "build_index",
     "card_hrefs",
     "card_sort_key",
+    "natural_key",
     "collect",
     "hub_path",
     "is_lecture_json",
