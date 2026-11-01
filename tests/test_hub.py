@@ -70,14 +70,40 @@ def test_cards_are_built_from_the_folder(course: Path) -> None:
     assert [len(card["frames"]) for card in cards] == [2, 2]
 
 
-def test_cards_sort_by_number_then_stem_as_strings() -> None:
+def test_cards_sort_by_number_then_stem_naturally() -> None:
     cards = [
         {"no": "10", "stem": "b"}, {"no": "2", "stem": "a"},
         {"no": "", "stem": "z"}, {"no": "2", "stem": "b"},
     ]
-    assert [hub.card_sort_key(card) for card in sorted(cards, key=hub.card_sort_key)] == [
-        ("10", "b"), ("2", "a"), ("2", "b"), (hub.UNNUMBERED_SORT_KEY, "z"),
+    assert [(card["no"], card["stem"]) for card in sorted(cards, key=hub.card_sort_key)] == [
+        ("2", "a"), ("2", "b"), ("10", "b"), ("", "z"),
     ]
+
+
+def test_unnumbered_stems_sort_with_numbers_compared_as_integers() -> None:
+    stems = ["2016-1 a", "2016-10 j", "2016-11 k", "2016-2 b", "2016-9 i"]
+    cards = [{"no": "", "stem": stem} for stem in stems]
+    assert [card["stem"] for card in sorted(cards, key=hub.card_sort_key)] == [
+        "2016-1 a", "2016-2 b", "2016-9 i", "2016-10 j", "2016-11 k",
+    ]
+
+
+def test_zero_padded_and_plain_numbers_interleave() -> None:
+    cards = [{"no": no, "stem": "s"} for no in ("10", "02", "1", "9")]
+    assert [card["no"] for card in sorted(cards, key=hub.card_sort_key)] == ["1", "02", "9", "10"]
+
+
+def test_date_stems_keep_chronological_order() -> None:
+    stems = ["20250315", "20241201", "20250301_part2", "20250301"]
+    cards = [{"no": "", "stem": stem} for stem in stems]
+    assert [card["stem"] for card in sorted(cards, key=hub.card_sort_key)] == [
+        "20241201", "20250301", "20250301_part2", "20250315",
+    ]
+
+
+def test_numbered_cards_come_before_unnumbered_ones() -> None:
+    cards = [{"no": "", "stem": "1 intro"}, {"no": "99", "stem": "zzz"}]
+    assert [card["no"] for card in sorted(cards, key=hub.card_sort_key)] == ["99", ""]
 
 
 def test_derived_json_and_underscore_files_are_not_lectures() -> None:
