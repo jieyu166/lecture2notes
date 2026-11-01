@@ -43,8 +43,8 @@ COURSE_START_LABEL = "最該先看的一場"
 #: opening every card.
 NO_COMMON_THREAD = "本系列各場主題獨立，無共同主線"
 DERIVED_SUFFIXES = (".frames.json", ".frames_ocr.json", ".corrections.json")
-#: Where an unnumbered lecture sorts: after every numbered one.
-UNNUMBERED_SORT_KEY = "zz"
+#: Runs of digits inside a number or stem, compared as integers when sorting.
+DIGIT_RUN = re.compile(r"(\d+)")
 #: The generated page's filename, in the reader's language.
 HUB_FILENAME = "課程首頁.html"
 #: Subfolders that hold a lecture's own assets, never a lecture: ``--subdirs``
@@ -193,14 +193,29 @@ def apply_titles(
     return card
 
 
-def card_sort_key(card: Mapping[str, Any]) -> tuple:
-    """Order by ``(no, stem)`` compared as strings, as the contract states.
+def natural_key(text: str) -> tuple:
+    """Split ``text`` so that runs of digits compare as integers.
 
-    Two lectures with the same stem in two subfolders tie here; :func:`collect`
-    reads folders in name order and the sort is stable, so they still come out
-    the same way on every run.
+    ``"2016-2"`` then sorts before ``"2016-10"``, which plain string order gets
+    backwards. Each digit run keeps its spelling as a tie-breaker, so ``"01"``
+    and ``"1"`` still come out in the same order on every run.
     """
-    return (card.get("no") or UNNUMBERED_SORT_KEY, card.get("stem") or "")
+    return tuple(
+        (0, int(part), part) if index % 2 else (1, 0, part)
+        for index, part in enumerate(DIGIT_RUN.split(text))
+        if part
+    )
+
+
+def card_sort_key(card: Mapping[str, Any]) -> tuple:
+    """Order by ``no``, then stem, both compared naturally (see :func:`natural_key`).
+
+    Unnumbered lectures come after every numbered one. Two lectures with the
+    same stem in two subfolders tie here; :func:`collect` reads folders in name
+    order and the sort is stable, so they still come out the same way on every run.
+    """
+    no = str(card.get("no") or "")
+    return (0 if no else 1, natural_key(no), natural_key(str(card.get("stem") or "")))
 
 
 def is_lecture_json(path: Path) -> bool:
@@ -646,7 +661,7 @@ __all__ = [
     "JS",
     "NO_COMMON_THREAD",
     "TITLES_FILE",
-    "UNNUMBERED_SORT_KEY",
+    "DIGIT_RUN",
     "ASSET_DIRS",
     "apply_titles",
     "build",
@@ -656,6 +671,7 @@ __all__ = [
     "build_index",
     "card_hrefs",
     "card_sort_key",
+    "natural_key",
     "collect",
     "hub_path",
     "is_lecture_json",
