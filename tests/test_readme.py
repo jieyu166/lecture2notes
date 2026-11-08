@@ -240,10 +240,10 @@ def _declared_version() -> str:
     return match.group(1)
 
 
-def test_the_project_is_at_0_3_8():
+def test_the_project_is_at_0_3_9():
     # Bumped with schema 2.1: an unchanged number let `pip install -U` from the
     # branch skip the reinstall and leave the 2.0-only l2n in place.
-    assert _declared_version() == "0.3.8"
+    assert _declared_version() == "0.3.9"
 
 
 def test_the_source_fallback_matches_pyproject():
@@ -270,7 +270,7 @@ def test_the_readme_lists_every_release():
     text = _readme_text()
 
     assert "## 版本說明" in text
-    for heading in ("### v0.1.0", "### v0.2.0", "### v0.2.1", "### v0.3.1", "### v0.3.2", "### v0.3.3", "### v0.3.4", "### v0.3.5", "### v0.3.6", "### v0.3.7", "### v0.3.8"):
+    for heading in ("### v0.1.0", "### v0.2.0", "### v0.2.1", "### v0.3.1", "### v0.3.2", "### v0.3.3", "### v0.3.4", "### v0.3.5", "### v0.3.6", "### v0.3.7", "### v0.3.8", "### v0.3.9"):
         assert text.count(heading) == 1, heading
     assert text.index("### v0.1.0") < text.index("### v0.2.0")
     assert text.index("### v0.2.0") < text.index("### v0.2.1")
@@ -282,9 +282,10 @@ def test_the_readme_lists_every_release():
     assert text.index("### v0.3.5") < text.index("### v0.3.6")
     assert text.index("### v0.3.6") < text.index("### v0.3.7")
     assert text.index("### v0.3.7") < text.index("### v0.3.8")
+    assert text.index("### v0.3.8") < text.index("### v0.3.9")
     assert "未發版" not in text
     assert "Unreleased" not in text
-    assert "### v0.3.8（本版）" in text
+    assert "### v0.3.9（本版）" in text
     assert text.count("（本版）") == 1
 
 

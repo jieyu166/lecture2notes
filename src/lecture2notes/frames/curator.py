@@ -134,7 +134,7 @@ def measure_frame_quality(path: Path, size: int = QUALITY_SIZE) -> Dict[str, Any
     """
     ffmpeg = _deps.require_ffmpeg()
     command = [
-        ffmpeg, "-v", "error", "-i", str(path), "-frames:v", "1",
+        ffmpeg, "-v", "error", "-nostats", "-i", str(path), "-frames:v", "1",
         "-vf", "scale=%d:%d:flags=bilinear,format=gray" % (size, size),
         "-f", "rawvideo", "-",
     ]

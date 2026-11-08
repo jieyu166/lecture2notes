@@ -389,7 +389,7 @@ def normalized_copy(
         height = int(round(width * declared[1] / float(declared[0]) / 2.0)) * 2
     out = Path(workdir) / "scan.mp4"
     done = subprocess.run(
-        [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(video_path),
+        [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostats", "-i", str(video_path),
          "-an", "-sn", "-vf",
          # setpts first: time 0 of the copy is the first video frame, whatever
          # the container start; otherwise fps pads from the container start.
@@ -550,7 +550,7 @@ def extract_frame(
     ffmpeg = _deps.require_ffmpeg()
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
-        [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+        [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostats",
          "-ss", "%.3f" % sec, "-i", str(video_path), "-frames:v", "1",
          "-vf", "scale=%d:-2" % width, str(out_path)],
         capture_output=True,

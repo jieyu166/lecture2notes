@@ -50,7 +50,7 @@ def build_extract_command(
     for a probe window a few milliseconds of seek inaccuracy is irrelevant next
     to a 90 second window.
     """
-    argv = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
+    argv = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostats", "-y"]
     if start_sec is not None:
         argv += ["-ss", "%.3f" % float(start_sec)]
     argv += ["-i", str(source)]

@@ -13,6 +13,11 @@ are enforced here so they cannot drift:
 Long stages report progress through :class:`Progress`, which emits either a plain
 line (``[frames] 12/134 elapsed 31s eta 290s``) or, under ``--json-progress``, one
 JSON object per line on stdout.
+
+``--log FILE`` sends every line, progress included, to that file (appended, with
+a time stamp) and keeps the console to warnings, errors, ``[ok]`` summaries and
+result lines. An agent driving a two-hour run then reads a few lines instead of
+hundreds of progress updates.
 """
 
 from __future__ import annotations
@@ -26,15 +31,44 @@ LEVELS = ("ok", "warn", "error", "skip", "info")
 
 _quiet = False
 _json_progress = False
+_log: Optional[IO[str]] = None
 
 T = TypeVar("T")
 
 
-def configure(quiet: bool = False, json_progress: bool = False) -> None:
+def configure(quiet: bool = False, json_progress: bool = False, log_path: Optional[str] = None) -> None:
     """Apply the global output flags parsed from the command line."""
-    global _quiet, _json_progress
+    global _quiet, _json_progress, _log
     _quiet = bool(quiet)
     _json_progress = bool(json_progress)
+    if _log is not None:
+        try:
+            _log.close()
+        except Exception:  # pragma: no cover - already closed
+            pass
+        _log = None
+    if log_path:
+        from pathlib import Path
+
+        target = Path(log_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _log = open(target, "a", encoding="utf-8", newline="\n")
+        _log.write("=== %s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), " ".join(sys.argv)))
+        _log.flush()
+
+
+def is_logging() -> bool:
+    return _log is not None
+
+
+def _to_log(text: str) -> None:
+    if _log is None:
+        return
+    try:
+        _log.write("%s %s\n" % (time.strftime("%H:%M:%S"), text))
+        _log.flush()
+    except Exception:  # pragma: no cover - a full disk must not stop the stage
+        pass
 
 
 def is_quiet() -> bool:
@@ -72,14 +106,18 @@ def _message_stream() -> IO[str]:
 def say(level: str, msg: str) -> None:
     """Print ``[level] msg``. Unknown levels fall back to ``[info]``."""
     tag = level if level in LEVELS else "info"
+    _to_log("[%s] %s" % (tag, msg))
     if _quiet and tag not in ("warn", "error"):
+        return
+    if _log is not None and tag == "info":
         return
     _write(_message_stream(), "[%s] %s" % (tag, msg))
 
 
 def stage(name: str, msg: str) -> None:
     """Print a stage-tagged line, for example ``[frames] skip (exists)``."""
-    if _quiet:
+    _to_log("[%s] %s" % (name, msg))
+    if _quiet or _log is not None:
         return
     _write(_message_stream(), "[%s] %s" % (name, msg))
 
@@ -96,6 +134,7 @@ def line(text: str) -> None:
     goes through the encoding-safe writer, and still moves to stderr under
     ``--json-progress``.
     """
+    _to_log(text)
     _write(_message_stream(), text)
 
 
@@ -170,17 +209,19 @@ class Progress:
             _write(sys.stdout, json.dumps(event, ensure_ascii=False))
             return
         eta_text = "?" if eta is None else str(int(round(eta)))
-        _write(
-            sys.stdout,
-            "[%s] %d/%d elapsed %ds eta %ss"
-            % (self.stage, self.done, self.total, int(round(elapsed)), eta_text),
+        text = "[%s] %d/%d elapsed %ds eta %ss" % (
+            self.stage, self.done, self.total, int(round(elapsed)), eta_text
         )
+        if _log is not None:
+            _to_log(text)
+            return
+        _write(sys.stdout, text)
 
     # -- public API --------------------------------------------------------
     def advance(self, n: int = 1) -> None:
         """Record ``n`` completed units and report if it is time to."""
         self.done += int(n)
-        if _quiet:
+        if _quiet and _log is None:
             return
         now = self._clock()
         if self._should_emit(now):
@@ -189,7 +230,7 @@ class Progress:
 
     def finish(self) -> None:
         """Force a final line even if the last ``advance`` was throttled."""
-        if _quiet:
+        if _quiet and _log is None:
             return
         self._last_emit = self._clock()
         self._emit()
@@ -207,6 +248,7 @@ __all__ = [
     "configure",
     "error",
     "is_json_progress",
+    "is_logging",
     "is_quiet",
     "line",
     "ok",

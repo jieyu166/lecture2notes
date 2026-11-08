@@ -627,7 +627,7 @@ l2n hub ./course-folder --subdirs --output index.html
   stem 為 `2016-1 …` 到 `2016-11 …` 的 11 場，舊版首頁排成 1、10、11、2、…、9。
 - 更正 v0.3.6 說明：直接掃描 VFR 影片時，換頁時間是比瀏覽器「早」7–11 秒，不是「晚」。
 
-### v0.3.8（本版）
+### v0.3.8
 
 - **`l2n frames --range START-END`：只補抓指定時段**（可重複，例如 `--range 56:00-58:30`）。
   既有影格與 manifest 全部保留，同名檔案不覆寫也不刪除，JSON 已挑好的 `frame` 不動，
@@ -638,6 +638,17 @@ l2n hub ./course-folder --subdirs --output index.html
   提醒先複製到本機；經 SMB 解碼大檔曾在隨機位置出現 ffmpeg `partial file` 而中斷。
 - **scene 抓圖過少時建議改用 interval**：20 分鐘以上的講座平均每 10 分鐘不到 1 張時，
   印出 `[warn]` 建議 `--mode interval --every 30`（低對比投影片常被漏抓）。
+
+### v0.3.9（本版）
+
+減少長任務灌進終端機與 agent 對話紀錄的輸出量。
+
+- **共用旗標 `--log FILE`**：進度、階段訊息與細節全部附加寫入檔案（每次執行先寫一行指令與時間），
+  終端機只留警告、錯誤、`[ok]` 結果與檢查報告。長任務建議 `--log <stem>.l2n.log`。
+- **ffmpeg 一律 `-loglevel error -nostats`**：抽音訊、抓圖、掃描副本、策展量測都不再產生逐格統計。
+- **whisper.cpp 不再逐段印出**：加上 `-np`，輸出改為擷取，失敗時才附上最後幾行錯誤訊息。
+- skill 新增「輸出量」一節：長任務加 `--log`，只讀 log 最後幾行；自己下 ffmpeg 指令時
+  加 `-hide_banner -loglevel error -nostats`，直接用 Whisper 時 `verbose=False`。
 
 ## 開發與測試
 

@@ -88,6 +88,7 @@ class WhisperCppEngine(Engine):
             "-m", str(self.model),
             "-l", str(lang),
             "-osrt",
+            "-np",  # --no-prints: the SRT is the output; no per-segment console dump
             "-of", str(out_stem),
             "-f", str(audio),
         ]
@@ -96,10 +97,17 @@ class WhisperCppEngine(Engine):
         self.check()
         audio = Path(audio)
         out_stem = audio.with_suffix("")
-        subprocess.run(self.build_command(audio, lang, out_stem), check=False)
+        # Captured, not echoed: whisper.cpp prints every segment, which for a
+        # two-hour lecture is thousands of lines in an agent's context.
+        done = subprocess.run(
+            self.build_command(audio, lang, out_stem), check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
         produced = out_stem.with_suffix(".srt")
         if not produced.is_file():
-            raise RuntimeError("whisper.cpp produced no subtitle file: %s" % produced)
+            tail = (done.stderr or "").strip().splitlines()[-3:]
+            raise RuntimeError("whisper.cpp produced no subtitle file: %s%s" % (
+                produced, (" (" + " | ".join(tail) + ")") if tail else ""))
         return parse_srt(produced)
 
 

@@ -44,6 +44,14 @@ SRT／JSON 就從缺少的階段接續，不重跑已完成的階段。
    首見寫「中文（English, 縮寫）」，分級系統名例外（規範 0.10）。程式碼與註解用英文；
    主控台輸出只用 ASCII 標記。
 
+## 輸出量
+
+**長任務的輸出寫進 log 檔，不要灌進對話。** `transcribe`、`frames`、`ocr`、`run`、
+`bilingual` 一律加 `--log <stem>.l2n.log`（寫在講座資料夾裡）：進度與細節附加寫入檔案，
+終端機只剩警告、錯誤與 `[ok]` 結果。要看進度時讀 log 的最後幾行，不要整份讀回。
+自己另外下 ffmpeg 指令時加 `-hide_banner -loglevel error -nostats`；
+直接用 Whisper 時關掉逐段輸出（`verbose=False`）。暫存檔與對話紀錄都會小很多。
+
 ## 完成條件
 
 - 每一個產出的產物都跑對應的 `l2n check`，並把結果回報給使用者：

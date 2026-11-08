@@ -99,6 +99,12 @@ def _common_parser() -> argparse.ArgumentParser:
         "--quiet", action="store_true", help="關閉進度與提示輸出，只保留警告與錯誤"
     )
     parser.add_argument(
+        "--log",
+        default=None,
+        metavar="FILE",
+        help="進度與提示全部附加寫入這個檔案；終端機只留警告、錯誤與結果（長任務建議用 <stem>.l2n.log）",
+    )
+    parser.add_argument(
         "--json-progress",
         action="store_true",
         help="進度改以每行一個 JSON 物件輸出（供 agent 追蹤）",
@@ -2128,6 +2134,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     _out.configure(
         quiet=getattr(args, "quiet", False),
         json_progress=getattr(args, "json_progress", False),
+        log_path=getattr(args, "log", None),
     )
 
     func: Optional[Callable[[argparse.Namespace], int]] = getattr(args, "func", None)

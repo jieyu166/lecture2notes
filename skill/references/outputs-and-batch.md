@@ -104,8 +104,10 @@ exit code：**0 全過、1 只有 warning、2 有 error**。
 每產出或改動一個產物就跑對應的 check，把 exit code 與每一條 warning 回報給使用者。
 有 error 就回頭修，不要交出去，也不要手改產物把檢查騙過去。
 
-共用旗標：`--quiet`（只留警告與錯誤）、`--json-progress`（進度改成每行一個 JSON
-物件，給 agent 追蹤）、`--force`（忽略既有產物重跑本階段）。
+共用旗標：`--quiet`（只留警告與錯誤）、`--log FILE`（進度與細節附加寫入檔案，
+終端機只留警告、錯誤與結果；長任務一律用，例如 `--log <stem>.l2n.log`）、
+`--json-progress`（進度改成每行一個 JSON 物件，給 agent 追蹤）、
+`--force`（忽略既有產物重跑本階段）。
 
 ## 不歸這裡管
 
